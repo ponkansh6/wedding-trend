@@ -78,14 +78,14 @@ pnpm dev
 
 ## スクリプト
 
-| コマンド                                     | 用途           |
-| -------------------------------------------- | -------------- |
-| `pnpm dev` / `build` / `start`               | Next.js        |
-| `pnpm test`                                  | Vitest         |
-| `pnpm type-check`                            | `tsc --noEmit` |
-| `pnpm lint:fast` / `format:fast`             | oxlint / oxfmt |
-| `pnpm check-env`                             | 環境変数の検証 |
-| `pnpm db:generate` / `db:push` / `db:studio` | Drizzle        |
+| コマンド                                     | 用途                    |
+| -------------------------------------------- | ----------------------- |
+| `pnpm dev` / `build` / `start`               | Next.js                 |
+| `pnpm test`                                  | Vitest                  |
+| `pnpm type-check`                            | 型生成 + `tsc --noEmit` |
+| `pnpm lint:fast` / `format:fast`             | oxlint / oxfmt          |
+| `pnpm check-env`                             | 環境変数の検証          |
+| `pnpm db:generate` / `db:push` / `db:studio` | Drizzle                 |
 
 ## 技術スタック
 

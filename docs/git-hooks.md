@@ -9,7 +9,7 @@ We use Husky to manage local Git hooks. These hooks provide rapid feedback befor
 Runs `lint-staged` on staged files, followed by full repository checks:
 
 - **Lint-staged actions**: `oxfmt` auto-formatting, related `vitest` unit tests, and `secretlint`.
-- **Global checks**: `oxlint` and `tsc --noEmit` (type check).
+- **Global checks**: `oxlint` and `pnpm run type-check` (`next typegen` + `tsc --noEmit`).
 
 ### Common Failures & Solutions
 

@@ -19,7 +19,8 @@ We use blazing fast, Rust-based tools (`oxlint` and `oxfmt`) alongside ESLint.
 
 ## Type Checking
 
-- Run `pnpm run type-check` to execute `tsc --noEmit`.
+- Run `pnpm run type-check` to execute `next typegen && tsc --noEmit`.
+- `next typegen` generates `next-env.d.ts` and `.next/types/` (route types such as `LayoutProps`). These are gitignored, so they must be regenerated before `tsc --noEmit` can pass on a fresh clone or in CI.
 - Note: We deliberately do **not** use `tsgo` or `@typescript/native-preview` to avoid unpinned/unstable dev dependencies.
 
 ## Testing & Coverage

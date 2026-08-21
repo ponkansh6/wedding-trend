@@ -11,7 +11,7 @@
     "test:watch": "vitest",
     "lint:fast": "oxlint --nextjs-plugin --react-plugin --react-perf-plugin",
     "format:fast": "oxfmt --write .",
-    "type-check": "tsc --noEmit",
+    "type-check": "next typegen && tsc --noEmit",
     "check-env": "tsx scripts/check-env.ts",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",

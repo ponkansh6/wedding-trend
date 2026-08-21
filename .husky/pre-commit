@@ -13,7 +13,7 @@ export PATH
 lint-staged
 
 oxlint --nextjs-plugin --react-plugin --react-perf-plugin
-tsc --noEmit
+pnpm run type-check
 
 if [ -n "$(git diff --name-only -- src)" ]; then
   printf '\n[warn] src/ に未ステージの変更があります。コミット漏れに注意してください。\n\n'
