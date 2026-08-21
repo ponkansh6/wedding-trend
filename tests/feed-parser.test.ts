@@ -32,6 +32,30 @@ const ATOM_FIXTURE = `<?xml version="1.0" encoding="UTF-8"?>
 </entry>
 </feed>`;
 
+const RDF_FIXTURE = `<?xml version="1.0" encoding="UTF-8"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns="http://purl.org/rss/1.0/">
+<channel rdf:about="https://example.com/rss">
+<title>RDF Feed</title>
+</channel>
+<item rdf:about="https://example.com/rdf-post1">
+<title>RDF 結婚式準備</title>
+<link>https://example.com/rdf-post1</link>
+<description>RDF 抜粋です。</description>
+<dc:date xmlns:dc="http://purl.org/dc/elements/1.1/">2024-03-01T00:00:00Z</dc:date>
+<dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">鈴木次郎</dc:creator>
+</item>
+</rdf:RDF>`;
+
+const ATOM_OBJECT_LINK_FIXTURE = `<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+<title>Atom Object Link</title>
+<entry>
+<title>Entry with object link</title>
+<link href="https://example.com/atom-obj" />
+<summary>Summary</summary>
+</entry>
+</feed>`;
+
 describe("parseFeed", () => {
   it("parses RSS 2.0 <item> entries", () => {
     const entries = parseFeed(RSS2_FIXTURE);
@@ -45,6 +69,22 @@ describe("parseFeed", () => {
     // <b> タグはスペースに置換されるため単語間に空白が入る（HTML タグ除去の仕様）。
     expect(entry.excerpt).toBe("これは テスト 投稿です。");
     expect(entry.excerpt).not.toContain("<");
+  });
+
+  it("parses Atom <entry> with object link", () => {
+    const entries = parseFeed(ATOM_OBJECT_LINK_FIXTURE);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].link).toBe("https://example.com/atom-obj");
+  });
+
+  it("parses RSS 1.0 (RDF) entries", () => {
+    const entries = parseFeed(RDF_FIXTURE);
+    expect(entries).toHaveLength(1);
+    const entry = entries[0];
+    expect(entry.title).toBe("RDF 結婚式準備");
+    expect(entry.link).toBe("https://example.com/rdf-post1");
+    expect(entry.author).toBe("鈴木次郎");
+    expect(entry.excerpt).toBe("RDF 抜粋です。");
   });
 
   it("parses Atom <entry> entries", () => {
@@ -100,7 +140,8 @@ describe("stripHtml", () => {
 
 describe("extractFirstImage", () => {
   it("extracts the first <img src> in HTML", () => {
-    const html = '<p><img src="https://example.com/a.jpg"/></p><img src="https://example.com/b.jpg"/>';
+    const html =
+      '<p><img src="https://example.com/a.jpg"/></p><img src="https://example.com/b.jpg"/>';
     expect(extractFirstImage(html)).toBe("https://example.com/a.jpg");
   });
 

@@ -38,9 +38,7 @@ export function formatAbsoluteJa(iso: string): string {
 /** publishedAt が null の場合を含めて安全にレンダリングする <time> */
 export function PublishedTime({ iso }: { iso: string | null }) {
   if (!iso) {
-    return (
-      <span className="text-[var(--color-muted-foreground)]">投稿日時不明</span>
-    );
+    return <span className="text-[var(--color-muted-foreground)]">投稿日時不明</span>;
   }
   return (
     <time dateTime={iso} title={formatAbsoluteJa(iso)}>

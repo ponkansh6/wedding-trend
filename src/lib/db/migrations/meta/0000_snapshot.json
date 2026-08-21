@@ -167,39 +167,27 @@
       "indexes": {
         "posts_url_unique": {
           "name": "posts_url_unique",
-          "columns": [
-            "url"
-          ],
+          "columns": ["url"],
           "isUnique": true
         },
         "idx_source_status_pub": {
           "name": "idx_source_status_pub",
-          "columns": [
-            "source_type",
-            "status",
-            "published_at"
-          ],
+          "columns": ["source_type", "status", "published_at"],
           "isUnique": false
         },
         "idx_category": {
           "name": "idx_category",
-          "columns": [
-            "category"
-          ],
+          "columns": ["category"],
           "isUnique": false
         },
         "idx_tag": {
           "name": "idx_tag",
-          "columns": [
-            "tag"
-          ],
+          "columns": ["tag"],
           "isUnique": false
         },
         "idx_created_at": {
           "name": "idx_created_at",
-          "columns": [
-            "created_at"
-          ],
+          "columns": ["created_at"],
           "isUnique": false
         }
       },

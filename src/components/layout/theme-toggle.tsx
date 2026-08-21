@@ -11,18 +11,11 @@ export function ThemeToggle() {
 
   // next-themes はマウント後にしか実際のテーマを確定できないため、
   // マウント前はプレースホルダーを描画してハイドレーション不一致を防ぐ。
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- マウント検知には必須の next-themes 公認パターン
   useEffect(() => setMounted(true), []);
 
   if (!mounted) {
-    return (
-      <Button
-        variant="ghost"
-        size="icon"
-        disabled
-        aria-hidden
-        className="opacity-0"
-      />
-    );
+    return <Button variant="ghost" size="icon" disabled aria-hidden className="opacity-0" />;
   }
 
   const isDark = resolvedTheme === "dark";

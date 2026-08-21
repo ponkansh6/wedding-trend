@@ -10,10 +10,6 @@ import { Toaster as Sonner } from "sonner";
 export function Toaster() {
   const { resolvedTheme } = useTheme();
   return (
-    <Sonner
-      theme={resolvedTheme === "dark" ? "dark" : "light"}
-      richColors
-      position="top-center"
-    />
+    <Sonner theme={resolvedTheme === "dark" ? "dark" : "light"} richColors position="top-center" />
   );
 }

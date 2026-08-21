@@ -1,11 +1,7 @@
 import { revalidateTag } from "next/cache";
 import { NextResponse } from "next/server";
 import { isBearerAuthorized } from "@/lib/auth";
-import {
-  AI_SUMMARY_VALIDATE_MAX_CHARS,
-  AI_TITLE_MAX_CHARS,
-  FEED_CACHE_TAG,
-} from "@/lib/constants";
+import { AI_SUMMARY_VALIDATE_MAX_CHARS, AI_TITLE_MAX_CHARS, FEED_CACHE_TAG } from "@/lib/constants";
 import { getPostsByUrls, markCurated, saveEmbed, upsertPosts } from "@/lib/db/repository";
 import { detectEmbedProvider } from "@/lib/embed/providers";
 import { fetchOEmbed } from "@/lib/embed/oembed";
@@ -43,7 +39,8 @@ const PROVIDER_DISPLAY_NAME: Record<EmbedProvider, string> = {
  * status を "pending" にすることで「要確認」として扱う（表示上のフラグ）。
  */
 function buildFallbackCuration(title: string, excerpt: string | null): CurationResult {
-  const fallbackTitle = title.length > AI_TITLE_MAX_CHARS ? title.slice(0, AI_TITLE_MAX_CHARS) : title;
+  const fallbackTitle =
+    title.length > AI_TITLE_MAX_CHARS ? title.slice(0, AI_TITLE_MAX_CHARS) : title;
   const summarySource = excerpt && excerpt.trim() !== "" ? excerpt : title;
   const fallbackSummary =
     summarySource.length > AI_SUMMARY_VALIDATE_MAX_CHARS

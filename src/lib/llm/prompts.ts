@@ -42,9 +42,7 @@ ${SHARED_RULES}
 
 /** バッチキュレーション用プロンプト。index は入力の 1 始まり番号と一致させる。 */
 export function buildBatchCurationPrompt(inputs: CurationInput[]): string {
-  const itemsBlock = inputs
-    .map((input, i) => `${i + 1}.\n${formatInput(input)}`)
-    .join("\n\n");
+  const itemsBlock = inputs.map((input, i) => `${i + 1}.\n${formatInput(input)}`).join("\n\n");
 
   return `あなたはウエディング（結婚式）関連の SNS/ブログ投稿を、中立的な立場で要約するキュレーターです。
 以下の ${inputs.length} 件の投稿それぞれについて要約してください。

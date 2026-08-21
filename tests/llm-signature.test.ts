@@ -35,7 +35,11 @@ describe("computeCurationSignature", () => {
 
 describe("skip logic (content hash + signature match)", () => {
   function shouldSkip(
-    stored: { contentHash: string | null; curationSignature: string | null; aiTitle: string | null },
+    stored: {
+      contentHash: string | null;
+      curationSignature: string | null;
+      aiTitle: string | null;
+    },
     freshHash: string,
     currentSignature: string,
   ): boolean {
@@ -47,7 +51,11 @@ describe("skip logic (content hash + signature match)", () => {
     const hash = computeContentHash("タイトル", "本文");
     const signature = computeCurationSignature();
     expect(
-      shouldSkip({ aiTitle: "既存タイトル", contentHash: hash, curationSignature: signature }, hash, signature),
+      shouldSkip(
+        { aiTitle: "既存タイトル", contentHash: hash, curationSignature: signature },
+        hash,
+        signature,
+      ),
     ).toBe(true);
   });
 
@@ -67,8 +75,8 @@ describe("skip logic (content hash + signature match)", () => {
   it("does not skip when never curated (aiTitle is null)", () => {
     const hash = computeContentHash("タイトル", "本文");
     const signature = computeCurationSignature();
-    expect(shouldSkip({ aiTitle: null, contentHash: null, curationSignature: null }, hash, signature)).toBe(
-      false,
-    );
+    expect(
+      shouldSkip({ aiTitle: null, contentHash: null, curationSignature: null }, hash, signature),
+    ).toBe(false);
   });
 });

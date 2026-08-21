@@ -15,7 +15,9 @@ function buildTagRssUrl(tag: string): string {
   return `https://b.hatena.ne.jp/search/tag?q=${encodeURIComponent(tag)}&mode=rss&sort=recent`;
 }
 
-export async function fetchHatenaBookmark(limit = SOURCE_ITEM_LIMIT): Promise<HatenaBookmarkItem[]> {
+export async function fetchHatenaBookmark(
+  limit = SOURCE_ITEM_LIMIT,
+): Promise<HatenaBookmarkItem[]> {
   const results = await Promise.all(
     HATENA_BOOKMARK_TAGS.map(async (tag) => {
       const xml = await fetchRssText(buildTagRssUrl(tag), "hatena-bookmark");

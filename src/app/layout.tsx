@@ -45,11 +45,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html
-      lang="ja"
-      className={`${fraunces.variable} h-full`}
-      suppressHydrationWarning
-    >
+    <html lang="ja" className={`${fraunces.variable} h-full`} suppressHydrationWarning>
       <body className="flex min-h-full flex-col bg-[var(--color-background)] font-sans text-[var(--color-foreground)] antialiased">
         <ThemeProvider
           attribute="class"

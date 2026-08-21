@@ -15,7 +15,14 @@
     "check-env": "tsx scripts/check-env.ts",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "prepare": "husky",
+    "format:check": "oxfmt --check .",
+    "security-check": "bash scripts/check-security.sh",
+    "check:deps": "depcheck",
+    "check:sources": "node scripts/check-sources.mjs",
+    "check:oembed": "node scripts/check-oembed-contract.mjs",
+    "eval:llm": "node scripts/eval-llm-compliance.mjs"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
@@ -37,6 +44,8 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@sbougerel/eslint-plugin-next-use-client-boundary": "^1.1.0",
+    "@secretlint/secretlint-rule-preset-recommend": "^13.0.4",
     "@tailwindcss/postcss": "^4",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.2",
@@ -45,12 +54,16 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vitest/coverage-v8": "^4.1.11",
+    "depcheck": "^1.4.7",
     "drizzle-kit": "^0.31.10",
     "eslint": "^9",
     "eslint-config-next": "16.3.1",
     "happy-dom": "^20.11.6",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.3.0",
     "oxfmt": "^0.64.0",
     "oxlint": "^1.79.0",
+    "secretlint": "^13.0.4",
     "tailwindcss": "^4",
     "tsx": "^4.23.12",
     "typescript": "^5",

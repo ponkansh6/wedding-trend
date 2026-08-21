@@ -10,7 +10,11 @@ export interface FetchOptions {
  * すべて null を返して呼び出し元に伝播させる（fail soft — 1 ソースの障害で
  * ingest 全体を落とさない）。
  */
-export async function fetchRssText(url: string, sourceName: string, options?: FetchOptions): Promise<string | null> {
+export async function fetchRssText(
+  url: string,
+  sourceName: string,
+  options?: FetchOptions,
+): Promise<string | null> {
   const timeoutMs = options?.timeoutMs ?? RSS_FETCH_TIMEOUT_MS;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);

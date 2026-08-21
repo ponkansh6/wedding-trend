@@ -103,7 +103,9 @@
   /* 欧文の装飾はディスプレイ書体、和文・本文はシステムの和文書体を優先する。
      和文ウェブフォントは重量級のため同梱しない。 */
   --font-display: var(--font-fraunces), "Hiragino Mincho ProN", "Yu Mincho", "YuMincho", serif;
-  --font-sans: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", "Hiragino Sans", "Yu Gothic Medium", "Yu Gothic", "Noto Sans JP", system-ui, sans-serif;
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", "Hiragino Sans",
+    "Yu Gothic Medium", "Yu Gothic", "Noto Sans JP", system-ui, sans-serif;
 
   /* 和文の行間・字間は欧文よりゆったり取る */
   --leading-jp-heading: 1.5;

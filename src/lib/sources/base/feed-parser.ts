@@ -64,9 +64,7 @@ export function extractFirstImage(html: string | null | undefined): string | nul
 function truncateExcerpt(text: string): string | null {
   const stripped = stripHtml(text);
   if (!stripped) return null;
-  return stripped.length > EXCERPT_MAX_CHARS
-    ? stripped.slice(0, EXCERPT_MAX_CHARS)
-    : stripped;
+  return stripped.length > EXCERPT_MAX_CHARS ? stripped.slice(0, EXCERPT_MAX_CHARS) : stripped;
 }
 
 function toIsoDate(raw: string | undefined): string | null {
@@ -128,7 +126,10 @@ function resolveRss2Thumbnail(item: Record<string, unknown>, bodyHtml: string): 
   const enclosure = item.enclosure as Record<string, unknown> | undefined;
   const enclosureType = enclosure?.["@_type"];
   const enclosureUrl = enclosure?.["@_url"];
-  if (typeof enclosureUrl === "string" && (!enclosureType || /^image\//.test(String(enclosureType)))) {
+  if (
+    typeof enclosureUrl === "string" &&
+    (!enclosureType || /^image\//.test(String(enclosureType)))
+  ) {
     return enclosureUrl;
   }
 

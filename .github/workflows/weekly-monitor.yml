@@ -1,0 +1,74 @@
+name: Weekly Supply-Line & Contract Monitor
+
+on:
+  schedule:
+    - cron: "0 9 * * 1" # Every Monday at 09:00 UTC
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js & pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.14.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check feed sources
+        id: check_sources
+        run: node scripts/check-sources.mjs
+
+      - name: Check oEmbed contracts
+        id: check_oembed
+        run: node scripts/check-oembed-contract.mjs
+
+      - name: Open GitHub Issue on Failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = "🚨 Weekly Monitor Alert: Feed or oEmbed Contract Broken";
+            const body = `Automated weekly monitoring detected a failure in feed sources or oEmbed contracts.\n\n- Workflow run: https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}\n- Please inspect the logs and update adapters or endpoints accordingly.`;
+
+            // Check if an open issue with this title already exists to avoid spamming
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: "open",
+              labels: ["automated-alert"]
+            });
+
+            const existing = issues.data.find(i => i.title === title);
+            if (existing) {
+              console.log(`Updating existing issue #${existing.number}`);
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body: `Another check failure occurred in run ${context.runId}.`
+              });
+            } else {
+              console.log("Creating new alert issue");
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ["automated-alert"]
+              });
+            }

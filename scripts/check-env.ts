@@ -47,7 +47,9 @@ for (const [key, desc] of Object.entries(OPTIONAL)) {
   }
 }
 
-console.log(`\n${hasError ? "Some required env vars are missing" : "All required env vars present"}`);
+console.log(
+  `\n${hasError ? "Some required env vars are missing" : "All required env vars present"}`,
+);
 
 if (hasError) {
   process.exit(1);

@@ -42,9 +42,7 @@ function ensureProviderScript(
   const src = PROVIDER_SCRIPT[provider];
   if (!src) return;
 
-  const existing = document.querySelector<HTMLScriptElement>(
-    `script[src="${src}"]`,
-  );
+  const existing = document.querySelector<HTMLScriptElement>(`script[src="${src}"]`);
   if (existing) {
     // 既にページ内の別カードが読み込み済み。再スキャンだけ行う。
     onAlreadyLoaded();
@@ -81,6 +79,7 @@ export function SnsEmbed({ embedProvider, embedHtml, fallback }: SnsEmbedProps) 
   useEffect(() => {
     if (embedProvider === "youtube") {
       // YouTube の oEmbed は単体の <iframe> を返すためスクリプト不要。
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- 初期状態で既に "ready" だがプロップ変更時に再判定
       setStatus("ready");
       return;
     }
@@ -131,9 +130,7 @@ export function SnsEmbed({ embedProvider, embedHtml, fallback }: SnsEmbedProps) 
         NEEDS_LIGHT_MAT[embedProvider] && "bg-white p-2",
       )}
     >
-      {status === "loading" && (
-        <Skeleton className="absolute inset-0 rounded-xl" />
-      )}
+      {status === "loading" && <Skeleton className="absolute inset-0 rounded-xl" />}
       <div
         className={cn(
           "h-full w-full transition-opacity duration-300",

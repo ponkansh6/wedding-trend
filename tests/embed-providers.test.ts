@@ -9,9 +9,7 @@ describe("detectEmbedProvider", () => {
   });
 
   it("detects TikTok video URLs", () => {
-    expect(detectEmbedProvider("https://www.tiktok.com/@someuser/video/1234567890")).toBe(
-      "tiktok",
-    );
+    expect(detectEmbedProvider("https://www.tiktok.com/@someuser/video/1234567890")).toBe("tiktok");
   });
 
   it("detects YouTube watch URLs", () => {
@@ -34,7 +32,15 @@ describe("detectEmbedProvider", () => {
     expect(detectEmbedProvider("https://www.instagram.com/someuser/")).toBe("none");
   });
 
-  it("returns none for unparsable URLs", () => {
-    expect(detectEmbedProvider("not a url")).toBe("none");
+  it("returns none for TikTok URLs without video path", () => {
+    expect(detectEmbedProvider("https://www.tiktok.com/@someuser")).toBe("none");
+  });
+
+  it("returns none for YouTube URLs without watch or shorts path", () => {
+    expect(detectEmbedProvider("https://www.youtube.com/feed/subscriptions")).toBe("none");
+  });
+
+  it("returns none for youtu.be with empty path", () => {
+    expect(detectEmbedProvider("https://youtu.be/")).toBe("none");
   });
 });

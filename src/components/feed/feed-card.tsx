@@ -176,11 +176,7 @@ function Thumbnail({ card, variant }: { card: FeedCardData; variant: FeedCardVar
 
   if (!card.thumbnailUrl) {
     return (
-      <FallbackTile
-        card={card}
-        iconSize="size-9"
-        className="aspect-[4/5] w-full rounded-xl"
-      />
+      <FallbackTile card={card} iconSize="size-9" className="aspect-[4/5] w-full rounded-xl" />
     );
   }
   return (

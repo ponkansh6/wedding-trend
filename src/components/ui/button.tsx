@@ -12,8 +12,7 @@ const buttonVariants = cva(
           "bg-[var(--color-trend)] text-[var(--color-on-trend)] shadow-sm hover:brightness-105 active:brightness-95",
         classic:
           "border-2 border-[var(--color-classic)] text-[var(--color-classic)] hover:bg-[var(--color-classic)] hover:text-[var(--color-on-classic-solid)]",
-        ghost:
-          "text-[var(--color-foreground)] hover:bg-[var(--color-surface-hover)]",
+        ghost: "text-[var(--color-foreground)] hover:bg-[var(--color-surface-hover)]",
         outline:
           "border border-[var(--color-border)] text-[var(--color-foreground)] hover:bg-[var(--color-surface-hover)]",
       },
@@ -35,20 +34,9 @@ type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> &
     asChild?: boolean;
   };
 
-function Button({
-  className,
-  variant,
-  size,
-  asChild = false,
-  ...props
-}: ButtonProps) {
+function Button({ className, variant, size, asChild = false, ...props }: ButtonProps) {
   const Comp = asChild ? Slot.Root : "button";
-  return (
-    <Comp
-      className={cn(buttonVariants({ variant, size, className }))}
-      {...props}
-    />
-  );
+  return <Comp className={cn(buttonVariants({ variant, size, className }))} {...props} />;
 }
 
 export { Button, buttonVariants };

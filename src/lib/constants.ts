@@ -55,8 +55,7 @@ export const RSS_FETCH_TIMEOUT_MS = 10_000;
 /** 1 ソースあたり取得する記事数の上限。 */
 export const SOURCE_ITEM_LIMIT = 20;
 /** RSS 取得時に付与する User-Agent。 */
-export const RSS_USER_AGENT =
-  "wedding-trend-bot/1.0 (+https://github.com/menonaki2/wedding-trend)";
+export const RSS_USER_AGENT = "wedding-trend-bot/1.0 (+https://github.com/menonaki2/wedding-trend)";
 /** originalExcerpt に保存する本文抜粋の最大文字数（LLM プロンプトの肥大化を防ぐ）。 */
 export const EXCERPT_MAX_CHARS = 600;
 
