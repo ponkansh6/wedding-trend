@@ -37,18 +37,30 @@ async function checkOEmbed(provider, url) {
           try {
             const json = JSON.parse(data);
             const hasHtml = typeof json.html === "string" && json.html.length > 0;
-            const hasThumb = typeof json.thumbnail_url === "string" || json.thumbnail_url === null; // some may omit thumbnail
-            if (hasHtml) {
-              resolve({ ok: true, status: res.statusCode, responseTime });
-            } else {
+            // Instagram の blockquote 応答は thumbnail_url を含まない仕様のため対象外。
+            // YouTube / TikTok は返すことが契約なので、欠落を検知する。
+            const thumbRequired = provider === "youtube" || provider === "tiktok";
+            const hasThumb =
+              typeof json.thumbnail_url === "string" && json.thumbnail_url.length > 0;
+
+            if (!hasHtml) {
               resolve({
                 ok: false,
                 status: res.statusCode,
                 responseTime,
                 error: "Missing 'html' in response",
               });
+            } else if (thumbRequired && !hasThumb) {
+              resolve({
+                ok: false,
+                status: res.statusCode,
+                responseTime,
+                error: "Missing 'thumbnail_url' in response",
+              });
+            } else {
+              resolve({ ok: true, status: res.statusCode, responseTime });
             }
-          } catch (err) {
+          } catch {
             resolve({
               ok: false,
               status: res.statusCode,
@@ -79,7 +91,9 @@ console.log("==================================================");
 const testCases = [
   { provider: "youtube", url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ" },
   { provider: "tiktok", url: "https://www.tiktok.com/@scout2015/video/6718335390845095173" },
-  { provider: "instagram", url: "https://www.instagram.com/p/C0000000000/" }, // May fail or pass depending on graph api token/public status; let's check contract behavior
+  // 実在する公開投稿を使う。存在しないダミー URL では Graph API が常に
+  // "Media Not Found"(400) を返し、契約は一切検証されない。
+  { provider: "instagram", url: "https://www.instagram.com/p/CUbHfhpswxt/" },
 ];
 
 let hasFailure = false;
@@ -100,15 +114,11 @@ for (const tc of testCases) {
   const statusStr = result.status ? String(result.status) : "ERR";
   const okStr = result.ok ? "✅ PASS" : `❌ FAIL (${result.error})`;
 
-  // Note: Instagram keyless oEmbed without access token often returns 400/403 for dummy or unauthenticated requests in strict environments,
-  // but we enforce contract assertion. If Instagram fails without token, we note it or fail as specified.
-  if (!result.ok && tc.provider !== "instagram") {
+  // Instagram も含め全プロバイダを失敗判定の対象にする。
+  // Instagram はキーレス oEmbed の仕様変更履歴があり最も壊れやすいため、
+  // ここを除外すると監視の意味が失われる。
+  if (!result.ok) {
     hasFailure = true;
-  } else if (!result.ok && tc.provider === "instagram") {
-    // For Instagram, print warning if failing due to missing access token/public graph constraints
-    console.log(
-      `[oembed] Note: Instagram oEmbed contract check returned non-200 (common without valid token or graph constraints).`,
-    );
   }
 
   console.log(
