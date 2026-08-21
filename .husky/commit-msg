@@ -19,8 +19,12 @@ if ! printf '%s' "$SUBJECT" | grep -qE "$PATTERN"; then
   exit 1
 fi
 
-if [ "${#SUBJECT}" -gt 72 ]; then
-  printf '\n[warn] 件名が %s 文字です。72 文字以内が読みやすいです。\n\n' "${#SUBJECT}"
+# POSIX sh の ${#VAR} はバイト長を返すため、日本語件名では 1 文字 = 3 バイトと
+# 数えられ常時誤報する（24 文字程度で 72 バイトに到達）。文字数で数える。
+SUBJECT_LEN=$(printf '%s' "$SUBJECT" | LC_ALL=C.UTF-8 wc -m | tr -d ' ')
+
+if [ "$SUBJECT_LEN" -gt 72 ]; then
+  printf '\n[warn] 件名が %s 文字です。72 文字以内が読みやすいです。\n\n' "$SUBJECT_LEN"
 fi
 
 exit 0
