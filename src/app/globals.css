@@ -1,26 +1,126 @@
 @import "tailwindcss";
+@import "tw-animate-css";
 
+/* next-themes は <html> に "dark" クラスを付与する（class 戦略）ため、
+   Tailwind v4 の dark: バリアントをそのクラスに追随させる。 */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+ * デザインシステム: 「紙と朱」
+ * ウエディング雑誌の索引ページのような、温かみのあるエディトリアル基調。
+ * パステル系の可愛さにも、開発者向けツールの無機質さにも寄せない。
+ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #faf6f0; /* 生成り紙 */
+  --surface: #ffffff;
+  --surface-hover: #f3ece2;
+  --foreground: #221d19; /* 温かみのある墨色 */
+  --muted-foreground: #6b625a;
+  --border: #e7dfd3;
+  --ring: #b33a24;
+
+  /* トレンド（速報・熱量）: 朱色 */
+  --trend: #b33a24;
+  --on-trend: #fff7f2;
+  --trend-tint-a: #f3ded6;
+  --trend-tint-b: #ead0c5;
+
+  /* 定番（安定・信頼）: 紺色 */
+  --classic: #2c3b5c;
+  --on-classic: #f1f4fb;
+  --on-classic-solid: #ffffff;
+  --classic-tint-a: #dde2ef;
+  --classic-tint-b: #ccd4e6;
+
+  /* AI要約マーカー: 静かな紫 */
+  --ai-chip: #ede8fb;
+  --on-ai-chip: #4b3f80;
+
+  --skeleton: #ece3d6;
+
+  --shadow-card: 0 1px 2px rgba(34, 29, 25, 0.05), 0 10px 28px -14px rgba(34, 29, 25, 0.18);
+}
+
+/*
+ * next-themes は attribute="class" 戦略で <html> に "dark" クラスを付与する。
+ * これは明示的なテーマ選択・システム設定への追随のどちらの場合も
+ * next-themes 側が解決した上でクラスとして反映するため、ここでは
+ * prefers-color-scheme の別ブロックは持たず .dark の上書きのみで完結させる。
+ */
+.dark {
+  --background: #16120e;
+  --surface: #221d18;
+  --surface-hover: #2b241d;
+  --foreground: #f3ece3;
+  --muted-foreground: #b7aa9c;
+  --border: #3a322a;
+  --ring: #e2603d;
+
+  --trend: #e2603d;
+  --on-trend: #16120e;
+  --trend-tint-a: #3a2a22;
+  --trend-tint-b: #2c1f19;
+
+  --classic: #8fa6de;
+  --on-classic: #16120e;
+  --on-classic-solid: #16120e;
+  --classic-tint-a: #232c42;
+  --classic-tint-b: #1b2233;
+
+  --ai-chip: #2a2347;
+  --on-ai-chip: #c9bef0;
+
+  --skeleton: #2b241d;
+
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4), 0 14px 32px -16px rgba(0, 0, 0, 0.55);
 }
 
 @theme inline {
   --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-hover: var(--surface-hover);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-ring: var(--ring);
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-trend: var(--trend);
+  --color-on-trend: var(--on-trend);
+  --color-trend-tint-a: var(--trend-tint-a);
+  --color-trend-tint-b: var(--trend-tint-b);
+
+  --color-classic: var(--classic);
+  --color-on-classic: var(--on-classic);
+  --color-on-classic-solid: var(--on-classic-solid);
+  --color-classic-tint-a: var(--classic-tint-a);
+  --color-classic-tint-b: var(--classic-tint-b);
+
+  --color-ai-chip: var(--ai-chip);
+  --color-on-ai-chip: var(--on-ai-chip);
+
+  --color-skeleton: var(--skeleton);
+
+  /* 欧文の装飾はディスプレイ書体、和文・本文はシステムの和文書体を優先する。
+     和文ウェブフォントは重量級のため同梱しない。 */
+  --font-display: var(--font-fraunces), "Hiragino Mincho ProN", "Yu Mincho", "YuMincho", serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", "Hiragino Sans", "Yu Gothic Medium", "Yu Gothic", "Noto Sans JP", system-ui, sans-serif;
+
+  /* 和文の行間・字間は欧文よりゆったり取る */
+  --leading-jp-heading: 1.5;
+  --leading-jp-body: 1.9;
+  --tracking-jp-heading: 0.01em;
+  --tracking-jp-body: 0.03em;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--color-background);
+  color: var(--color-foreground);
+}
+
+/* Instagram / TikTok の公式埋め込みは固定の最小幅を inline style で
+   持つことがあり、375px 前後の狭い画面でカード幅からはみ出して
+   横スクロールの原因になる。カード内では常にコンテナ幅に収める。 */
+.embed-frame :where(iframe, .instagram-media, blockquote) {
+  max-width: 100% !important;
+  width: 100% !important;
 }
