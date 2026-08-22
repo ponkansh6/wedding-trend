@@ -1,33 +1,14 @@
 import { describe, expect, it, beforeEach, vi } from "vitest";
 import { sql } from "drizzle-orm";
-import { readFileSync } from "fs";
-import path from "path";
 import { db } from "@/lib/db";
 import { upsertPosts, getPostsByUrls, markCurated, saveEmbed } from "@/lib/db/repository";
 import { getFeedCards } from "@/lib/db/query";
+import { setupTestDb } from "./helpers/test-db";
 
 vi.mock("next/cache", () => ({
   unstable_cache: (fn: any) => fn,
   revalidateTag: vi.fn(),
 }));
-
-const migrationSql = readFileSync(
-  path.resolve(__dirname, "../src/lib/db/migrations/0000_stormy_harrier.sql"),
-  "utf-8",
-);
-
-async function setupTestDb() {
-  try {
-    await db.run(sql.raw("DROP TABLE IF EXISTS posts;"));
-  } catch {}
-  const statements = migrationSql
-    .split("--> statement-breakpoint")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  for (const stmt of statements) {
-    await db.run(sql.raw(stmt));
-  }
-}
 
 describe("Database Repository and Queries", () => {
   beforeEach(async () => {

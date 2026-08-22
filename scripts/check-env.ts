@@ -12,10 +12,12 @@ const REQUIRED = {
   TURSO_DATABASE_URL: "Turso DB 接続文字列",
   TURSO_AUTH_TOKEN: "Turso DB 認証トークン",
   GOOGLE_API_KEY: "Gemini API キー（AI タイトル/要約生成に使用）",
+  // fail-closed のため未設定だと /api/ingest・/api/submit-url が常に 401 を返す。
+  // ローカル開発でも設定が必要なので、任意項目ではなく必須項目として扱う。
+  CRON_SECRET: "ingest / submit-url API の Bearer 認証トークン（未設定だと常に 401）",
 } as const;
 
 const OPTIONAL = {
-  CRON_SECRET: "ingest / submit-url API の Bearer 認証トークン（未設定時は無認証）",
   ADMIN_BASIC_AUTH_USER: "/admin/* の Basic 認証ユーザー名",
   ADMIN_BASIC_AUTH_PASSWORD: "/admin/* の Basic 認証パスワード",
   INSTAGRAM_OEMBED_TOKEN: "Instagram oEmbed の access_token（無くても公開投稿は取得可）",

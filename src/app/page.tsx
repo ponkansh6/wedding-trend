@@ -1,15 +1,22 @@
 import { getFeedCards } from "@/lib/db/query";
 import { FeedLaneTrend } from "@/components/feed/feed-lane-trend";
 import { FeedLaneClassic } from "@/components/feed/feed-lane-classic";
+import { CollectPanel } from "@/components/feed/collect-panel";
 import { OperatorPanel } from "@/components/admin/operator-panel";
 import { Separator } from "@/components/ui/separator";
-import { adminControlsEnabled } from "@/app/actions";
+import { adminControlsEnabled, getIngestCooldown } from "@/app/actions";
+
+// 収集トリガーの Server Action はこのページのルート関数上で実行される。
+// 巡回・要約に最大60秒ほどかかるため、Vercel の既定タイムアウトでは
+// 本番で打ち切られてしまう。
+export const maxDuration = 60;
 
 export default async function Home() {
-  const [trendCards, classicCards, adminEnabled] = await Promise.all([
+  const [trendCards, classicCards, adminEnabled, { cooldownUntil }] = await Promise.all([
     getFeedCards({ sourceType: "sns", limit: 12 }),
     getFeedCards({ sourceType: "blog", limit: 12 }),
     adminControlsEnabled(),
+    getIngestCooldown(),
   ]);
 
   return (
@@ -19,11 +26,13 @@ export default async function Home() {
         「今」のトレンドと「リアル」な体験談を1分で俯瞰できる、結婚式準備のキュレーションフィードです。すべてのカードは元投稿のAI要約で、原文には各カードのボタンから移動できます。
       </p>
 
-      <FeedLaneTrend cards={trendCards} adminEnabled={adminEnabled} />
+      <CollectPanel cooldownUntil={cooldownUntil} />
+
+      <FeedLaneTrend cards={trendCards} adminEnabled={adminEnabled} cooldownUntil={cooldownUntil} />
 
       <Separator />
 
-      <FeedLaneClassic cards={classicCards} adminEnabled={adminEnabled} />
+      <FeedLaneClassic cards={classicCards} cooldownUntil={cooldownUntil} />
 
       {adminEnabled && (
         <>

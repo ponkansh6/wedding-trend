@@ -69,3 +69,18 @@ export const posts = sqliteTable(
     createdAtIdx: index("idx_created_at").on(table.createdAt),
   }),
 );
+
+/**
+ * アプリケーション全体のメタ情報を保持する key-value テーブル。
+ * 現状の唯一の用途は収集トリガーのグローバルクールダウン
+ * （key: "last_ingest_at" — `src/lib/pipeline/cooldown.ts` 参照）。
+ * 行数がごく少数の想定のため、値の型ごとにカラムを分けず単一の
+ * key-value 構造に寄せている。
+ */
+export const config = sqliteTable("config", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+  updatedAt: text("updated_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});

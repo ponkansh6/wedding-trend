@@ -1,8 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { sql } from "drizzle-orm";
-import { readFileSync } from "fs";
-import path from "path";
-import { db } from "@/lib/db";
+import { setupTestDb } from "./helpers/test-db";
 
 vi.mock("next/cache", () => ({
   unstable_cache: (fn: any) => fn,
@@ -42,24 +39,6 @@ vi.mock("@/lib/llm/batch", () => ({
 import { curatePosts } from "@/lib/llm/batch";
 import { revalidateTag } from "next/cache";
 import { runIngest } from "@/lib/pipeline/ingest";
-
-const migrationSql = readFileSync(
-  path.resolve(__dirname, "../src/lib/db/migrations/0000_stormy_harrier.sql"),
-  "utf-8",
-);
-
-async function setupTestDb() {
-  try {
-    await db.run(sql.raw("DROP TABLE IF EXISTS posts;"));
-  } catch {}
-  const statements = migrationSql
-    .split("--> statement-breakpoint")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  for (const stmt of statements) {
-    await db.run(sql.raw(stmt));
-  }
-}
 
 describe("runIngest (src/lib/pipeline/ingest.ts)", () => {
   beforeEach(async () => {

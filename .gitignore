@@ -37,6 +37,11 @@ yarn-error.log*
 # vercel
 .vercel
 
+# Claude Code のローカル設定（権限許可リスト。個人の信頼判断のため共有しない）
+.claude/settings.local.json
+# セッション実行サマリー（成果物ではなく作業ログ）
+.claude/summaries/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
