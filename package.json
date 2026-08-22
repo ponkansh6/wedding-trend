@@ -23,7 +23,8 @@
     "check:deps": "depcheck",
     "check:sources": "node scripts/check-sources.mjs",
     "check:oembed": "node scripts/check-oembed-contract.mjs",
-    "eval:llm": "node scripts/eval-llm-compliance.mjs"
+    "eval:llm": "node scripts/eval-llm-compliance.mjs",
+    "backfill:usefulness": "tsx scripts/backfill-usefulness.mjs"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

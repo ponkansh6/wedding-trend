@@ -20,6 +20,15 @@ function textResponse(text: string) {
   return { response: { text: () => text } };
 }
 
+/** 有用度判定 5 項目のデフォルト値（テストの主眼ではないため固定値で埋める）。 */
+const USEFULNESS_FIELDS = {
+  firsthand: true,
+  ceremonyDecision: true,
+  specific: false,
+  tradeoff: false,
+  promotional: false,
+};
+
 function batchJson(items: Array<{ index: number; title: string }>) {
   return JSON.stringify({
     items: items.map((it) => ({
@@ -28,6 +37,7 @@ function batchJson(items: Array<{ index: number; title: string }>) {
       summary: "て".repeat(80),
       category: "その他",
       tag: "trend",
+      ...USEFULNESS_FIELDS,
     })),
   });
 }
@@ -57,6 +67,7 @@ describe("curateBatch", () => {
               summary: "し".repeat(80),
               category: "その他",
               tag: "trend",
+              ...USEFULNESS_FIELDS,
             },
             {
               index: 2,
@@ -64,6 +75,7 @@ describe("curateBatch", () => {
               summary: "い".repeat(80),
               category: "衣装・ドレス",
               tag: "classic",
+              ...USEFULNESS_FIELDS,
             },
           ],
         }),
@@ -78,6 +90,7 @@ describe("curateBatch", () => {
     expect(results).toHaveLength(2);
     expect(results[0]?.title).toBe("式場レポート");
     expect(results[0]?.tag).toBe("trend");
+    expect(results[0]?.firsthand).toBe(true);
     expect(results[1]?.category).toBe("衣装・ドレス");
   });
 
@@ -93,6 +106,7 @@ describe("curateBatch", () => {
             summary: "あ".repeat(80),
             category: "その他",
             tag: "trend",
+            ...USEFULNESS_FIELDS,
           }),
         ),
       )
@@ -103,6 +117,7 @@ describe("curateBatch", () => {
             summary: "い".repeat(80),
             category: "その他",
             tag: "classic",
+            ...USEFULNESS_FIELDS,
           }),
         ),
       );
@@ -128,6 +143,7 @@ describe("curateBatch", () => {
               summary: "に".repeat(80),
               category: "その他",
               tag: "classic",
+              ...USEFULNESS_FIELDS,
             },
             {
               index: 1,
@@ -135,6 +151,7 @@ describe("curateBatch", () => {
               summary: "い".repeat(80),
               category: "その他",
               tag: "trend",
+              ...USEFULNESS_FIELDS,
             },
           ],
         }),
@@ -225,6 +242,7 @@ describe("curatePosts", () => {
             summary: "あ".repeat(80),
             category: "その他",
             tag: "trend",
+            ...USEFULNESS_FIELDS,
           }),
         ),
       )
@@ -235,6 +253,7 @@ describe("curatePosts", () => {
             summary: "い".repeat(80),
             category: "その他",
             tag: "classic",
+            ...USEFULNESS_FIELDS,
           }),
         ),
       );

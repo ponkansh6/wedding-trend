@@ -68,7 +68,7 @@ Next.js 16 (App Router), React 19, TypeScript strict, Tailwind CSS v4, Drizzle O
 
 ## 5. Data Model
 
-データベースは Turso (libSQL) および Drizzle ORM (`src/lib/db/schema.ts`, `src/lib/db/index.ts`, `src/lib/db/query.ts`, `src/lib/db/repository.ts`, `src/lib/db/migrations/0000_stormy_harrier.sql`, `src/lib/db/migrations/0001_supreme_dark_phoenix.sql`) によって管理されます。
+データベースは Turso (libSQL) および Drizzle ORM (`src/lib/db/schema.ts`, `src/lib/db/index.ts`, `src/lib/db/query.ts`, `src/lib/db/repository.ts`, `src/lib/db/migrations/0000_stormy_harrier.sql`, `src/lib/db/migrations/0001_supreme_dark_phoenix.sql`, `src/lib/db/migrations/0002_dry_forge.sql`) によって管理されます。
 
 ### `posts` テーブル
 
@@ -116,6 +116,30 @@ Next.js 16 (App Router), React 19, TypeScript strict, Tailwind CSS v4, Drizzle O
 - `value`: 値。ISO8601 文字列で文字列比較の大小判定が成立する形式に統一する
   （`last_run_summary` のみ JSON 文字列で例外） (Text)
 - `updated_at`: タイムスタンプ (Text)
+
+### `post_usefulness` テーブル（体験談レーンの有用度採点結果）
+
+体験談レーン（`sourceType: "blog"`）の掲載順を決めるための採点結果を保持する
+（判定項目・重み・掲載順ルールの詳細は §9 編集方針を参照）。`posts` へのカラム
+追加ではなく別テーブルにしているのは、本番 Turso が news-watch と DB を共有
+しており、追加専用の安全装置 (`scripts/apply-migrations-remote.mjs`) が
+`ALTER TABLE` を含む文を一切許可しない（`CREATE TABLE` / `CREATE INDEX` の
+みを許可し、それ以外が現れると exit 1 する）ためである。
+
+- `post_id`: `posts.id` と同じ型（Integer）の主キー。採点対象の投稿。
+- `firsthand` / `ceremony_decision` / `specific` / `tradeoff` / `promotional`:
+  判定項目 5 つ（SQLite に boolean 型が無いため 0/1 の Integer）。
+- `signature`: 採点時点の `computeCurationSignature()`（`src/lib/llm/signature.ts`）
+  の値。`posts.curation_signature` と比較し、プロンプト/モデルが変わった
+  記事を再スコア対象として検出する。
+- `model_id`: 採点した Gemini モデル ID。
+- `scored_at`: ISO8601 文字列（`config` / `posts` と同じ規約）。
+
+**合計スコアはこのテーブルに保存しない。** 重みは `src/lib/scoring/usefulness.ts`
+の純関数 `computeUsefulnessScore()` に置き、DB には判定項目 5 つのブール値
+のみを保存する設計とした。合計スコアを保存すると、重みを調整するたびに
+既存データのマイグレーションが必要になってしまうため、表示時に毎回その場で
+計算する。
 
 ---
 
@@ -245,7 +269,7 @@ Server Action 自身（Node ランタイム）は `node:crypto` の `timingSafeE
 
 | Tier                  | 対象モジュール・ファイル                                                                                                                                                                         | ターゲット網羅率         |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------ |
-| Tier 1 純粋ロジック   | `src/lib/url.ts`, `src/lib/llm/signature.ts`, `src/lib/llm/schemas.ts`, `src/lib/constants.ts`                                                                                                   | 95%                      |
+| Tier 1 純粋ロジック   | `src/lib/url.ts`, `src/lib/llm/signature.ts`, `src/lib/llm/schemas.ts`, `src/lib/constants.ts`, `src/lib/scoring/usefulness.ts`                                                                  | 95%                      |
 | Tier 2 パース・判定   | `src/lib/sources/base/feed-parser.ts`, `src/lib/embed/providers.ts`                                                                                                                              | 85%                      |
 | Tier 3 収集アダプタ   | `src/lib/sources/hatena-bookmark.ts`, `src/lib/sources/google-news.ts`, `src/lib/sources/note.ts`, `src/lib/sources/ameblo.ts`, `src/lib/sources/base/rss-fetcher.ts`, `src/lib/embed/oembed.ts` | 80%                      |
 | Tier 4 LLM 制御       | `src/lib/llm/batch.ts`, `src/lib/llm/client.ts`                                                                                                                                                  | 80%                      |
@@ -259,11 +283,124 @@ Server Action 自身（Node ランタイム）は `node:crypto` の `timingSafeE
 
 - 独自に結婚式関連記事の本文を作成・執筆すること。
 - プラットフォーム独自の非公式スクレイピングによるデータ収集。
-- 個別のユーザー嗜好に基づくレコメンド・パーソナライズ。
+- 閲覧者ごとに出し分けるレコメンド・パーソナライズ（Cookie / ログイン / 行動履歴に基づく順序・内容の変更）。掲載順は全閲覧者に対して同一である。
 
 ---
 
-## 9. 法務制約 (Legal Constraints)
+## 9. 編集方針 (Editorial Policy)
+
+体験談レーン（`sourceType: "blog"`）の掲載順は「何が話題か」ではなく「これから
+式の中身を決める読者にとって役に立つか」で決める。本セクションはその判定
+基準・重み・掲載順ルールを定義する唯一の参照先であり、第2段（LLM プロンプト
+変更・並び順の実装・既存データのバックフィル）はここに従って実装する。
+
+### §9.1 想定読者
+
+> 想定読者は、挙式日・会場が決まっており、衣装（ドレス・和装）もおおむね
+> 決まっている。これから決めるのは挙式・披露宴の**中身**である —— 進行と
+> タイムライン、演出、席次と席札、余興、スピーチや余興の依頼、BGM、装花、
+> 料理、引出物、ペーパーアイテム、写真と映像、ゲストの過ごしやすさ、当日の
+> 段取り。この読者が求めているのは「何が人気か」ではなく「実際に式を挙げた
+> 人が、何を、なぜそう判断したか」である。
+
+第2段でこの文面をそのまま LLM プロンプトからも参照する（プロンプトと
+spec.md とで想定読者の定義が乖離しないようにするため）。
+
+### §9.2 語彙非依存の原則
+
+「卒花」「プレ花嫁」等の語がタイトル・本文に含まれること自体は加点材料では
+ない。これらの語が無くても、実際の挙式・披露宴の経験に基づく知見であれば
+§9.3 の判定基準に従って同等に扱う。新婦本人に限らず、新郎・両家家族、および
+プランナー・司会者・カメラマン・装花担当など式に立ち会う職能者が実務経験に
+基づいて書いた知見も対象に含む（§9.3 `firsthand` の定義を参照）。
+
+### §9.3 判定項目とスコア計算
+
+LLM には次の 5 つのブール値のみを判定させ、点数そのものは出させない
+（点数は `src/lib/scoring/usefulness.ts` の純関数 `computeUsefulnessScore()`
+がコード側で計算する。この分離により、重み調整が再課金ゼロのコード変更で
+済む）。
+
+| 項目               | 定義                                                                                                                                                                                                                       |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `firsthand`        | 書き手自身または近しい当事者が実際に挙式・披露宴を経験した立場から書かれている。新婦本人に限らず、新郎・両家家族、およびプランナー・司会者・カメラマン・装花担当など式に立ち会う職能者が実務経験に基づいて書いたものを含む |
+| `ceremonyDecision` | 挙式・披露宴の**中身**の意思決定に効く（進行・タイムライン・演出・席次・席札・余興・スピーチ・BGM・装花・料理・引出物・ペーパーアイテム・写真映像・ゲストの過ごしやすさ・当日段取り）                                      |
+| `specific`         | 具体を含む（固有の選択・数字・実際にやったこと / やらなかった理由）。心構えのみは false                                                                                                                                    |
+| `tradeoff`         | 判断の理由・後悔・「やってよかった / 要らなかった」の評価が述べられている                                                                                                                                                  |
+| `promotional`      | 事業者による集客・自社サービスへの誘導が主目的（減点）。判別基準は「読者が別の会場・別の業者で式を挙げる場合にも役立つか」                                                                                                 |
+
+スコア計算式（`USEFULNESS_GATE_BONUS` 等の重み定数は `src/lib/constants.ts`
+に定義する）:
+
+```
+score = (ceremonyDecision ? USEFULNESS_GATE_BONUS(10) : 0)
+      + USEFULNESS_WEIGHT_FIRSTHAND(3)   * firsthand
+      + USEFULNESS_WEIGHT_SPECIFIC(2)    * specific
+      + USEFULNESS_WEIGHT_TRADEOFF(2)    * tradeoff
+      - USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY(4) * promotional
+```
+
+`ceremonyDecision` は加算項の一つではなく**ゲート**である。単純な加算項に
+すると、「衣装だけの記事だが実体験・具体的・トレードオフあり」（3+2+2=7）が
+「式の中身に触れているが浅い記事」（10）を上回ってしまい、「これから式の
+中身を決める読者に効く記事を優先する」という編集方針そのものが反転する。
+挙式・披露宴の中身に関する記事であることを他の加点の前提条件にすることで、
+この逆転を構造的に防ぐ。
+
+重みは、抜粋（記事冒頭）から LLM が判定できる確信度に比例させている。話題
+（`ceremonyDecision`）・書き手の立場（`firsthand`）・宣伝性（`promotional`）
+は記事冒頭からでも判定しやすい一方、具体性（`specific`）やトレードオフ
+（`tradeoff`）は本文中盤以降にしか現れないことが多く、抜粋だけからの判定は
+確信度が落ちる。そのため `firsthand`（3）を `specific`/`tradeoff`（各 2）
+より重くしている。`promotional` の減点（4）を他の加点より大きくしているのは、
+ゲートを通過した記事であっても宣伝目的の記事を上位に出さないという編集方針
+の強さを反映したものである。
+
+### §9.4 判断材料が無ければ false に倒す
+
+LLM が判定に必要な情報を十分に得られない場合（抜粋が短すぎる等）、各項目は
+`true` ではなく `false` に倒す。自信を持って誤判定して不適切な記事を上位に
+押し上げるより、判定を保留して新着順相当の位置に留まる方が実害が小さい
+という判断による。
+
+### §9.5 未スコア投稿の扱い
+
+LLM によるキュレーションが一時的に失敗した投稿、および原文テキストが存在せ
+ず要約を生成できない投稿（次章 §10 の要件 4. 参照）には、`src/lib/scoring/usefulness.ts`
+の `UNSCORED_USEFULNESS_SCORE`（固定値 3）を用いる。この値は**ゲート不通過
+帯の中位**に意図的に置いており、無条件で最下位に落とすことはしない。最下位
+に固定してしまうと、一時的な LLM 失敗によって新着の良記事が静かに埋もれて
+しまうためである。次回 ingest で `post_usefulness.signature` が
+`posts.curation_signature` と不一致になった投稿として再スコア対象に検出され、
+自然に正しい位置へ移動する。
+
+### §9.6 掲載順の決定規則
+
+- **体験談レーン**（`sourceType: "blog"`）: 有用度スコア（§9.3）降順 →
+  `publishedAt` 降順。
+- **速報レーン**（`sourceType: "sns"`、手動 URL 投入）: `publishedAt` 降順を
+  維持する（本セクションの採点対象外）。速報性そのものが価値であることに加え、
+  SNS 投稿には体験談レーンのような本文抜粋が無く、同じルーブリックで採点
+  できないため。
+
+### §9.7 不変条件
+
+スコアは記事単体（原文テキスト・書き手の立場）から一意に決定され、閲覧文脈
+や閲覧者に依存しない。全閲覧者に対して同一の掲載順を提示する（§8 Non-Goals
+の禁止対象——閲覧者ごとに出し分けるレコメンド・パーソナライズ——と対になる
+不変条件）。
+
+### §9.8 スコアは UI に公開表示しない
+
+有用度スコアはページ上の一般公開面には表示しない。他人が書いた記事に点数を
+付けて公開することは、中立キュレーションから評価メディアへ立ち位置が変わる
+行為であり、著作者クレジット（次章 §10 の要件 2.）の隣に数値を置く表示は
+それと異なる法的リスクを負う。順序として使うことは編集行為だが、点数その
+ものの公表は評価行為であり、本プロジェクトのスコープ外とする。
+
+---
+
+## 10. 法務制約 (Legal Constraints)
 
 1. **元ソースへの導線が最優先 CTA**: すべてのカードにおいて、元投稿・記事へのリンク（または公式埋め込み）を明確なメインアクションとして配置する。
 2. **著作者名の必須クレジット**: 引用（著作権法第32条）の要件を満たすため、カード上に著者名・情報源名を必ず表示する。

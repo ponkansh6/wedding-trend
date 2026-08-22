@@ -1,13 +1,16 @@
 import { CURATION_BUDGET, SOURCE_ITEM_LIMIT } from "@/lib/constants";
 import {
   getPostsByUrls,
+  getStaleCurationCandidates,
   markCurated,
   readLastRunSummary,
   saveLastRunSummary,
   upsertPosts,
+  type CurationCandidate,
   type PostUpsertInput,
 } from "@/lib/db/repository";
 import { curatePosts } from "@/lib/llm/batch";
+import { LLM_MODEL } from "@/lib/llm/client";
 import { computeContentHash, computeCurationSignature } from "@/lib/llm/signature";
 import { SOURCE_IDS, SOURCE_REGISTRY, type SourceAdapter } from "@/lib/sources/registry";
 import { canonicalizeUrl } from "@/lib/url";
@@ -182,30 +185,74 @@ export async function runIngest(trigger: IngestTrigger = "manual"): Promise<Inge
   }
 
   // 4. 未キュレーション、またはプロンプト/モデル変更で再キュレーションが必要な投稿を
-  //    予算内で選定する（新しい publishedAt を優先）。
+  //    予算内で選定する。新着（今回の巡回で取得できた投稿）を優先し、余った予算を
+  //    DB 側のバックフィル対象（signature 不一致・未スコア）に回す。
+  //
+  //    以前は deduped（今回の巡回で取得できた投稿）からしか候補を作っておらず、
+  //    CURATION_PROMPT_VERSION を bump しても RSS のウィンドウから落ちた古い投稿は
+  //    永久に再判定されなかった（バージョン管理として機能していなかった）。
+  //    stale candidates を毎回一定量ずつ混ぜることで、プロンプト変更が数回の
+  //    cron 実行で自動的に全件へ波及する。CURATION_DEADLINE_MS で打ち切られて
+  //    今回処理できなかった残りは、signature 不一致のまま DB に残るため、
+  //    次回 run で再び候補に上がる（自己回復する）。
   const currentSignature = computeCurationSignature();
   const states = await getPostsByUrls(upsertResult.succeeded);
 
-  const candidates = deduped.filter((post) => {
+  const freshCandidates: CurationCandidate[] = deduped.flatMap((post): CurationCandidate[] => {
     const state = states.get(post.url);
-    if (!state) return true; // 状態が読めなければ安全側で対象に含める
-    if (!state.aiTitle) return true;
-    const freshHash = computeContentHash(state.originalTitle, state.originalExcerpt);
-    const isUnchanged =
-      state.contentHash === freshHash && state.curationSignature === currentSignature;
-    return !isUnchanged;
+    const id = state?.id ?? null;
+    const needsCuration = ((): boolean => {
+      if (!state) return true; // 状態が読めなければ安全側で対象に含める
+      if (!state.aiTitle) return true;
+      const freshHash = computeContentHash(state.originalTitle, state.originalExcerpt);
+      const isUnchanged =
+        state.contentHash === freshHash && state.curationSignature === currentSignature;
+      return !isUnchanged;
+    })();
+    if (!needsCuration) return [];
+    return [
+      {
+        id,
+        url: post.url,
+        originalTitle: post.originalTitle,
+        originalExcerpt: post.originalExcerpt,
+        publishedAt: post.publishedAt,
+      },
+    ];
   });
 
-  candidates.sort((a, b) => {
+  freshCandidates.sort((a, b) => {
     const aTime = a.publishedAt ? new Date(a.publishedAt).getTime() : 0;
     const bTime = b.publishedAt ? new Date(b.publishedAt).getTime() : 0;
     return bTime - aTime;
   });
 
-  const toCurate = candidates.slice(0, CURATION_BUDGET);
-  const skipped = deduped.length - toCurate.length;
+  // 新着だけで予算を使い切った場合はバックフィル分の DB 問い合わせ自体を省略する。
+  const remainingBudget = Math.max(0, CURATION_BUDGET - freshCandidates.length);
+  let staleCandidates: CurationCandidate[] = [];
+  if (remainingBudget > 0) {
+    const freshIds = new Set(
+      freshCandidates.map((c) => c.id).filter((id): id is number => id !== null),
+    );
+    // fresh candidates と DB 側の stale 判定が重複するケース（今回取り込んだ
+    // 投稿がそのまま「未スコア」にも該当する等）を見込み、フィルタ後も
+    // remainingBudget を満たせるよう多めに取得しておく。
+    const staleRows = await getStaleCurationCandidates({
+      currentSignature,
+      limit: remainingBudget + freshCandidates.length,
+    });
+    staleCandidates = staleRows
+      .filter((c) => c.id === null || !freshIds.has(c.id))
+      .slice(0, remainingBudget);
+  }
 
-  // 5. LLM キュレーション → 結果を保存
+  const toCurate = [...freshCandidates, ...staleCandidates].slice(0, CURATION_BUDGET);
+  // skipped は「今回の巡回で取得できた投稿のうち、今回キュレーションされな
+  // かった件数」。stale candidates は deduped 由来ではないためこの数には含めない。
+  const includedFreshCount = Math.min(freshCandidates.length, CURATION_BUDGET);
+  const skipped = deduped.length - includedFreshCount;
+
+  // 5. LLM キュレーション → 結果を保存（posts の要約/カテゴリ等 + post_usefulness の有用度判定）
   let curated = 0;
   let geminiCalls = 0;
   if (toCurate.length > 0) {
@@ -227,6 +274,23 @@ export async function runIngest(trigger: IngestTrigger = "manual"): Promise<Inge
             tag: result.tag,
             contentHash: computeContentHash(post.originalTitle, post.originalExcerpt),
             curationSignature: currentSignature,
+            // postId が解決できなかった投稿（fresh candidates の一部。上記コメント
+            // 参照）は post_usefulness への書き込みをスキップし、posts の更新だけ
+            // 安全側で行う。
+            usefulness:
+              post.id !== null
+                ? {
+                    postId: post.id,
+                    modelId: LLM_MODEL,
+                    criteria: {
+                      firsthand: result.firsthand,
+                      ceremonyDecision: result.ceremonyDecision,
+                      specific: result.specific,
+                      tradeoff: result.tradeoff,
+                      promotional: result.promotional,
+                    },
+                  }
+                : undefined,
           };
         })
         .filter((u): u is NonNullable<typeof u> => u !== null);

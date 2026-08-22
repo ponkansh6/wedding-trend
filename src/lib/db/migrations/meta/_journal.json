@@ -15,6 +15,13 @@
       "when": 1787363279031,
       "tag": "0001_supreme_dark_phoenix",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1787440187996,
+      "tag": "0002_dry_forge",
+      "breakpoints": true
     }
   ]
 }

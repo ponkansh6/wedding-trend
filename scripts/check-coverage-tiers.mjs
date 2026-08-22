@@ -35,6 +35,7 @@ const TIERS = [
       /\/lib\/llm\/signature\.ts$/,
       /\/lib\/llm\/schemas\.ts$/,
       /\/lib\/constants\.ts$/,
+      /\/lib\/scoring\/usefulness\.ts$/,
     ],
   },
   {

@@ -6,8 +6,17 @@
 // ── LLM (Gemini) ──────────────────────────────────────────────
 /** キュレーションに使う Gemini モデル ID。 */
 export const LLM_MODEL = "gemini-3.1-flash-lite";
-/** 生成温度。低めにして事実からの逸脱・創作的表現を抑える。 */
-export const LLM_GEN_TEMPERATURE = 0.2;
+/**
+ * 生成温度。0（このSDKでの最小値）に固定している。
+ *
+ * すべてのキュレーション呼び出しは要約・タイトル生成と同時に有用度判定
+ * （firsthand / ceremonyDecision / specific / tradeoff / promotional の5つの
+ * ブール値。`src/lib/scoring/usefulness.ts` 参照）を1コールで行う設計のため、
+ * 温度を上げるとこのブール判定がブレて体験談レーンの掲載順が実行のたびに
+ * 揺らいでしまう。要約の事実からの逸脱・創作的表現の抑制という以前からの
+ * 目的とも合致するため、0.2 から 0 へさらに下げた。
+ */
+export const LLM_GEN_TEMPERATURE = 0;
 /** バッチキュレーション 1 回あたりの投稿数。 */
 export const LLM_BATCH_SIZE = 12;
 /** バッチ処理の並列実行数（p-limit）。 */
@@ -28,8 +37,16 @@ export const LLM_BACKOFF_BASE_MS = 2000;
 export const LLM_BATCH_MAX_TOKENS = 8000;
 /** 単体応答の最大トークン数。 */
 export const LLM_SINGLE_MAX_TOKENS = 800;
-/** プロンプト本文を変更したら bump する（curationSignature に反映）。 */
-export const CURATION_PROMPT_VERSION = 1;
+/**
+ * プロンプト本文を変更したら bump する（curationSignature に反映）。
+ *
+ * v2: 有用度判定5項目（firsthand / ceremonyDecision / specific / tradeoff /
+ * promotional）の判定指示を追加し、想定読者ペルソナをプロンプトに載せた
+ * （openspec/specs/wedding-trend/spec.md §9 編集方針）。bump により全投稿の
+ * curationSignature が不一致になり、次回以降の ingest で段階的に、または
+ * scripts/backfill-usefulness.mjs で一括して再キュレーションされる。
+ */
+export const CURATION_PROMPT_VERSION = 2;
 
 // ── キュレーション予算・締切 ──────────────────────────────────
 /** 1 回の ingest 実行で LLM に投げる投稿数の上限。 */
@@ -102,6 +119,31 @@ export const INGEST_FULL_COOLDOWN_MS = 4 * 60 * 60 * 1000;
  * 大幅に縮小できる。
  */
 export const INGEST_LEASE_TTL_MS = 2 * 60 * 1000;
+
+// ── 有用度スコアリング（体験談レーンの掲載順）─────────────────
+// 計算式・各重みの根拠（確信度に比例させている理由等）は
+// `src/lib/scoring/usefulness.ts` の JSDoc、編集方針全体は
+// `openspec/specs/wedding-trend/spec.md` を参照。ここでは値のみを持つ。
+
+/**
+ * `ceremonyDecision`（挙式・披露宴の中身に関する記事か）を満たした場合にのみ
+ * 加算するゲート分。他の加点項目の合計（firsthand + specific + tradeoff =
+ * 3+2+2=7）を上回る値にすることで、「中身に関する記事」であることを他の
+ * 加点の前提条件として機能させ、衣装のみの記事等が逆転して上位に来ることを防ぐ。
+ */
+export const USEFULNESS_GATE_BONUS = 10;
+
+/** 実体験に基づく記事であることの加点。話題性・宣伝性と同様に抜粋段階で判定しやすいため重め。 */
+export const USEFULNESS_WEIGHT_FIRSTHAND = 3;
+
+/** 具体（固有の選択・数字・実際の行動）を含むことの加点。本文中盤以降でないと判定しにくいため firsthand より軽め。 */
+export const USEFULNESS_WEIGHT_SPECIFIC = 2;
+
+/** 判断理由・後悔・評価が述べられていることの加点。specific と同様の理由で軽め。 */
+export const USEFULNESS_WEIGHT_TRADEOFF = 2;
+
+/** 事業者による集客が主目的の記事に対する減点。ゲート通過後でも上位に出さない編集方針の強さを反映し、他の加点より大きい。 */
+export const USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY = 4;
 
 // ── HTTP ステータス ───────────────────────────────────────────
 export const HTTP_STATUS_TOO_MANY_REQUESTS = 429;

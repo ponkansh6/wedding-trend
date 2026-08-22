@@ -96,3 +96,37 @@ export const config = sqliteTable("config", {
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
 });
+
+/**
+ * 体験談レーン（`sourceType: "blog"`）の記事に対する有用度採点結果。
+ * `posts` へのカラム追加ではなく別テーブルにしているのは、本番 Turso が
+ * news-watch と DB を共有しており、追加専用の安全装置
+ * （`scripts/apply-migrations-remote.mjs`）が `ALTER TABLE` を一切許可しない
+ * ため（新テーブルの `CREATE TABLE` のみ許可される）。
+ *
+ * 合計スコアはここに保存しない。5 つのブール値だけを LLM から受け取り、
+ * 重み付けは `src/lib/scoring/usefulness.ts` の純関数（コード側）で行う設計
+ * のため、スコアを DB に保存すると重み変更のたびにデータ移行が必要になって
+ * しまう。表示順に使う実際のスコアは読み取り時に毎回計算する。
+ *
+ * - `postId`: `posts.id`（採点対象の投稿）。
+ * - `firsthand` / `ceremonyDecision` / `specific` / `tradeoff` / `promotional`:
+ *   判定項目 5 つ（boolean は SQLite に無いため 0/1 の integer で表現）。
+ *   定義は `openspec/specs/wedding-trend/spec.md` の編集方針セクションを参照。
+ * - `signature`: 採点時点の `computeCurationSignature()` の値。`posts` 側の
+ *   `curationSignature` と比較し、プロンプト/モデルが変わった記事を
+ *   再スコア対象として検出する（混成ヴィンテージ対策）。
+ * - `modelId`: 採点した Gemini モデル ID。
+ * - `scoredAt`: ISO8601 文字列（`config` / `posts` と同じ規約）。
+ */
+export const postUsefulness = sqliteTable("post_usefulness", {
+  postId: integer("post_id").primaryKey(),
+  firsthand: integer("firsthand").notNull(),
+  ceremonyDecision: integer("ceremony_decision").notNull(),
+  specific: integer("specific").notNull(),
+  tradeoff: integer("tradeoff").notNull(),
+  promotional: integer("promotional").notNull(),
+  signature: text("signature").notNull(),
+  modelId: text("model_id").notNull(),
+  scoredAt: text("scored_at").notNull(),
+});

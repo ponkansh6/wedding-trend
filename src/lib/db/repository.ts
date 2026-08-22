@@ -1,7 +1,8 @@
-import { and, eq, inArray, lt, lte } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, lt, lte, ne, or } from "drizzle-orm";
 import { db } from "./index";
-import { config, posts } from "./schema";
+import { config, posts, postUsefulness } from "./schema";
 import type { Category, EmbedProvider, PostStatus, SourceType, TrendTag } from "@/lib/types";
+import type { UsefulnessCriteria } from "@/lib/scoring/usefulness";
 
 /**
  * ingest（RSS クロール）または submit-url（SNS 単発投稿）が渡す、
@@ -156,6 +157,21 @@ export interface CurationUpdate {
   curationSignature: string;
   /** 指定があれば status も一緒に更新する（例: submit-url でのキュレーション失敗 → "pending"）。 */
   status?: PostStatus;
+  /**
+   * 有用度採点結果（`post_usefulness`）の永続化に必要な追加情報。
+   *
+   * 省略した場合は `post_usefulness` への書き込みをスキップし、`posts` のみ
+   * 更新する。`post_usefulness` は体験談レーン（`sourceType: "blog"`）の掲載順
+   * にのみ使う設計（openspec/specs/wedding-trend/spec.md §9.6）のため、
+   * SNS 単発投稿（`src/lib/pipeline/submit-url.ts`）はこれを渡さない。
+   * また `postId` を解決できなかった投稿（`src/lib/pipeline/ingest.ts` 参照）も
+   * 省略し、`posts` 側の更新だけは安全側で行う。
+   */
+  usefulness?: {
+    postId: number;
+    criteria: UsefulnessCriteria;
+    modelId: string;
+  };
 }
 
 /** キュレーション結果を書き込む。バッチ→個別フォールバック。 */
@@ -164,21 +180,66 @@ export async function markCurated(
 ): Promise<{ succeeded: string[]; failed: string[] }> {
   if (updates.length === 0) return { succeeded: [], failed: [] };
 
-  const buildSet = (u: CurationUpdate) => ({
+  const buildPostSet = (u: CurationUpdate, now: string) => ({
     aiTitle: u.aiTitle,
     aiSummary: u.aiSummary,
     category: u.category,
     tag: u.tag,
     contentHash: u.contentHash,
     curationSignature: u.curationSignature,
-    updatedAt: new Date().toISOString(),
+    updatedAt: now,
     ...(u.status ? { status: u.status } : {}),
   });
 
+  const buildUsefulnessValues = (u: CurationUpdate, now: string) => {
+    if (!u.usefulness) return null;
+    const { postId, criteria, modelId } = u.usefulness;
+    return {
+      postId,
+      firsthand: criteria.firsthand ? 1 : 0,
+      ceremonyDecision: criteria.ceremonyDecision ? 1 : 0,
+      specific: criteria.specific ? 1 : 0,
+      tradeoff: criteria.tradeoff ? 1 : 0,
+      promotional: criteria.promotional ? 1 : 0,
+      // posts.curationSignature と同じ値を保存する。両者は必ず一致させる
+      // （getStaleCurationCandidates は posts.curationSignature だけを見て
+      // 再スコア対象を判定するため、ここがズレると検出漏れになる）。
+      signature: u.curationSignature,
+      modelId,
+      scoredAt: now,
+    };
+  };
+
+  /**
+   * 1 件分の posts 更新（＋あれば post_usefulness upsert）を 1 つの
+   * ステートメント配列にまとめる。`posts` の更新と `post_usefulness` の更新が
+   * 食い違わないよう（例: signature だけ更新されて有用度だけ古いまま残る）、
+   * この 2 つは常にペアで `db.batch()` に渡し、フォールバック（個別実行）時も
+   * ペアのまま実行する。
+   */
+  const buildStatements = (u: CurationUpdate): unknown[] => {
+    const now = new Date().toISOString();
+    // posts の update 文と post_usefulness の insert/upsert 文はビルダーの型が
+    // 異なる（drizzle の SQLiteUpdateBase / SQLiteInsertBase）ため、この配列は
+    // `unknown[]` として扱う。呼び出し側でどのみち `db.batch()` に渡す直前に
+    // `Parameters<typeof db.batch>[0]` へキャストしているため実害はない。
+    const stmts: unknown[] = [
+      db.update(posts).set(buildPostSet(u, now)).where(eq(posts.url, u.url)),
+    ];
+    const usefulnessValues = buildUsefulnessValues(u, now);
+    if (usefulnessValues) {
+      stmts.push(
+        db
+          .insert(postUsefulness)
+          .values(usefulnessValues)
+          .onConflictDoUpdate({ target: postUsefulness.postId, set: usefulnessValues }),
+      );
+    }
+    return stmts;
+  };
+
   try {
-    const statements = updates.map((u) =>
-      db.update(posts).set(buildSet(u)).where(eq(posts.url, u.url)),
-    );
+    const statements = updates.flatMap(buildStatements);
     await db.batch(statements as unknown as Parameters<typeof db.batch>[0]);
     return { succeeded: updates.map((u) => u.url), failed: [] };
   } catch (batchErr) {
@@ -187,7 +248,12 @@ export async function markCurated(
     const failed: string[] = [];
     for (const u of updates) {
       try {
-        await db.update(posts).set(buildSet(u)).where(eq(posts.url, u.url));
+        const stmts = buildStatements(u);
+        if (stmts.length > 1) {
+          await db.batch(stmts as unknown as Parameters<typeof db.batch>[0]);
+        } else {
+          await stmts[0];
+        }
         succeeded.push(u.url);
       } catch (err) {
         console.error(`[db] failed to markCurated url="${u.url}":`, err);
@@ -195,6 +261,80 @@ export async function markCurated(
       }
     }
     return { succeeded, failed };
+  }
+}
+
+/**
+ * LLM キュレーション対象 1 件分の最小限の情報。`src/lib/pipeline/ingest.ts` は
+ * 今回の巡回で取得できた投稿（fresh candidates）と、DB から検出した再スコア
+ * 対象（stale candidates、`getStaleCurationCandidates` 参照）の両方をこの
+ * 共通の形に正規化して扱う。
+ *
+ * `id` は `post_usefulness` への書き込みに使う `posts.id`。fresh candidates
+ * 側で解決できない場合（upsert 失敗・状態読み取り失敗等）は `null` になり得る
+ * （その場合 `markCurated` の呼び出し元は `usefulness` を省略し、`posts` 側の
+ * 更新のみ安全側で行う）。
+ */
+export interface CurationCandidate {
+  id: number | null;
+  url: string;
+  originalTitle: string;
+  originalExcerpt: string | null;
+  publishedAt: string | null;
+}
+
+/**
+ * 体験談レーン（`sourceType: "blog"`）のうち、`posts.curationSignature` が
+ * 最新のプロンプト/モデル（`currentSignature`）と不一致、または一度も
+ * キュレーションされていない（`curationSignature` が null）投稿を
+ * `publishedAt` 降順で取得する。バックフィル対象（再スコア対象）の選定に使う。
+ *
+ * ここでの「不一致」は `posts.curationSignature` のみを見ればよく、
+ * `post_usefulness.signature` を別途確認する必要はない。`markCurated()` が
+ * `posts` と `post_usefulness` を常に同一の `now` ペアで（フォールバック時も
+ * 2 文をまとめて）書き込むため、`posts.curationSignature` が最新であれば
+ * `post_usefulness.signature` も必ず最新のはずだからである。
+ *
+ * `sourceType: "blog"` に絞っているのは、有用度スコアが体験談レーンの掲載順
+ * にしか使われないため（spec.md §9.6）。SNS 単発投稿を対象に含めても
+ * 表示には使われず、Gemini 予算を無駄に消費するだけになる。
+ *
+ * `publishedAt` は元記事側の情報が欠けている場合に null になり得る。SQLite は
+ * ORDER BY ... DESC で NULL を最後に並べるため、公開日不明の投稿はバックフィル
+ * の優先順位としては最後に回る（不明な新しさより既知の新しさを優先する）。
+ *
+ * `runIngest()`（新着優先の上に予算の余りをバックフィルへ回す経路）と
+ * `scripts/backfill-usefulness.mjs`（全件強制バックフィル）の両方から
+ * 再利用される。読み取り専用のためフェイルソフト（`getFeedCards` と同じ
+ * パターン: 例外を投げず空配列を返す）。
+ */
+export async function getStaleCurationCandidates(params: {
+  currentSignature: string;
+  limit: number;
+}): Promise<CurationCandidate[]> {
+  if (params.limit <= 0) return [];
+  try {
+    const rows = await db
+      .select({
+        id: posts.id,
+        url: posts.url,
+        originalTitle: posts.originalTitle,
+        originalExcerpt: posts.originalExcerpt,
+        publishedAt: posts.publishedAt,
+      })
+      .from(posts)
+      .where(
+        and(
+          eq(posts.sourceType, "blog"),
+          or(isNull(posts.curationSignature), ne(posts.curationSignature, params.currentSignature)),
+        ),
+      )
+      .orderBy(desc(posts.publishedAt))
+      .limit(params.limit);
+    return rows;
+  } catch (err) {
+    console.warn("[db] getStaleCurationCandidates query error:", err);
+    return [];
   }
 }
 

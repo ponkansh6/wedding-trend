@@ -143,7 +143,17 @@ export async function curateBatch(
   const aligned = inputs.map((_, i): CurationResult | null => {
     const item = byIndex.get(i + 1);
     if (!item) return null;
-    return { title: item.title, summary: item.summary, category: item.category, tag: item.tag };
+    return {
+      title: item.title,
+      summary: item.summary,
+      category: item.category,
+      tag: item.tag,
+      firsthand: item.firsthand,
+      ceremonyDecision: item.ceremonyDecision,
+      specific: item.specific,
+      tradeoff: item.tradeoff,
+      promotional: item.promotional,
+    };
   });
 
   if (aligned.every((r) => r === null)) {
