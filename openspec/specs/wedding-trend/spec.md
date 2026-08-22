@@ -128,7 +128,7 @@ Next.js 16 (App Router), React 19, TypeScript strict, Tailwind CSS v4, Drizzle O
 収集パイプラインを起動する経路は次の 2 つのみであり、いずれも最終的に上記の pipeline モジュールを呼ぶ。
 
 1. **UI の取得ボタン（Server Action）**: `src/app/actions.ts` の `triggerIngest()` / `submitSnsUrl(url)` を、トップページ上のボタン（別コンポーネントが所有）が呼び出す。`triggerIngest()` は無認証で本番の公開トップページに置かれる公開 Server Action であり、`submitSnsUrl()`（管理者向け・§6.2 参照）とは認可モデルが異なる。`triggerIngest()` の濫用防止は §6.4 の lease（排他ロック）と DB クールダウンが担う。
-2. **Vercel Cron（定期実行）**: `vercel.json` の `crons` 設定により、Vercel が `GET /api/ingest` を定期的に呼び出す（スケジュールは `0 */6 * * *` = 6 時間ごと、UTC 0:00/6:00/12:00/18:00 = JST 9:00/15:00/21:00/翌3:00）。挙動が急変しやすい SNS トレンドを日中〜深夜にかけて数回拾いつつ、Gemini API 呼び出し回数と RSS ソースへの負荷を抑えるための頻度。Vercel の Hobby プランでは Cron の実行頻度が 1 日 1 回に制限される場合があるため、Hobby で運用する場合は `schedule` を `0 21 * * *`（JST 6:00 の 1 日 1 回）に変更すること。
+2. **Vercel Cron（定期実行）**: `vercel.json` の `crons` 設定により、Vercel が `GET /api/ingest` を定期的に呼び出す（スケジュールは `0 21 * * *` = UTC 21:00、JST 6:00 の 1 日 1 回）。本番は Vercel Hobby プランで運用しており、Hobby は Cron の実行頻度が 1 日 1 回までに制限される（それを超えるスケジュールを指定すると `vercel deploy` 自体が拒否され、デプロイが失敗する）ため、この頻度としている。
    - `src/app/api/ingest/route.ts` の `GET` ハンドラは単なるヘルスチェック/案内スタブではなく、`POST` と全く同じ認可チェック・同じ `runIngest()` 呼び出しを行う。Vercel Cron は `CRON_SECRET` 環境変数が設定されていれば `Authorization: Bearer <CRON_SECRET>` ヘッダーを自動付与するため、`src/lib/auth.ts` の `isBearerAuthorized` がそのまま両方の HTTP メソッドを検証できる。**`CRON_SECRET` が未設定の場合、この経路は fail-closed により常に 401 を返す**（詳細は §6.4 直前の認証方針、および `src/lib/auth.ts` を参照）。
    - この経路は公開ボタン経路の 4 時間クールダウンの**評価**を迂回するが、**lease（排他ロック）は迂回しない**。`acquireIngestLease()` に失敗した場合（＝公開ボタン経路や他の Cron 呼び出しが実行中）は `runIngest()` を呼ばずに `409` を返す。
 
@@ -176,7 +176,7 @@ SNS URL 投入フォームは `ENABLE_ADMIN_CONTROLS` 環境変数で有効/無�
 
 #### cooldown（グローバルクールダウン）
 
-**公開ボタン経路のみ**に課すレートリミット。Cron は 6 時間ごとにしか叩かれず認証済みであるため評価を免除されるが、実行後に `last_ingest_at` を更新することで、Cron 実行の直後に公開ボタンが押されても不必要な再実行が起きないようにする。
+**公開ボタン経路のみ**に課すレートリミット。Cron は 1 日 1 回にしか叩かれず認証済みであるため評価を免除されるが、実行後に `last_ingest_at` を更新することで、Cron 実行の直後に公開ボタンが押されても不必要な再実行が起きないようにする。
 
 - **`INGEST_COOLDOWN_MS`**: クールダウン幅（4 時間 = `4 * 60 * 60 * 1000` ミリ秒）。
 - **`claimIngestSlot(now?)`**: cooldown 判定と `last_ingest_at` の更新を 1 呼び出しで行う。`src/lib/db/repository.ts` の `claimLastIngestAt()` が発行する単一の条件付き `INSERT ... ON CONFLICT DO UPDATE ... WHERE` により、4 時間以上経過していれば（または初回であれば）`last_ingest_at` を `now`（＝実行開始時刻）に更新して `{ claimed: true, cooldownUntil }` を返す。経過していなければ DB を書き換えずに `{ claimed: false, cooldownUntil }` を返す。`ClaimResult` は `{ claimed: boolean; cooldownUntil: string }`（両バリアントのフィールドが同一なため判別共用体にしていない）。奪取に失敗した場合の `cooldownUntil` は `getCooldownUntil()` に計算を委譲しており、重複実装しない。この関数は**呼び出し前に lease を取得済みであることが前提**（呼び出しが既に直列化されているため、内部の原子的 CAS は多重防御として働く）。

@@ -13,7 +13,7 @@ export const maxDuration = 60;
  * この経路（Bearer 認証済み・Vercel Cron）は公開 UI の収集ボタンにかかる
  * 4 時間のグローバルクールダウン（`src/lib/pipeline/cooldown.ts` の
  * `claimIngestSlot` が行う *cooldown* の評価）を意図的に迂回する。Cron は
- * 6 時間ごとにしか叩かれず認証済みであるため濫用防止の対象外である。
+ * 1 日 1 回にしか叩かれず認証済みであるため濫用防止の対象外である（Vercel Hobby プランの Cron 実行頻度上限。詳細は `vercel.json` および spec.md §6.1 を参照）。
  *
  * ただし **lease（排他ロック）はこの経路も必ず取得する**。cooldown を迂回
  * できるからといって同時実行まで許してしまうと、Cron 実行中に公開ボタンが

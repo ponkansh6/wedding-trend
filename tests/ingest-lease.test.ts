@@ -46,7 +46,16 @@ describe("triggerIngest × real lease/cooldown (integration, in-memory DB)", () 
   });
 
   it("returns busy:true and never calls runIngest while another execution (e.g. cron) already holds the lease", async () => {
-    const now = new Date("2026-08-22T09:00:00.000Z");
+    // ⚠️ 注入時刻と実時刻を混在させない: triggerIngest() は now を注入できず
+    // 常に実時刻（new Date()）で lease の期限を判定する。ここで固定の壁時計
+    // 時刻（例: "2026-08-22T09:00:00.000Z"）を注入して lease を書き込むと、
+    // テスト実行時刻がその期限（INGEST_LEASE_TTL_MS 後）を過ぎた瞬間に
+    // 「lease が期限切れ」と判定され、busy:true を期待するこのテストが
+    // 実行時刻依存で自然に落ちる（実際に発生した回帰）。
+    // triggerIngest() 側が実時刻固定である以上、lease 側も実時刻に合わせて
+    // 統一する。INGEST_LEASE_TTL_MS は 10 分あるため、テスト実行中に
+    // 期限切れになる心配はない。
+    const now = new Date();
     // Cron 経路が実行中であることを、実際の lease 取得で再現する。
     const cronHoldsLease = await acquireIngestLease(now);
     expect(cronHoldsLease).toBe(true);
@@ -89,7 +98,14 @@ describe("triggerIngest × real lease/cooldown (integration, in-memory DB)", () 
   });
 
   it("lets the button path proceed immediately after the cron-held lease is released", async () => {
-    const now = new Date("2026-08-22T09:00:00.000Z");
+    // このテストは acquire 直後に release するため、書き込まれる lease の値は
+    // 常に「常に期限切れ」を表す過去日時（releaseIngestLease は無条件に過去の
+    // 定数を書く。src/lib/db/repository.ts 参照）になり、その後 triggerIngest()
+    // が実時刻で評価しても矛盾しない。つまりここでの now は acquire/release の
+    // どちらにも同じ値を使っている限り実時刻・固定時刻のどちらでも安全だが、
+    // 上のテストと同様のパターンに見えて紛らわしいため、ファイル内で時刻の
+    // 扱いを統一する目的で実時刻に揃えている。
+    const now = new Date();
     await acquireIngestLease(now);
     await releaseIngestLease(now);
 
