@@ -1,16 +1,10 @@
 import { Flame } from "lucide-react";
 import { FeedCard } from "@/components/feed/feed-card";
 import { EmptyState } from "@/components/feed/empty-state";
-import { SubmitUrlForm } from "@/components/admin/submit-url-form";
-import { IngestTrigger } from "@/components/feed/ingest-trigger";
 import type { FeedCard as FeedCardData } from "@/lib/types";
 
 type FeedLaneTrendProps = {
   cards: FeedCardData[];
-  /** 運用者向け操作（SNS URL 投入フォーム）を表示するか（本番では既定で false）。 */
-  adminEnabled?: boolean;
-  /** サーバー時点でのクールダウン終了時刻（ISO8601）。null なら実行可能。 */
-  cooldownUntil: string | null;
 };
 
 /**
@@ -18,7 +12,7 @@ type FeedLaneTrendProps = {
  * モバイルでは横スクロールの「速報レール」、デスクトップではグリッドに
  * 切り替え、視覚優先・高速なリズムを演出する。
  */
-export function FeedLaneTrend({ cards, adminEnabled = false, cooldownUntil }: FeedLaneTrendProps) {
+export function FeedLaneTrend({ cards }: FeedLaneTrendProps) {
   return (
     <section aria-labelledby="lane-trend-heading" className="flex flex-col gap-4">
       <header className="flex flex-col gap-1.5">
@@ -41,18 +35,7 @@ export function FeedLaneTrend({ cards, adminEnabled = false, cooldownUntil }: Fe
         <EmptyState
           variant="visual"
           title="速報はまだありません"
-          description={
-            adminEnabled
-              ? "このレーンはSNS投稿URLの追加でのみ埋まります。下のフォームにURLを貼り付けてください。"
-              : "SNSの投稿は、個別に登録されたものだけが並びます。下のボタンで確認できるのは、ブログの新着記事です。"
-          }
-          action={
-            adminEnabled ? (
-              <SubmitUrlForm compact />
-            ) : (
-              <IngestTrigger compact cooldownUntil={cooldownUntil} />
-            )
-          }
+          description="このレーンは、運営が個別に見つけたSNS投稿を追加したときのみ埋まります。新しい投稿が追加され次第、ここに表示されます。"
         />
       ) : (
         <div

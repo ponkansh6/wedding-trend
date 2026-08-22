@@ -28,15 +28,23 @@ export type CurationResult = Omit<CurationItem, "index">;
 /**
  * callGemini → JSON.parse → zod validate をまとめて行い、JSON 崩れ・
  * スキーマ不一致のときは指数バックオフで再試行する。全滅すれば null。
+ *
+ * `onGeminiCall` は `fetcher()`（＝実際に Gemini へ 1 回リクエストを送る
+ * 呼び出し）の直前に毎回呼ばれる。JSON パース失敗による再試行
+ * （`LLM_MAX_PARSE_RETRIES`）も 1 回ごとに実際の Gemini 呼び出しを伴うため、
+ * ループの各反復でカウントする（`fetcher()` の成功・失敗を問わない。
+ * 失敗した呼び出しも「実際に呼んだ」ことに変わりはないため）。
  */
 async function callAndParse<T>(
   fetcher: () => Promise<string | null>,
   schema: ZodType<T>,
   contextName: string,
+  onGeminiCall?: () => void,
 ): Promise<T | null> {
   for (let attempt = 0; attempt <= LLM_MAX_PARSE_RETRIES; attempt++) {
     let text: string | null;
     try {
+      onGeminiCall?.();
       text = await fetcher();
     } catch (err) {
       console.error(`[llm] ${contextName} call failed:`, err);
@@ -77,23 +85,32 @@ async function callAndParse<T>(
 
 const SingleCurationSchema = CurationItemSchema.omit({ index: true });
 
-/** 投稿 1 件を単体キュレーションする（バッチ失敗時のフォールバック、および SNS 単発投稿用）。 */
+/**
+ * 投稿 1 件を単体キュレーションする（バッチ失敗時のフォールバック、および SNS 単発投稿用）。
+ * `onGeminiCall` は `curatePosts()` が呼び出し回数（課金コストの有無の判定に使う
+ * `geminiCalls`）を集計するための内部向けフック。`curateSingle` を直接呼ぶ
+ * 既存の呼び出し元（`submit-url.ts` 等）は指定不要。
+ */
 export async function curateSingle(
   input: CurationInput,
-  opts?: { timeoutMs?: number },
+  opts?: { timeoutMs?: number; onGeminiCall?: () => void },
 ): Promise<CurationResult | null> {
   const prompt = buildSingleCurationPrompt(input);
   return callAndParse(
     () => callGemini(prompt, LLM_SINGLE_MAX_TOKENS, opts?.timeoutMs ?? LLM_SINGLE_TIMEOUT_MS),
     SingleCurationSchema,
     "single curation",
+    opts?.onGeminiCall,
   );
 }
 
-/** 複数投稿をバッチでキュレーションする。バッチ全体が失敗したら単体フォールバックする。 */
+/**
+ * 複数投稿をバッチでキュレーションする。バッチ全体が失敗したら単体フォールバックする。
+ * `onGeminiCall` については `curateSingle` の JSDoc を参照。
+ */
 export async function curateBatch(
   inputs: CurationInput[],
-  opts?: { timeoutMs?: number; retries?: number },
+  opts?: { timeoutMs?: number; retries?: number; onGeminiCall?: () => void },
 ): Promise<(CurationResult | null)[]> {
   if (inputs.length === 0) return [];
 
@@ -105,13 +122,16 @@ export async function curateBatch(
     () => callGemini(prompt, LLM_BATCH_MAX_TOKENS, timeoutMs, retries),
     CurationBatchResponseSchema,
     "batch curation",
+    opts?.onGeminiCall,
   );
 
   if (!parsed) {
     console.warn(
       `[llm] batch curation failed for ${inputs.length} items, falling back to single-item curation`,
     );
-    return Promise.all(inputs.map((input) => curateSingle(input)));
+    return Promise.all(
+      inputs.map((input) => curateSingle(input, { onGeminiCall: opts?.onGeminiCall })),
+    );
   }
 
   // index（1 始まり）で入力配列の位置に揃える。欠落・重複・範囲外は null で埋める。
@@ -130,7 +150,9 @@ export async function curateBatch(
     console.warn(
       `[llm] batch curation returned no usable items for ${inputs.length} items, falling back to single-item curation`,
     );
-    return Promise.all(inputs.map((input) => curateSingle(input)));
+    return Promise.all(
+      inputs.map((input) => curateSingle(input, { onGeminiCall: opts?.onGeminiCall })),
+    );
   }
 
   return aligned;
@@ -140,10 +162,27 @@ export async function curateBatch(
  * ingest ルートから呼ぶ本体。LLM_BATCH_SIZE ごとに分割し、LLM_BATCH_CONCURRENCY
  * 並列（p-limit）で実行する。CURATION_DEADLINE_MS を超えそうなバッチは
  * 着手せず null で埋めて早期に打ち切る（Route Handler の maxDuration 対策）。
- * 戻り値は inputs と同じ長さ・同じ順序（index で整列済み）。
+ * `results` は inputs と同じ長さ・同じ順序（index で整列済み）。
+ *
+ * `geminiCalls` は今回の呼び出しで実際に Gemini へリクエストを送った回数
+ * （バッチ・単体フォールバック・JSON パース再試行のすべてを合算）。
+ * 呼び出し元（`src/lib/pipeline/ingest.ts`）はこれを使って「Gemini を実際に
+ * 使ったランかどうか」（＝クールダウンを 4 時間へ延長すべきかどうか）を判定する。
+ * デッドライン超過で着手しなかったバッチはカウントされない（実際に呼んで
+ * いないため 0 でよい）。カウントは `curatePosts` 単位でリセットされる
+ * ローカルなクロージャ変数のため、並行する別の `curatePosts` 呼び出しと
+ * 混ざらない（Node の単一スレッドイベントループ上で同期的にインクリメント
+ * するため競合しない）。
  */
-export async function curatePosts(inputs: CurationInput[]): Promise<(CurationResult | null)[]> {
-  if (inputs.length === 0) return [];
+export async function curatePosts(
+  inputs: CurationInput[],
+): Promise<{ results: (CurationResult | null)[]; geminiCalls: number }> {
+  if (inputs.length === 0) return { results: [], geminiCalls: 0 };
+
+  const geminiCallCounter = { count: 0 };
+  const onGeminiCall = () => {
+    geminiCallCounter.count += 1;
+  };
 
   const batches: CurationInput[][] = [];
   for (let start = 0; start < inputs.length; start += LLM_BATCH_SIZE) {
@@ -163,14 +202,19 @@ export async function curatePosts(inputs: CurationInput[]): Promise<(CurationRes
           );
           return Promise.resolve(batch.map((): CurationResult | null => null));
         }
-        return curateBatch(batch, { timeoutMs: Math.min(LLM_BATCH_TIMEOUT_MS, remaining) });
+        return curateBatch(batch, {
+          timeoutMs: Math.min(LLM_BATCH_TIMEOUT_MS, remaining),
+          onGeminiCall,
+        });
       }),
     ),
   );
 
-  return settled.flatMap((s, i) => {
+  const results = settled.flatMap((s, i) => {
     if (s.status === "fulfilled") return s.value;
     console.error(`[llm] batch ${i} rejected unexpectedly:`, s.reason);
     return batches[i].map((): CurationResult | null => null);
   });
+
+  return { results, geminiCalls: geminiCallCounter.count };
 }

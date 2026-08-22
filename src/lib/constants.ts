@@ -68,8 +68,40 @@ export const OEMBED_CACHE_TTL_DAYS = 30;
 // ── フィード表示 ──────────────────────────────────────────────
 /** フィード 1 ページあたりのカード数。 */
 export const FEED_PAGE_SIZE = 24;
-/** getFeedCards の unstable_cache タグ。ingest / submit-url からの revalidateTag に使う。 */
-export const FEED_CACHE_TAG = "feed-cards";
+
+// ── 収集トリガー（cooldown / lease）────────────────────────────
+// 詳細な設計判断（なぜ claim/extend の 2 段階か、CAS の必要性など）は
+// `src/lib/pipeline/cooldown.ts` の JSDoc を参照。
+
+/**
+ * 収集トリガーの実行権を確保（claim）した時点で最低限押さえるクールダウン幅。
+ *
+ * 収集ボタンはオーナー限定（`/admin` の Basic 認証配下）に閉じるため、以前の
+ * ような「無認証の公開ボタン濫用を fail-closed で防ぐ」目的の値ではない。
+ * ここでの役割は、Gemini を実際に呼ばなかった「空振り」実行（例: 新着ゼロで
+ * 何もキュレーションしなかった）の再実行間隔を短く保つこと。空振りはコストが
+ * 掛かっていないので、長時間ブロックする理由がない。
+ */
+export const INGEST_BASE_COOLDOWN_MS = 15 * 60 * 1000;
+
+/**
+ * 収集ラン中に Gemini を実際に呼んだ場合、完了後にクールダウンを延長する幅。
+ * Gemini API の予算焼き付きを防ぐための実質的なレートリミットはこちらが担う
+ * （`INGEST_BASE_COOLDOWN_MS` は空振り用の短い間隔に過ぎない）。
+ */
+export const INGEST_FULL_COOLDOWN_MS = 4 * 60 * 60 * 1000;
+
+/**
+ * 収集パイプラインの実行排他（同時実行禁止）ロックの TTL。
+ *
+ * 以前は 10 分だったが、Route Handler の `maxDuration` が 60 秒である以上
+ * 10 分は過剰に長く、タイムアウトやクラッシュでリースが解放されないまま
+ * 残った場合に、最大で 9 分近く「実行中」の実体がないまま収集ボタンが
+ * 押せなくなっていた（不必要な機会損失）。2 分あれば実測実行時間
+ * （長くても 60 秒程度）に対して十分な回復余裕を保ちつつ、この機会損失を
+ * 大幅に縮小できる。
+ */
+export const INGEST_LEASE_TTL_MS = 2 * 60 * 1000;
 
 // ── HTTP ステータス ───────────────────────────────────────────
 export const HTTP_STATUS_TOO_MANY_REQUESTS = 429;

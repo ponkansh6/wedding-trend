@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { isBearerAuthorized } from "@/lib/auth";
-import { acquireIngestLease, markIngestStart, releaseIngestLease } from "@/lib/pipeline/cooldown";
+import { recordCronIngestAt } from "@/lib/db/repository";
+import { acquireIngestLease, releaseIngestLease } from "@/lib/pipeline/cooldown";
 import { runIngest } from "@/lib/pipeline/ingest";
 
 export const maxDuration = 60;
@@ -10,22 +11,26 @@ export const maxDuration = 60;
  * 実処理は `@/lib/pipeline/ingest`（`runIngest`）に一本化されており、
  * ここに実装を重複させない。
  *
- * この経路（Bearer 認証済み・Vercel Cron）は公開 UI の収集ボタンにかかる
- * 4 時間のグローバルクールダウン（`src/lib/pipeline/cooldown.ts` の
- * `claimIngestSlot` が行う *cooldown* の評価）を意図的に迂回する。Cron は
- * 1 日 1 回にしか叩かれず認証済みであるため濫用防止の対象外である（Vercel Hobby プランの Cron 実行頻度上限。詳細は `vercel.json` および spec.md §6.1 を参照）。
+ * この経路（Bearer 認証済み・Vercel Cron）は `ingest_cooldown_until`
+ * （`src/lib/pipeline/cooldown.ts` の `claimIngestSlot` / `getCooldownUntil`
+ * が扱うクールダウン）に一切触れない。以前はここが「起点時刻の無条件上書き」
+ * （旧 `markIngestStart()`）でクールダウンの基準時刻を更新していたが、収集
+ * ボタンがオーナー限定（`/admin` の Basic 認証配下）に閉じられたことで、
+ * cooldown と cron 実行の間に本来因果関係はない（cooldown は「認証済みの
+ * 手動実行を短時間に連打しない」ためのものであり、1 日 1 回しか動かない
+ * Cron の実行有無とは無関係）と整理し、cron はクールダウンの評価・更新の
+ * どちらからも完全に外した。代わりに、Cron が最後にいつ動いたかを観測する
+ * ためだけの別キー `last_cron_ingest_at` を無条件で記録する（`config` の
+ * 他のキーとは独立しており、何の判定にも使われない）。
  *
- * ただし **lease（排他ロック）はこの経路も必ず取得する**。cooldown を迂回
- * できるからといって同時実行まで許してしまうと、Cron 実行中に公開ボタンが
- * 押された場合に `runIngest()` が二重に走ってしまう（Gemini 課金二重・
- * 重複挿入レース）。`acquireIngestLease()` に失敗した場合（＝別の経路が
- * 実行中）は `runIngest()` を呼ばずに 409 を返す。
+ * ただし **lease（排他ロック）はこの経路も必ず取得する**。cooldown を
+ * 評価しないからといって同時実行まで許してしまうと、Cron 実行中に手動
+ * トリガーが押された場合に `runIngest()` が二重に走ってしまう（Gemini
+ * 課金二重・重複挿入レース）。`acquireIngestLease()` に失敗した場合
+ * （＝別の経路が実行中）は `runIngest()` を呼ばずに 409 を返す。
  *
- * lease 取得後、`runIngest()` を呼ぶ**前**に `markIngestStart()` で
- * `last_ingest_at` を実行開始時刻で更新しておく。これにより、Cron 実行の
- * 直後に公開ボタンが押されても不必要に二重実行にならない
- * （公開ボタン経路のクールダウン起点と統一するため、更新するのは
- * 「完了時刻」ではなく「実行開始時刻」である点に注意）。
+ * `runIngest("cron")` の `trigger` 引数は `last_run_summary` テレメトリに
+ * 記録される値であり、パイプラインの挙動そのものを変えない。
  */
 async function handleTrigger(request: Request): Promise<Response> {
   if (!isBearerAuthorized(request)) {
@@ -38,9 +43,16 @@ async function handleTrigger(request: Request): Promise<Response> {
     return NextResponse.json({ error: "ingest already running" }, { status: 409 });
   }
 
+  // 観測用の記録。cooldown（ingest_cooldown_until）とは独立したキーであり、
+  // 書き込みに失敗してもレスポンスを止めない（テレメトリで本処理を壊さない）。
   try {
-    await markIngestStart(now);
-    const summary = await runIngest();
+    await recordCronIngestAt(now.toISOString());
+  } catch (err) {
+    console.warn("[api/ingest] recordCronIngestAt failed (telemetry only, continuing):", err);
+  }
+
+  try {
+    const summary = await runIngest("cron");
     return NextResponse.json(summary);
   } finally {
     await releaseIngestLease(now);

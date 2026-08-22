@@ -1,8 +1,9 @@
-import { revalidateTag } from "next/cache";
-import { CURATION_BUDGET, FEED_CACHE_TAG, SOURCE_ITEM_LIMIT } from "@/lib/constants";
+import { CURATION_BUDGET, SOURCE_ITEM_LIMIT } from "@/lib/constants";
 import {
   getPostsByUrls,
   markCurated,
+  readLastRunSummary,
+  saveLastRunSummary,
   upsertPosts,
   type PostUpsertInput,
 } from "@/lib/db/repository";
@@ -15,6 +16,12 @@ import { canonicalizeUrl } from "@/lib/url";
  * RSS 巡回パイプラインの実行結果。
  * `/api/ingest`（cron / curl）と Server Action（UI ボタン）の両方から
  * 同じ形で結果を受け取れるよう、シリアライズ可能な値のみで構成する。
+ *
+ * `geminiCalls` は今回のランで実際に Gemini API を呼んだ回数
+ * （`curatePosts()` からそのまま伝播する）。0 なら Gemini の課金コストが
+ * 一切発生していないことを意味し、呼び出し元はこれを使ってクールダウンを
+ * 4 時間へ延長すべきかどうかを判定する（`src/lib/pipeline/cooldown.ts` の
+ * `extendIngestCooldownAfterRun` を参照）。
  */
 export type IngestSummary = {
   fetched: number;
@@ -22,7 +29,85 @@ export type IngestSummary = {
   curated: number;
   skipped: number;
   errors: string[];
+  geminiCalls: number;
 };
+
+/** `runIngest()` を呼んだ経路。`last_run_summary` のテレメトリに残す。 */
+export type IngestTrigger = "manual" | "cron";
+
+/**
+ * `config` の `last_run_summary` に保存する直近ラン結果のスキーマ。
+ *
+ * `finishedAt` はラン開始時に一旦 `null` で保存し、完了時に確定させる
+ * （`runIngest()` 冒頭と末尾の 2 回の `saveRunSummarySafely()` 呼び出しを
+ * 参照）。そのため、もし `finishedAt` が `null` のレコードが残っていれば、
+ * 前回のランが完了しなかった（タイムアウト・クラッシュ等）と判定できる。
+ */
+export interface LastRunSummary {
+  startedAt: string;
+  finishedAt: string | null;
+  fetched: number;
+  inserted: number;
+  curated: number;
+  geminiCalls: number;
+  errorCount: number;
+  trigger: IngestTrigger;
+}
+
+/**
+ * `last_run_summary` の保存はテレメトリであり、本処理（収集ラン）を落として
+ * はならない。書き込み経路（`saveLastRunSummary`）自体は既存の設計方針通り
+ * fail-closed（例外を投げる）のままにしているため、ここで意図的に catch して
+ * 握りつぶす（詳細は `saveLastRunSummary` の JSDoc を参照）。
+ */
+async function saveRunSummarySafely(summary: LastRunSummary): Promise<void> {
+  try {
+    await saveLastRunSummary(JSON.stringify(summary), new Date().toISOString());
+  } catch (err) {
+    console.warn("[ingest] failed to save last_run_summary (telemetry only, continuing):", err);
+  }
+}
+
+/**
+ * 直近の収集ラン結果を返す。UI からの利用は後続タスクが行う。
+ *
+ * **フェイルソフト**: `last_run_summary` が未保存、パース不能、または
+ * 期待する形（`LastRunSummary`）と一致しない場合は `null` を返す
+ * （テレメトリの読み取りが例外で他機能を巻き込まないようにするため）。
+ */
+export async function getLastRunSummary(): Promise<LastRunSummary | null> {
+  const raw = await readLastRunSummary();
+  if (!raw) return null;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    console.warn("[ingest] getLastRunSummary: JSON parse failed:", err);
+    return null;
+  }
+
+  if (!isLastRunSummary(parsed)) {
+    console.warn("[ingest] getLastRunSummary: malformed shape, ignoring stored value");
+    return null;
+  }
+  return parsed;
+}
+
+function isLastRunSummary(value: unknown): value is LastRunSummary {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.startedAt === "string" &&
+    (v.finishedAt === null || typeof v.finishedAt === "string") &&
+    typeof v.fetched === "number" &&
+    typeof v.inserted === "number" &&
+    typeof v.curated === "number" &&
+    typeof v.geminiCalls === "number" &&
+    typeof v.errorCount === "number" &&
+    (v.trigger === "manual" || v.trigger === "cron")
+  );
+}
 
 /**
  * SOURCE_REGISTRY は各アダプタごとに固有のアイテム型 T を持つが、ここではソース
@@ -44,8 +129,27 @@ async function fetchAndNormalize(id: (typeof SOURCE_IDS)[number]): Promise<PostU
  * RSS 巡回 → 重複排除 → upsert → LLM キュレーション → フィードキャッシュ失効までの
  * 一連のパイプラインを実行する。`/api/ingest` の Route Handler（curl / Vercel Cron）と
  * `triggerIngest` Server Action（UI の取得ボタン）の両方から呼ばれる唯一の実装。
+ *
+ * `trigger` はテレメトリ（`last_run_summary`）に残すためだけの値で、
+ * パイプラインの挙動そのものは変えない。呼び出し元を指定しない場合は
+ * `"manual"`（UI ボタン経路）を既定値とする。
  */
-export async function runIngest(): Promise<IngestSummary> {
+export async function runIngest(trigger: IngestTrigger = "manual"): Promise<IngestSummary> {
+  const startedAt = new Date().toISOString();
+  // ラン開始時点でプレースホルダーを保存しておく。finishedAt が null のまま
+  // このレコードが残っていれば、前回のランが完了しなかった（タイムアウト・
+  // クラッシュ等）と判定できる（詳細は LastRunSummary の JSDoc を参照）。
+  await saveRunSummarySafely({
+    startedAt,
+    finishedAt: null,
+    fetched: 0,
+    inserted: 0,
+    curated: 0,
+    geminiCalls: 0,
+    errorCount: 0,
+    trigger,
+  });
+
   const errors: string[] = [];
 
   // 1. 全ブログアダプタを並列取得（1 ソースの失敗が他ソースを止めないよう個別に catch）
@@ -103,11 +207,13 @@ export async function runIngest(): Promise<IngestSummary> {
 
   // 5. LLM キュレーション → 結果を保存
   let curated = 0;
+  let geminiCalls = 0;
   if (toCurate.length > 0) {
     try {
-      const results = await curatePosts(
+      const { results, geminiCalls: calls } = await curatePosts(
         toCurate.map((post) => ({ title: post.originalTitle, excerpt: post.originalExcerpt })),
       );
+      geminiCalls = calls;
 
       const updates = toCurate
         .map((post, i) => {
@@ -136,15 +242,29 @@ export async function runIngest(): Promise<IngestSummary> {
     }
   }
 
-  // 6. フィードキャッシュを即時失効させる（外部トリガー・UI ボタンいずれの呼び出しでも
-  //    即時反映が必要なため、Next.js 16 の revalidateTag では { expire: 0 } を明示する）。
-  revalidateTag(FEED_CACHE_TAG, { expire: 0 });
+  // 6. `/` は force-dynamic（`src/app/page.tsx`）でキャッシュを経由しないため、
+  //    以前ここにあったフィードキャッシュの明示的失効（revalidateTag）は不要になった。
 
-  return {
+  const summary: IngestSummary = {
     fetched: rawPosts.length,
     inserted: upsertResult.succeeded.length,
     curated,
     skipped,
     errors,
+    geminiCalls,
   };
+
+  // 7. 完了時点で last_run_summary を全体上書きする（finishedAt を確定させる）。
+  await saveRunSummarySafely({
+    startedAt,
+    finishedAt: new Date().toISOString(),
+    fetched: summary.fetched,
+    inserted: summary.inserted,
+    curated: summary.curated,
+    geminiCalls: summary.geminiCalls,
+    errorCount: summary.errors.length,
+    trigger,
+  });
+
+  return summary;
 }

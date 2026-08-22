@@ -1,10 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-vi.mock("next/cache", () => ({
-  unstable_cache: (fn: any) => fn,
-  revalidateTag: vi.fn(),
-}));
-
 // vi.mock ファクトリより先に評価される必要があるため vi.hoisted() で宣言する
 // （通常の const 宣言だと vi.mock 側の巻き上げより後に実行され参照エラーになる）。
 const { fetchOEmbedMock, detectEmbedProviderMock, curateSingleMock } = vi.hoisted(() => ({
@@ -38,7 +33,6 @@ vi.mock("@/lib/db/repository", () => ({
   getPostsByUrls: getPostsByUrlsMock,
 }));
 
-import { revalidateTag } from "next/cache";
 import { runSubmitUrl } from "@/lib/pipeline/submit-url";
 
 describe("runSubmitUrl (src/lib/pipeline/submit-url.ts)", () => {
@@ -98,7 +92,7 @@ describe("runSubmitUrl (src/lib/pipeline/submit-url.ts)", () => {
     expect(upsertPostsMock).not.toHaveBeenCalled();
   });
 
-  it("happy path: builds a FeedCard from oEmbed + LLM curation and revalidates the feed cache", async () => {
+  it("happy path: builds a FeedCard from oEmbed + LLM curation", async () => {
     const outcome = await runSubmitUrl("https://www.instagram.com/p/ABC123/?utm_source=ig");
 
     expect(outcome.ok).toBe(true);
@@ -106,7 +100,6 @@ describe("runSubmitUrl (src/lib/pipeline/submit-url.ts)", () => {
     expect(outcome.card?.aiTitle).toBe("AI Curated Title");
     expect(outcome.card?.embedProvider).toBe("instagram");
     expect(outcome.card?.id).toBe(42);
-    expect(revalidateTag).toHaveBeenCalledWith("feed-cards", { expire: 0 });
     expect(saveEmbedMock).toHaveBeenCalledTimes(1);
   });
 
@@ -131,7 +124,6 @@ describe("runSubmitUrl (src/lib/pipeline/submit-url.ts)", () => {
 
     expect(outcome).toEqual({ ok: false, reason: "save_failed", card: null });
     expect(markCuratedMock).not.toHaveBeenCalled();
-    expect(revalidateTag).not.toHaveBeenCalled();
   });
 
   it("uses the optional note as supplementary excerpt text when oEmbed returns no title", async () => {

@@ -72,10 +72,22 @@ export const posts = sqliteTable(
 
 /**
  * アプリケーション全体のメタ情報を保持する key-value テーブル。
- * 現状の唯一の用途は収集トリガーのグローバルクールダウン
- * （key: "last_ingest_at" — `src/lib/pipeline/cooldown.ts` 参照）。
  * 行数がごく少数の想定のため、値の型ごとにカラムを分けず単一の
- * key-value 構造に寄せている。
+ * key-value 構造に寄せている。現状 4 つの key を持つ
+ * （詳細は `src/lib/db/repository.ts` および `src/lib/pipeline/cooldown.ts` 参照）:
+ *
+ * - `"ingest_cooldown_until"` — 収集トリガーのクールダウンの**期限そのもの**
+ *   （起点時刻ではなく絶対時刻の ISO8601 文字列）。`claimIngestSlot()` が
+ *   実行開始時に 15 分だけ確保し（claim）、`runIngest()` が実際に Gemini を
+ *   呼んでいれば `extendIngestCooldownAfterRun()` が 4 時間へ延長する（extend）。
+ * - `"ingest_lease_until"` — 収集パイプラインの実行排他ロック（lease）の期限。
+ *   全経路（`/admin` の手動トリガー・Vercel Cron）が実行前に必ず取得し、
+ *   実行完了後に解放する。
+ * - `"last_cron_ingest_at"` — Vercel Cron 経路が最後に実行された時刻の観測用
+ *   記録。cooldown・lease とは独立しており、何の判定にも使われない。
+ * - `"last_run_summary"` — 直近の収集ラン結果を保持する JSON 文字列
+ *   （`src/lib/pipeline/ingest.ts` の `LastRunSummary`）。他の 3 key と異なり
+ *   値は ISO8601 ではなく JSON。
  */
 export const config = sqliteTable("config", {
   key: text("key").primaryKey(),

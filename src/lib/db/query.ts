@@ -1,18 +1,34 @@
 import { and, desc, eq, isNotNull } from "drizzle-orm";
-import { unstable_cache } from "next/cache";
 import { db } from "./index";
 import { posts } from "./schema";
-import { FEED_CACHE_TAG } from "@/lib/constants";
 import type { Category, FeedCard, SourceType, TrendTag } from "@/lib/types";
 
-async function fetchFeedCards(sourceType: SourceType, limit: number): Promise<FeedCard[]> {
+/**
+ * 公開済みフィードカードを新しい順に取得する。
+ *
+ * NOTE: 以前は `unstable_cache`（5分・`revalidateTag` 手動失効）でラップして
+ * いたが撤去した。理由: `/` は `export const dynamic = "force-dynamic"`
+ * （`src/app/page.tsx`）になり、そもそもこの関数の呼び出し自体が
+ * リクエストごとに発生する。トラフィックはほぼゼロで、クエリも最大12件×2レーンの
+ * 単純な SELECT に過ぎないため、キャッシュ層を維持するコスト（デプロイをまたいで
+ * stale なエントリが stale-while-revalidate で配信され続け、収集直後にオーナーが
+ * 結果を確認できない）の方が ISR の利得より大きいと判断した。詳細は
+ * `src/app/page.tsx` のコメントを参照。
+ *
+ * UI はこのシグネチャのみに依存する。DB 未接続・空でも例外を投げず [] を返す
+ * （fail-soft 契約はキャッシュ撤去後も維持する）。
+ */
+export async function getFeedCards(params: {
+  sourceType: SourceType;
+  limit: number;
+}): Promise<FeedCard[]> {
   try {
     const rows = await db
       .select()
       .from(posts)
       .where(
         and(
-          eq(posts.sourceType, sourceType),
+          eq(posts.sourceType, params.sourceType),
           eq(posts.status, "published"),
           isNotNull(posts.aiTitle),
           isNotNull(posts.aiSummary),
@@ -21,7 +37,7 @@ async function fetchFeedCards(sourceType: SourceType, limit: number): Promise<Fe
       // createdAt（取り込み順）を新着基準にする。publishedAt は元記事側の情報が
       // 欠けている場合に null になりうるため、並び順の基準には使わない。
       .orderBy(desc(posts.createdAt))
-      .limit(limit);
+      .limit(params.limit);
 
     // category / tag / aiTitle / aiSummary は SQL 条件で non-null のはずだが、
     // 型安全のため念のため防御的にフィルタする。
@@ -48,33 +64,6 @@ async function fetchFeedCards(sourceType: SourceType, limit: number): Promise<Fe
     });
   } catch (err) {
     console.warn("[db] getFeedCards query error:", err);
-    return [];
-  }
-}
-
-/**
- * next/cache の unstable_cache でラップ。ingest / submit-url 側は
- * revalidateTag(FEED_CACHE_TAG, ...) を呼んで反映させる。
- * NOTE: Next.js 16 では use cache directive が推奨だが、cacheComponents の
- * opt-in が必要なため、この API ルート主体の構成では unstable_cache を採用する。
- */
-const getFeedCardsCached = unstable_cache(fetchFeedCards, ["feed-cards"], {
-  tags: [FEED_CACHE_TAG],
-  revalidate: 300,
-});
-
-/**
- * 公開済みフィードカードを新しい順に取得する。
- * NOTE: UI はこのシグネチャのみに依存する。DB 未接続・空でも例外を投げず [] を返す。
- */
-export async function getFeedCards(params: {
-  sourceType: SourceType;
-  limit: number;
-}): Promise<FeedCard[]> {
-  try {
-    return await getFeedCardsCached(params.sourceType, params.limit);
-  } catch (err) {
-    console.warn("[db] getFeedCards cache error:", err);
     return [];
   }
 }

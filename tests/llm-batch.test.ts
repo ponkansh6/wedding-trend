@@ -195,17 +195,57 @@ describe("curatePosts", () => {
       .mockResolvedValueOnce(textResponse(batchJson(firstBatchItems)))
       .mockResolvedValueOnce(textResponse(batchJson(secondBatchItems)));
 
-    const results = await curatePosts(inputs);
+    const { results, geminiCalls } = await curatePosts(inputs);
 
     expect(results).toHaveLength(total);
     expect(results[0]?.title).toBe("結果1");
     expect(results[LLM_BATCH_SIZE - 1]?.title).toBe(`結果${LLM_BATCH_SIZE}`);
     expect(results[LLM_BATCH_SIZE]?.title).toBe(`結果${total}`);
+    // 2 バッチに分割されているため、実際に Gemini を呼んだ回数も 2。
+    expect(geminiCalls).toBe(2);
   });
 
-  it("returns an empty array for empty input without calling the LLM", async () => {
-    const results = await curatePosts([]);
+  it("returns an empty array and geminiCalls: 0 for empty input without calling the LLM", async () => {
+    const { results, geminiCalls } = await curatePosts([]);
     expect(results).toEqual([]);
+    expect(geminiCalls).toBe(0);
     expect(mockGenerateContent).not.toHaveBeenCalled();
+  });
+
+  it("counts a Gemini call even when the batch response is unusable and it falls back to single-item curation", async () => {
+    // バッチ呼び出し 1 回（失敗）+ 単体フォールバック 2 回 = 合計 3 回。
+    mockGenerateContent
+      .mockResolvedValueOnce(textResponse("not json"))
+      .mockResolvedValueOnce(textResponse("still not json"))
+      .mockResolvedValueOnce(textResponse("nope"))
+      .mockResolvedValueOnce(
+        textResponse(
+          JSON.stringify({
+            title: "個別1",
+            summary: "あ".repeat(80),
+            category: "その他",
+            tag: "trend",
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(
+        textResponse(
+          JSON.stringify({
+            title: "個別2",
+            summary: "い".repeat(80),
+            category: "その他",
+            tag: "classic",
+          }),
+        ),
+      );
+
+    const { results, geminiCalls } = await curatePosts([
+      { title: "投稿1", excerpt: null },
+      { title: "投稿2", excerpt: null },
+    ]);
+
+    expect(results[0]?.title).toBe("個別1");
+    expect(results[1]?.title).toBe("個別2");
+    expect(geminiCalls).toBe(5);
   });
 });

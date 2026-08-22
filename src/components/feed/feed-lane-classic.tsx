@@ -1,23 +1,21 @@
 import { Landmark } from "lucide-react";
 import { FeedCard } from "@/components/feed/feed-card";
 import { EmptyState } from "@/components/feed/empty-state";
-import { IngestTrigger } from "@/components/feed/ingest-trigger";
 import type { FeedCard as FeedCardData } from "@/lib/types";
 
 type FeedLaneClassicProps = {
   cards: FeedCardData[];
-  /** サーバー時点でのクールダウン終了時刻（ISO8601）。null なら実行可能。 */
-  cooldownUntil: string | null;
 };
 
 /**
  * 下段: 満足度の高い王道・定番（sourceType: "blog"）。
  * 卒花ブログのレポート記事を、密度高めの縦リストで落ち着いて読ませる。
  * 上段の「速い」リズムと対比する「じっくり」のリズム。
- * このレーンを埋める収集操作は adminEnabled に関わらず常に表示する
- * （訪問者にとって唯一の前進手段のため）。
+ * このレーンを埋める収集は Vercel Cron による自動巡回（1日1回。詳細は
+ * spec.md §6.1）と、オーナーが `/admin` から行う手動トリガーの 2 経路のみで、
+ * 訪問者が操作できる導線は存在しない。
  */
-export function FeedLaneClassic({ cards, cooldownUntil }: FeedLaneClassicProps) {
+export function FeedLaneClassic({ cards }: FeedLaneClassicProps) {
   return (
     <section aria-labelledby="lane-classic-heading" className="flex flex-col gap-4">
       <header className="flex flex-col gap-1.5">
@@ -40,8 +38,7 @@ export function FeedLaneClassic({ cards, cooldownUntil }: FeedLaneClassicProps) 
         <EmptyState
           variant="editorial"
           title="定番の体験談はまだありません"
-          description="登録している卒花ブログの新着記事は、まだ取り込まれていません。下のボタンから確認できます。"
-          action={<IngestTrigger compact cooldownUntil={cooldownUntil} />}
+          description="登録している卒花ブログの新着記事は、まだ取り込まれていません。新着は自動で定期的に確認されます。"
         />
       ) : (
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">

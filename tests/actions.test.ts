@@ -4,22 +4,29 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // （通常の const 宣言だと vi.mock 側の巻き上げより後に実行され参照エラーになる）。
 const {
   runIngestMock,
+  getLastRunSummaryMock,
   runSubmitUrlMock,
   acquireIngestLeaseMock,
   releaseIngestLeaseMock,
   claimIngestSlotMock,
+  extendIngestCooldownAfterRunMock,
   getCooldownUntilMock,
+  isBasicAuthorizedMock,
 } = vi.hoisted(() => ({
   runIngestMock: vi.fn(),
+  getLastRunSummaryMock: vi.fn(),
   runSubmitUrlMock: vi.fn(),
   acquireIngestLeaseMock: vi.fn(),
   releaseIngestLeaseMock: vi.fn(),
   claimIngestSlotMock: vi.fn(),
+  extendIngestCooldownAfterRunMock: vi.fn(),
   getCooldownUntilMock: vi.fn(),
+  isBasicAuthorizedMock: vi.fn(),
 }));
 
 vi.mock("@/lib/pipeline/ingest", () => ({
   runIngest: runIngestMock,
+  getLastRunSummary: getLastRunSummaryMock,
 }));
 
 vi.mock("@/lib/pipeline/submit-url", () => ({
@@ -30,67 +37,123 @@ vi.mock("@/lib/pipeline/cooldown", () => ({
   acquireIngestLease: acquireIngestLeaseMock,
   releaseIngestLease: releaseIngestLeaseMock,
   claimIngestSlot: claimIngestSlotMock,
+  extendIngestCooldownAfterRun: extendIngestCooldownAfterRunMock,
   getCooldownUntil: getCooldownUntilMock,
 }));
 
-import {
-  adminControlsEnabled,
-  getIngestCooldown,
-  submitSnsUrl,
-  triggerIngest,
-} from "@/app/actions";
+vi.mock("@/lib/auth", () => ({
+  isBasicAuthorized: isBasicAuthorizedMock,
+}));
+
+// isBasicAuthorized() 自体は @/lib/auth のモックで完全に差し替えているため、
+// next/headers の headers() が返す実際の中身はテストの結果に影響しない。
+// ここでは Server Action が呼び出し時に headers() を await できることだけを
+// 保証すればよい。
+vi.mock("next/headers", () => ({
+  headers: vi.fn().mockResolvedValue(new Headers()),
+}));
+
+import { getIngestCooldown, getIngestStatus, submitSnsUrl, triggerIngest } from "@/app/actions";
 
 const JAPANESE_CHAR = /[ぁ-んァ-ヶ一-龠]/;
 
-describe("adminControlsEnabled", () => {
-  afterEach(() => {
-    vi.unstubAllEnvs();
+const CLAIMED_COOLDOWN_UNTIL = "2026-08-22T04:15:00.000Z";
+const EXTENDED_COOLDOWN_UNTIL = "2026-08-22T08:00:00.000Z";
+
+describe("getIngestCooldown", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
   });
 
-  it("is enabled outside production regardless of the flag", async () => {
-    vi.stubEnv("NODE_ENV", "development");
-    vi.stubEnv("ENABLE_ADMIN_CONTROLS", undefined);
-    await expect(adminControlsEnabled()).resolves.toBe(true);
-  });
+  it("wraps getCooldownUntil() as { cooldownUntil }", async () => {
+    getCooldownUntilMock.mockResolvedValue(null);
+    await expect(getIngestCooldown()).resolves.toEqual({ cooldownUntil: null });
 
-  it("is disabled in production when the flag is unset", async () => {
-    vi.stubEnv("NODE_ENV", "production");
-    vi.stubEnv("ENABLE_ADMIN_CONTROLS", undefined);
-    await expect(adminControlsEnabled()).resolves.toBe(false);
-  });
-
-  it('is enabled in production when the flag is exactly "1"', async () => {
-    vi.stubEnv("NODE_ENV", "production");
-    vi.stubEnv("ENABLE_ADMIN_CONTROLS", "1");
-    await expect(adminControlsEnabled()).resolves.toBe(true);
+    getCooldownUntilMock.mockResolvedValue(CLAIMED_COOLDOWN_UNTIL);
+    await expect(getIngestCooldown()).resolves.toEqual({
+      cooldownUntil: CLAIMED_COOLDOWN_UNTIL,
+    });
   });
 });
 
-const CLAIMED_COOLDOWN_UNTIL = "2026-08-22T04:00:00.000Z";
+describe("getIngestStatus", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("returns null without calling getLastRunSummary() when Basic auth fails (does not leak whether a run history exists)", async () => {
+    isBasicAuthorizedMock.mockReturnValue(false);
+
+    await expect(getIngestStatus()).resolves.toBeNull();
+    expect(getLastRunSummaryMock).not.toHaveBeenCalled();
+  });
+
+  it("returns getLastRunSummary()'s value when authorized", async () => {
+    isBasicAuthorizedMock.mockReturnValue(true);
+    const summary = {
+      startedAt: "2026-08-22T04:00:00.000Z",
+      finishedAt: "2026-08-22T04:00:30.000Z",
+      fetched: 5,
+      inserted: 3,
+      curated: 3,
+      geminiCalls: 1,
+      errorCount: 0,
+      trigger: "manual" as const,
+    };
+    getLastRunSummaryMock.mockResolvedValue(summary);
+
+    await expect(getIngestStatus()).resolves.toEqual(summary);
+  });
+
+  it("returns null (not an error) when authorized but no run has happened yet", async () => {
+    isBasicAuthorizedMock.mockReturnValue(true);
+    getLastRunSummaryMock.mockResolvedValue(null);
+
+    await expect(getIngestStatus()).resolves.toBeNull();
+  });
+});
 
 describe("triggerIngest", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // 明示的に上書きしないテストのデフォルトは「lease を取得でき、クールダウンも
-    // 空いていた」状態。claimed: true でも cooldownUntil は必ず入る
-    // （今回の奪取で新たに開始した枠の満了時刻）。
+    // 明示的に上書きしないテストのデフォルトは「認証済み・lease を取得でき、
+    // クールダウンも空いていた」状態。claimed: true でも cooldownUntil は必ず
+    // 入る（今回の奪取で新たに開始した 15 分の枠の満了時刻）。
+    isBasicAuthorizedMock.mockReturnValue(true);
     acquireIngestLeaseMock.mockResolvedValue(true);
     releaseIngestLeaseMock.mockResolvedValue(undefined);
     claimIngestSlotMock.mockResolvedValue({
       claimed: true,
       cooldownUntil: CLAIMED_COOLDOWN_UNTIL,
     });
+    extendIngestCooldownAfterRunMock.mockResolvedValue(undefined);
+    // 既定では「延長は行われず、claim 時点の 15 分の枠がそのまま有効」を模す。
+    getCooldownUntilMock.mockResolvedValue(CLAIMED_COOLDOWN_UNTIL);
   });
   afterEach(() => {
     vi.unstubAllEnvs();
   });
 
-  // 収集ボタンは無認証で本番公開される方針のため、triggerIngest は
-  // adminControlsEnabled() のガードを持たない。submitSnsUrl とは異なり
-  // 公開範囲を広げること自体が意図した変更である（下の「回帰防止」テスト参照）。
+  it("returns a fixed public message and never touches lease/cooldown/runIngest when Basic auth fails", async () => {
+    isBasicAuthorizedMock.mockReturnValue(false);
+
+    const result = await triggerIngest();
+
+    expect(result.ok).toBe(false);
+    expect(result.ran).toBe(false);
+    expect(result.busy).toBe(false);
+    expect(result.cooldownUntil).toBeNull();
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]).toMatch(JAPANESE_CHAR);
+    // 認証失敗は「無効になっています」の固定文言であり、生の認証エラーの
+    // 内部情報（どちらの資格情報が一致しなかったか等）を含まない。
+    expect(result.errors[0]).not.toMatch(/user|password|auth/i);
+    expect(acquireIngestLeaseMock).not.toHaveBeenCalled();
+    expect(claimIngestSlotMock).not.toHaveBeenCalled();
+    expect(runIngestMock).not.toHaveBeenCalled();
+  });
 
   it("does not call claimIngestSlot or runIngest, and reports busy:true, when the lease cannot be acquired (another execution — e.g. cron — is running)", async () => {
-    vi.stubEnv("NODE_ENV", "development");
     acquireIngestLeaseMock.mockResolvedValue(false);
     getCooldownUntilMock.mockResolvedValue(null);
 
@@ -122,7 +185,6 @@ describe("triggerIngest", () => {
   });
 
   it("does not call runIngest, releases the lease, and reports ran:false/busy:false plus the cooldown deadline when the slot cannot be claimed", async () => {
-    vi.stubEnv("NODE_ENV", "development");
     const cooldownUntil = "2026-08-22T04:00:00.000Z";
     claimIngestSlotMock.mockResolvedValue({ claimed: false, cooldownUntil });
 
@@ -140,20 +202,24 @@ describe("triggerIngest", () => {
     expect(runIngestMock).not.toHaveBeenCalled();
     // クールダウン中で見送る場合、次の呼び出しをブロックしないよう lease を解放する。
     expect(releaseIngestLeaseMock).toHaveBeenCalledTimes(1);
+    // クールダウン判定のみで完了しており、延長ロジックには到達しない。
+    expect(extendIngestCooldownAfterRunMock).not.toHaveBeenCalled();
   });
 
-  it("wraps runIngest's summary into an IngestResult with ok:true, ran:true, busy:false, and echoes the claimed cooldownUntil (not null)", async () => {
-    vi.stubEnv("NODE_ENV", "development");
+  it("wraps runIngest's summary into an IngestResult with ok:true/ran:true/busy:false, calls runIngest('manual'), and extends the cooldown based on geminiCalls", async () => {
     runIngestMock.mockResolvedValue({
       fetched: 3,
       inserted: 2,
       curated: 2,
       skipped: 1,
       errors: [],
+      geminiCalls: 2,
     });
+    getCooldownUntilMock.mockResolvedValue(EXTENDED_COOLDOWN_UNTIL);
 
     const result = await triggerIngest();
 
+    expect(runIngestMock).toHaveBeenCalledWith("manual");
     expect(result).toEqual({
       ok: true,
       ran: true,
@@ -163,14 +229,58 @@ describe("triggerIngest", () => {
       curated: 2,
       skipped: 1,
       errors: [],
-      cooldownUntil: CLAIMED_COOLDOWN_UNTIL,
+      cooldownUntil: EXTENDED_COOLDOWN_UNTIL,
     });
-    // UI の誤判定を防ぐ回帰テストの本体: 実行して成功した場合、
-    // ran は true（cooldownUntil の非 null だけでは「見送り」と誤解されるため）。
-    expect(result.ran).toBe(true);
-    expect(result.cooldownUntil).not.toBeNull();
+    // Gemini を実際に呼んだ回数（geminiCalls）をそのまま延長ロジックへ渡す。
+    expect(extendIngestCooldownAfterRunMock).toHaveBeenCalledWith(
+      CLAIMED_COOLDOWN_UNTIL,
+      2,
+      expect.any(Date),
+    );
+    // 延長後の実際の値は getCooldownUntil() で読み直す。
+    expect(getCooldownUntilMock).toHaveBeenCalled();
     // 成功時も lease を解放する（finally）。
     expect(releaseIngestLeaseMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("still calls extendIngestCooldownAfterRun with geminiCalls:0 for a no-op run (Gemini not called), and the base 15-minute cooldown is left in place", async () => {
+    runIngestMock.mockResolvedValue({
+      fetched: 0,
+      inserted: 0,
+      curated: 0,
+      skipped: 0,
+      errors: [],
+      geminiCalls: 0,
+    });
+    // extendIngestCooldownAfterRun 自体は geminiCalls<=0 のとき何もしない
+    // （src/lib/pipeline/cooldown.ts 側の契約）ため、DB 上の値は claim 時点の
+    // 15 分の枠のまま変わらない。
+    getCooldownUntilMock.mockResolvedValue(CLAIMED_COOLDOWN_UNTIL);
+
+    const result = await triggerIngest();
+
+    expect(extendIngestCooldownAfterRunMock).toHaveBeenCalledWith(
+      CLAIMED_COOLDOWN_UNTIL,
+      0,
+      expect.any(Date),
+    );
+    expect(result.cooldownUntil).toBe(CLAIMED_COOLDOWN_UNTIL);
+  });
+
+  it("falls back to the claimed cooldownUntil when getCooldownUntil() cannot resolve the current value after extension", async () => {
+    runIngestMock.mockResolvedValue({
+      fetched: 1,
+      inserted: 1,
+      curated: 1,
+      skipped: 0,
+      errors: [],
+      geminiCalls: 1,
+    });
+    getCooldownUntilMock.mockResolvedValue(null);
+
+    const result = await triggerIngest();
+
+    expect(result.cooldownUntil).toBe(CLAIMED_COOLDOWN_UNTIL);
   });
 
   it("sanitizes runIngest's per-source errors: the public response reports only a count, never the raw messages", async () => {
@@ -183,6 +293,7 @@ describe("triggerIngest", () => {
         "hatena-bookmark: fetch failed https://internal.example.com/secret-path",
         "curation failed: GoogleGenAI: 500 Internal error at https://generativelanguage.googleapis.com/...",
       ],
+      geminiCalls: 1,
     });
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
@@ -198,9 +309,9 @@ describe("triggerIngest", () => {
     errorSpy.mockRestore();
   });
 
-  it("never throws and never leaks the raw exception message: catches an error from runIngest, returns ok:false with ran:true/busy:false, a fixed public message, and still reports the claimed cooldownUntil (regression guard: must not be null)", async () => {
-    vi.stubEnv("NODE_ENV", "development");
+  it("never throws and never leaks the raw exception message: catches an error from runIngest, returns ok:false with ran:true/busy:false, a fixed public message, force-extends the cooldown to the safe (budget-protecting) side, and still reports a non-null cooldownUntil", async () => {
     runIngestMock.mockRejectedValue(new Error("connect ECONNREFUSED internal-db.example.com:5432"));
+    getCooldownUntilMock.mockResolvedValue(EXTENDED_COOLDOWN_UNTIL);
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     const result = await triggerIngest();
@@ -217,13 +328,42 @@ describe("triggerIngest", () => {
     expect(result.errors[0]).not.toContain("internal-db.example.com");
     // 実際の例外はサーバーログにのみ出す。
     expect(errorSpy).toHaveBeenCalled();
-    errorSpy.mockRestore();
-    // runIngest が失敗しても実行権の消費（クールダウンの開始）は claimIngestSlot()
-    // の時点で確定済みであり、その事実を戻り値に正しく反映する。null を返すと
-    // UI が「今すぐ実行可能」と誤解し、押すとクールダウン拒否になる不整合が生じる。
-    expect(result.cooldownUntil).toBe(CLAIMED_COOLDOWN_UNTIL);
+    // runIngest() が例外を投げた場合、Gemini を呼んだかどうか不明なため安全側
+    // （予算保護優先）に倒し、無条件で4時間への延長を試みる（geminiCalls に
+    // 実際の回数ではなく正の値を渡す）。
+    expect(extendIngestCooldownAfterRunMock).toHaveBeenCalledWith(
+      CLAIMED_COOLDOWN_UNTIL,
+      expect.any(Number),
+      expect.any(Date),
+    );
+    const [, geminiCallsArg] = extendIngestCooldownAfterRunMock.mock.calls[0] ?? [];
+    expect(geminiCallsArg).toBeGreaterThan(0);
+    expect(result.cooldownUntil).toBe(EXTENDED_COOLDOWN_UNTIL);
     expect(result.cooldownUntil).not.toBeNull();
+    errorSpy.mockRestore();
     // 失敗時も lease を解放する（finally）。
+    expect(releaseIngestLeaseMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not fail the Server Action when extendIngestCooldownAfterRun itself throws; falls back to the value read from getCooldownUntil()", async () => {
+    runIngestMock.mockResolvedValue({
+      fetched: 1,
+      inserted: 1,
+      curated: 1,
+      skipped: 0,
+      errors: [],
+      geminiCalls: 1,
+    });
+    extendIngestCooldownAfterRunMock.mockRejectedValue(new Error("SQLITE_BUSY"));
+    getCooldownUntilMock.mockResolvedValue(CLAIMED_COOLDOWN_UNTIL);
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const result = await triggerIngest();
+
+    expect(result.ok).toBe(true);
+    expect(result.cooldownUntil).toBe(CLAIMED_COOLDOWN_UNTIL);
+    expect(errorSpy).toHaveBeenCalled();
+    errorSpy.mockRestore();
     expect(releaseIngestLeaseMock).toHaveBeenCalledTimes(1);
   });
 
@@ -277,15 +417,15 @@ describe("triggerIngest", () => {
     errorSpy.mockRestore();
   });
 
-  it("runs even in a production-like environment with ENABLE_ADMIN_CONTROLS unset (public-button regression guard)", async () => {
+  it("does not branch on NODE_ENV: runs identically in a production-like environment as long as Basic auth succeeds (regression guard against reintroducing a dev/prod fail-open split)", async () => {
     vi.stubEnv("NODE_ENV", "production");
-    vi.stubEnv("ENABLE_ADMIN_CONTROLS", undefined);
     runIngestMock.mockResolvedValue({
       fetched: 1,
       inserted: 1,
       curated: 1,
       skipped: 0,
       errors: [],
+      geminiCalls: 0,
     });
 
     const result = await triggerIngest();
@@ -296,34 +436,17 @@ describe("triggerIngest", () => {
   });
 });
 
-describe("getIngestCooldown", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it("wraps getCooldownUntil() as { cooldownUntil }", async () => {
-    getCooldownUntilMock.mockResolvedValue(null);
-    await expect(getIngestCooldown()).resolves.toEqual({ cooldownUntil: null });
-
-    getCooldownUntilMock.mockResolvedValue("2026-08-22T04:00:00.000Z");
-    await expect(getIngestCooldown()).resolves.toEqual({
-      cooldownUntil: "2026-08-22T04:00:00.000Z",
-    });
-  });
-});
-
 describe("submitSnsUrl", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.stubEnv("NODE_ENV", "development");
+    isBasicAuthorizedMock.mockReturnValue(true);
   });
   afterEach(() => {
     vi.unstubAllEnvs();
   });
 
-  it("refuses to run and returns ok:false when admin controls are disabled", async () => {
-    vi.stubEnv("NODE_ENV", "production");
-    vi.stubEnv("ENABLE_ADMIN_CONTROLS", undefined);
+  it("refuses to run and returns ok:false when Basic auth fails", async () => {
+    isBasicAuthorizedMock.mockReturnValue(false);
 
     const result = await submitSnsUrl("https://www.instagram.com/p/ABC123/");
 

@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import { db } from "@/lib/db";
 import { setupTestDb } from "./helpers/test-db";
 
@@ -9,20 +9,15 @@ import { setupTestDb } from "./helpers/test-db";
  * 実際に同時実行を防いでいることまでは検証できない。
  *
  * このファイルは cooldown.ts と db/repository.ts を**モックせず**、実際の
- * （インメモリ）DB を使って `triggerIngest()`（公開ボタン経路）と
+ * （インメモリ）DB を使って `triggerIngest()`（`/admin` の手動トリガー経路）と
  * `acquireIngestLease()`（Cron 経路が保持する想定のリース）の間で本物の排他が
- * 機能することを検証する。回帰対象は「Cron 実行中に公開ボタンが押されると
- * runIngest() が二重に走る」という今回の脆弱性そのもの。
+ * 機能することを検証する。回帰対象は「Cron 実行中に手動トリガーが押されると
+ * runIngest() が二重に走る」という脆弱性そのもの。
  */
 
 const { runIngestMock, runSubmitUrlMock } = vi.hoisted(() => ({
   runIngestMock: vi.fn(),
   runSubmitUrlMock: vi.fn(),
-}));
-
-vi.mock("next/cache", () => ({
-  unstable_cache: (fn: any) => fn,
-  revalidateTag: vi.fn(),
 }));
 
 vi.mock("@/lib/pipeline/ingest", () => ({
@@ -35,14 +30,34 @@ vi.mock("@/lib/pipeline/submit-url", () => ({
   runSubmitUrl: runSubmitUrlMock,
 }));
 
+// このファイルは @/lib/auth（isBasicAuthorized）もモックしない。lease/cooldown
+// の検証対象は認証を通過した後の挙動なので、実装のまま常に認証が通るよう、
+// headers() が返す Authorization ヘッダーと ADMIN_BASIC_AUTH_USER/PASSWORD を
+// 一致させておく（下の beforeEach で env を設定する）。
+const ADMIN_TEST_USER = "admin";
+const ADMIN_TEST_PASSWORD = "test-password";
+vi.mock("next/headers", () => ({
+  headers: vi.fn(() =>
+    Promise.resolve(
+      new Headers({
+        authorization: `Basic ${Buffer.from(`${ADMIN_TEST_USER}:${ADMIN_TEST_PASSWORD}`).toString("base64")}`,
+      }),
+    ),
+  ),
+}));
+
 import { getIngestCooldown, triggerIngest } from "@/app/actions";
 import { acquireIngestLease, getCooldownUntil, releaseIngestLease } from "@/lib/pipeline/cooldown";
-import { getLastIngestAt } from "@/lib/db/repository";
 
 describe("triggerIngest × real lease/cooldown (integration, in-memory DB)", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
+    vi.stubEnv("ADMIN_BASIC_AUTH_USER", ADMIN_TEST_USER);
+    vi.stubEnv("ADMIN_BASIC_AUTH_PASSWORD", ADMIN_TEST_PASSWORD);
     await setupTestDb();
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it("returns busy:true and never calls runIngest while another execution (e.g. cron) already holds the lease", async () => {
@@ -53,7 +68,7 @@ describe("triggerIngest × real lease/cooldown (integration, in-memory DB)", () 
     // 「lease が期限切れ」と判定され、busy:true を期待するこのテストが
     // 実行時刻依存で自然に落ちる（実際に発生した回帰）。
     // triggerIngest() 側が実時刻固定である以上、lease 側も実時刻に合わせて
-    // 統一する。INGEST_LEASE_TTL_MS は 10 分あるため、テスト実行中に
+    // 統一する。INGEST_LEASE_TTL_MS は 2 分あるため、テスト実行中に
     // 期限切れになる心配はない。
     const now = new Date();
     // Cron 経路が実行中であることを、実際の lease 取得で再現する。
@@ -83,6 +98,7 @@ describe("triggerIngest × real lease/cooldown (integration, in-memory DB)", () 
       curated: 2,
       skipped: 0,
       errors: [],
+      geminiCalls: 1,
     });
 
     const result = await triggerIngest();
@@ -92,9 +108,13 @@ describe("triggerIngest × real lease/cooldown (integration, in-memory DB)", () 
     expect(result.ok).toBe(true);
     expect(runIngestMock).toHaveBeenCalledTimes(1);
 
-    // last_ingest_at が更新され、次の呼び出しはクールダウン中になる。
-    expect(await getLastIngestAt()).not.toBeNull();
-    expect(await getCooldownUntil(new Date())).not.toBeNull();
+    // ingest_cooldown_until が確保され、次の呼び出しはクールダウン中になる
+    // （actions.ts は claimIngestSlot() → extendIngestCooldownAfterRun() 経由で
+    // 本物の cooldown.ts を通す。このファイルは cooldown.ts をモックしないため
+    // 実 DB 状態で検証できる。geminiCalls: 1 のため 4 時間へ延長されている）。
+    const cooldownUntil = await getCooldownUntil(new Date());
+    expect(cooldownUntil).not.toBeNull();
+    expect(cooldownUntil).toBe(result.cooldownUntil);
   });
 
   it("lets the button path proceed immediately after the cron-held lease is released", async () => {
@@ -115,6 +135,7 @@ describe("triggerIngest × real lease/cooldown (integration, in-memory DB)", () 
       curated: 1,
       skipped: 0,
       errors: [],
+      geminiCalls: 0,
     });
 
     const result = await triggerIngest();
@@ -138,8 +159,13 @@ describe("triggerIngest × real lease/cooldown (integration, in-memory DB)", () 
 describe("page render / triggerIngest × missing config table (pre-migration prod, smoke test)", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
+    vi.stubEnv("ADMIN_BASIC_AUTH_USER", ADMIN_TEST_USER);
+    vi.stubEnv("ADMIN_BASIC_AUTH_PASSWORD", ADMIN_TEST_PASSWORD);
     await setupTestDb();
     await db.run(sql.raw("DROP TABLE IF EXISTS config;"));
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it("getIngestCooldown() (called by src/app/page.tsx on render) resolves to cooldownUntil:null instead of throwing — smoke-test crash regression guard", async () => {

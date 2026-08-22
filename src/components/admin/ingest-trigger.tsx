@@ -38,8 +38,9 @@ const jstClockFormatter = new Intl.DateTimeFormat("ja-JP", {
 });
 
 /**
- * ミリ秒の残り時間を「あと40分」「あと2時間」のような、4時間スケールに見合う
- * 粗い粒度の日本語に整形する。秒単位のカウントダウンは意図的に行わない。
+ * ミリ秒の残り時間を「あと40分」「あと2時間」のような、クールダウンの幅
+ * （15分〜4時間。詳細は `src/lib/pipeline/cooldown.ts`）に見合う粗い粒度の
+ * 日本語に整形する。秒単位のカウントダウンは意図的に行わない。
  */
 function formatRemaining(ms: number): string | null {
   if (ms <= 0) return null;
@@ -72,8 +73,10 @@ type IngestTriggerProps = {
 };
 
 /**
- * 訪問者が自分でフィードの新着を呼び込むための、公開・無認証の操作。
- * サーバー側で4時間のグローバルクールダウンが強制されるため、UI 側は
+ * オーナーがフィードの新着を手動で呼び込むための操作（`/admin` 配下、
+ * `src/middleware.ts` の Basic 認証で保護される）。サーバー側でクールダウンが
+ * 強制される（実行開始時に15分を確保し、実際に Gemini を呼んだ場合のみ
+ * 4時間へ延長される。詳細は `src/lib/pipeline/cooldown.ts`）ため、UI 側は
  * 「押せる／実行中／クールダウン中」の3状態を、押す前から結果が
  * 予測できる形で表現する。
  */
@@ -157,7 +160,8 @@ export function IngestTrigger({ className, compact = false, cooldownUntil }: Ing
       }
 
       if (!result.ran) {
-        // 直前に実行済みで、4時間のクールダウンにより見送られたケース。
+        // 直前に実行済みで、クールダウン中のため見送られたケース
+        // （15分〜4時間。詳細は src/lib/pipeline/cooldown.ts）。
         // cooldownUntil は「見送り／成功／失敗」の3分岐すべてで非 null が返るため、
         // 「実行されなかった」の判別には使えない。必ず ran を見ること。
         setCooldown(result.cooldownUntil);

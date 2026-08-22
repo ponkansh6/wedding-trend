@@ -25,7 +25,7 @@ Next.js 16 (App Router), React 19, TypeScript strict, Tailwind CSS v4, Drizzle O
 - **定期巡回 API**:
   - `src/app/api/ingest/route.ts` / `src/lib/pipeline/ingest.ts` による一括インジェスト
 - **収集トリガー（2 経路）**:
-  - UI の取得ボタンから叩く Server Action (`src/app/actions.ts`) と、`vercel.json` の Vercel Cron による定期実行。両者とも実処理は `src/lib/pipeline/ingest.ts` / `src/lib/pipeline/submit-url.ts` に一本化されている（詳細は §6）。取得ボタンは無認証で本番の公開トップページに置かれるため、DB 側で強制する 4 時間のグローバルクールダウンで濫用を防ぐ。加えて、両経路とも同時実行を防ぐ排他ロック（lease）を必ず取得する（`src/lib/pipeline/cooldown.ts`。詳細は §6.4）
+  - `/admin`（`src/middleware.ts` の Basic 認証配下。オーナー限定）から叩く Server Action (`src/app/actions.ts`) と、`vercel.json` の Vercel Cron による定期実行。両者とも実処理は `src/lib/pipeline/ingest.ts` / `src/lib/pipeline/submit-url.ts` に一本化されている（詳細は §6）。収集ボタンは以前、無認証で本番の公開トップページに置かれていたが、デプロイをまたいで残る ISR の stale ページが原因の誤解（「体験談 0 件なのに更新制限」）をきっかけに `/admin` へ移した。加えて、両経路とも同時実行を防ぐ排他ロック（lease）と、`/admin` 経路のみ連打防止のクールダウンを DB 側で必ず取得する（`src/lib/pipeline/cooldown.ts`。詳細は §6.4）
 - **ヘルスチェック**:
   - `src/app/api/health/route.ts`
 
@@ -50,10 +50,10 @@ Next.js 16 (App Router), React 19, TypeScript strict, Tailwind CSS v4, Drizzle O
   - `src/app/page.tsx` において、SNS トレンド速報 (`src/components/feed/feed-lane-trend.tsx`) とブログ定番 (`src/components/feed/feed-lane-classic.tsx`) を分けて表示する。
 - **FR-005: セキュリティおよび環境検証**
   - `src/middleware.ts` および `src/lib/auth.ts` によるベーシック認証等の保護、`src/lib/constants.ts` や `src/lib/url.ts` 等の共通ユーティリティ。`src/lib/auth.ts` の `isBearerAuthorized` は **fail-closed**: 検証用の secret（既定 `CRON_SECRET`）が未設定の場合、実行環境（`NODE_ENV` / `VERCEL_ENV` 等）によらず常にリクエストを拒否する。環境によって認証ロジックが変わる設計（未設定時はローカル開発向けに無認証で許可する fail-open）を避けるための意図的な制約であり、ローカル開発でも `.env.local` に secret を設定しない限り `/api/ingest` `/api/submit-url` は 401 を返す。
-- **FR-006: 収集トリガーの UI 化と定期実行**
-  - `src/app/actions.ts` の Server Action（`triggerIngest` / `submitSnsUrl`）により、UI 上のボタン操作から `src/lib/pipeline/ingest.ts` / `src/lib/pipeline/submit-url.ts` を直接呼び出す。加えて `vercel.json` の Vercel Cron 設定により `GET /api/ingest` を定期実行する。両トリガー経路の詳細・認可モデルは §6 を参照。
-- **FR-007: 収集トリガーの排他ロックとグローバルクールダウン**
-  - 収集パイプラインを起動する両経路（公開ボタン・Cron）は、`src/lib/pipeline/cooldown.ts` の `acquireIngestLease()` により実行排他ロック（lease）を必ず取得する。取得できなければ「実行中」として `runIngest()` を呼ばずに返す（公開ボタン経路では `IngestResult.busy: true`）。加えて公開ボタン経路のみ、`claimIngestSlot()` により 4 時間のグローバルクールダウンを DB 側で原子的に強制する。クールダウン中は lease を解放し `runIngest()` を呼ばずに待機状態を返す。詳細は §6.4 を参照。
+- **FR-006: 収集トリガーの管理画面化と定期実行**
+  - `src/app/actions.ts` の Server Action（`triggerIngest` / `submitSnsUrl`）により、`/admin`（`src/middleware.ts` の Basic 認証配下・オーナー限定）上のボタン操作から `src/lib/pipeline/ingest.ts` / `src/lib/pipeline/submit-url.ts` を直接呼び出す。加えて `vercel.json` の Vercel Cron 設定により `GET /api/ingest` を定期実行する。両トリガー経路の詳細・認可モデルは §6 を参照。
+- **FR-007: 収集トリガーの排他ロックとクールダウン**
+  - 収集パイプラインを起動する両経路（`/admin` の手動トリガー・Cron）は、`src/lib/pipeline/cooldown.ts` の `acquireIngestLease()` により実行排他ロック（lease）を必ず取得する。取得できなければ「実行中」として `runIngest()` を呼ばずに返す（`/admin` 経路では `IngestResult.busy: true`）。加えて `/admin` 経路のみ、`claimIngestSlot()` により 15 分のクールダウンを DB 側で原子的に確保し、`runIngest()` が実際に Gemini を呼んでいれば `extendIngestCooldownAfterRun()` が 4 時間へ延長する。クールダウン中は lease を解放し `runIngest()` を呼ばずに待機状態を返す。詳細は §6.4 を参照。
 
 ---
 
@@ -93,18 +93,28 @@ Next.js 16 (App Router), React 19, TypeScript strict, Tailwind CSS v4, Drizzle O
 ### `config` テーブル
 
 アプリケーション全体のメタ情報を保持する key-value テーブル（`src/lib/db/schema.ts`）。
-現状の用途は収集トリガーの排他ロックとグローバルクールダウンの 2 つで、
-それぞれ独立した key を持つ:
+現状 4 つの key を持つ:
 
-- `key: "last_ingest_at"` — 直近の実行**開始**時刻（ISO8601 文字列）。公開ボタン
-  経路のみが評価するグローバルクールダウン（4 時間）の起点。
+- `key: "ingest_cooldown_until"` — クールダウンの**期限そのもの**（起点時刻ではなく
+  絶対時刻の ISO8601 文字列）。`/admin` の手動トリガー経路のみが評価する。
+  `claimIngestSlot()` が実行開始時に 15 分だけ確保し（claim）、`runIngest()` が
+  実際に Gemini を呼んでいれば `extendIngestCooldownAfterRun()` が 4 時間へ
+  延長する（extend）。
 - `key: "ingest_lease_until"` — 現在保持されているリース（実行排他ロック）の
-  期限（ISO8601 文字列）。全経路が実行前に必ず取得し、実行完了後に解放する。
+  期限（ISO8601 文字列）。全経路（`/admin` の手動トリガー・Cron）が実行前に
+  必ず取得し、実行完了後に解放する。
+- `key: "last_cron_ingest_at"` — Vercel Cron 経路が最後に実行された時刻の
+  観測用記録。cooldown・lease とは独立しており、何の判定にも使われない。
+- `key: "last_run_summary"` — 直近の収集ラン結果を保持する JSON 文字列
+  （`src/lib/pipeline/ingest.ts` の `LastRunSummary`）。`/admin` の
+  `IngestStatusPanel` の表示に使う。他の 3 key と異なり値は ISO8601 ではなく
+  JSON（`value` の一般則の例外。`assertIso8601` の検証をスキップする）。
 
 詳細は §6.4 を参照。
 
 - `key`: 主キー (Text)
-- `value`: 値。ISO8601 文字列で文字列比較の大小判定が成立する形式に統一する (Text)
+- `value`: 値。ISO8601 文字列で文字列比較の大小判定が成立する形式に統一する
+  （`last_run_summary` のみ JSON 文字列で例外） (Text)
 - `updated_at`: タイムスタンプ (Text)
 
 ---
@@ -119,18 +129,18 @@ Next.js 16 (App Router), React 19, TypeScript strict, Tailwind CSS v4, Drizzle O
 - **oEmbed fallback**:
   - `src/lib/embed/oembed.ts` 及び `src/lib/embed/providers.ts` による堅牢な埋め込み取得と障害時フォールバック。
 - **Pipeline modules（実処理の単一実装）**:
-  - `src/lib/pipeline/ingest.ts`（`runIngest`）: RSS 巡回 → 正規化 URL での重複排除 → upsert → 未キュレーション/再キュレーション対象の予算内選定 → LLM 一括キュレーション → `revalidateTag(FEED_CACHE_TAG, { expire: 0 })` によるフィードキャッシュ即時失効、までの一連の処理。
-  - `src/lib/pipeline/submit-url.ts`（`runSubmitUrl`）: URL 正規化 → oEmbed 取得 → LLM 単体キュレーション（失敗時は原文ベースのフォールバックで `"pending"` 保存）→ upsert → 埋め込み保存 → 同様のキャッシュ失効、までの一連の処理。
+  - `src/lib/pipeline/ingest.ts`（`runIngest`）: RSS 巡回 → 正規化 URL での重複排除 → upsert → 未キュレーション/再キュレーション対象の予算内選定 → LLM 一括キュレーション、までの一連の処理。`/` は `export const dynamic = "force-dynamic"` でキャッシュを経由しないため、以前ここにあったフィードキャッシュの明示的失効（`revalidateTag`）は不要になった（詳細は §6.5）。
+  - `src/lib/pipeline/submit-url.ts`（`runSubmitUrl`）: URL 正規化 → oEmbed 取得 → LLM 単体キュレーション（失敗時は原文ベースのフォールバックで `"pending"` 保存）→ upsert → 埋め込み保存、までの一連の処理。
   - どちらも「呼び出し元（Route Handler か Server Action か）に依存しない」ことを目的に切り出されており、`src/app/api/ingest/route.ts` / `src/app/api/submit-url/route.ts` および `src/app/actions.ts` はいずれもこれらの薄いラッパーに過ぎない。ロジックを二重実装しないことが本設計の前提。
 
 ### §6.1 収集トリガーの 2 経路
 
 収集パイプラインを起動する経路は次の 2 つのみであり、いずれも最終的に上記の pipeline モジュールを呼ぶ。
 
-1. **UI の取得ボタン（Server Action）**: `src/app/actions.ts` の `triggerIngest()` / `submitSnsUrl(url)` を、トップページ上のボタン（別コンポーネントが所有）が呼び出す。`triggerIngest()` は無認証で本番の公開トップページに置かれる公開 Server Action であり、`submitSnsUrl()`（管理者向け・§6.2 参照）とは認可モデルが異なる。`triggerIngest()` の濫用防止は §6.4 の lease（排他ロック）と DB クールダウンが担う。
+1. **`/admin` の収集ボタン（Server Action）**: `src/app/actions.ts` の `triggerIngest()` / `submitSnsUrl(url)` を、`src/app/admin/page.tsx` 上のボタン（`src/components/admin/ingest-status-panel.tsx` / `src/components/admin/operator-panel.tsx`）が呼び出す。`/admin/:path*` は `src/middleware.ts` が Basic 認証（`ADMIN_BASIC_AUTH_USER` / `ADMIN_BASIC_AUTH_PASSWORD`）で保護しており、オーナー限定の操作である。UI・ミドルウェアだけでは防御にならないため、`triggerIngest()` / `submitSnsUrl()` はそれ自身の実行時にも `src/lib/auth.ts` の `isBasicAuthorized()` で同じ資格情報を再検証する多層防御を取る（§6.2 参照）。`triggerIngest()` の濫用防止はこれに加えて §6.4 の lease（排他ロック）と DB クールダウンが担う。
 2. **Vercel Cron（定期実行）**: `vercel.json` の `crons` 設定により、Vercel が `GET /api/ingest` を定期的に呼び出す（スケジュールは `0 21 * * *` = UTC 21:00、JST 6:00 の 1 日 1 回）。本番は Vercel Hobby プランで運用しており、Hobby は Cron の実行頻度が 1 日 1 回までに制限される（それを超えるスケジュールを指定すると `vercel deploy` 自体が拒否され、デプロイが失敗する）ため、この頻度としている。
    - `src/app/api/ingest/route.ts` の `GET` ハンドラは単なるヘルスチェック/案内スタブではなく、`POST` と全く同じ認可チェック・同じ `runIngest()` 呼び出しを行う。Vercel Cron は `CRON_SECRET` 環境変数が設定されていれば `Authorization: Bearer <CRON_SECRET>` ヘッダーを自動付与するため、`src/lib/auth.ts` の `isBearerAuthorized` がそのまま両方の HTTP メソッドを検証できる。**`CRON_SECRET` が未設定の場合、この経路は fail-closed により常に 401 を返す**（詳細は §6.4 直前の認証方針、および `src/lib/auth.ts` を参照）。
-   - この経路は公開ボタン経路の 4 時間クールダウンの**評価**を迂回するが、**lease（排他ロック）は迂回しない**。`acquireIngestLease()` に失敗した場合（＝公開ボタン経路や他の Cron 呼び出しが実行中）は `runIngest()` を呼ばずに `409` を返す。
+   - この経路は `/admin` 経路のクールダウンの**評価・更新のどちらにも触れない**が、**lease（排他ロック）は迂回しない**。`acquireIngestLease()` に失敗した場合（＝`/admin` 経路や他の Cron 呼び出しが実行中）は `runIngest()` を呼ばずに `409` を返す。代わりに、Cron が最後にいつ動いたかを観測するためだけの独立したキー `last_cron_ingest_at` を無条件で記録する（`config` の他のキーとは独立しており、何の判定にも使われない）。
 
 ### §6.3 収集ソースの採否（2026-08-22 実データ検証）
 
@@ -149,71 +159,83 @@ Next.js 16 (App Router), React 19, TypeScript strict, Tailwind CSS v4, Drizzle O
 実在しない ID やタグをプレースホルダーとして残すと死活監視が「正常」と誤報するため、
 未採用のソースは必ず空リストにすること。
 
-### §6.2 管理操作の有効化（ENABLE_ADMIN_CONTROLS）
+### §6.2 管理操作の認可モデル（Basic 認証・多層防御）
 
-SNS URL 投入フォームは `ENABLE_ADMIN_CONTROLS` 環境変数で有効/無効を切り替える。判定は `src/app/actions.ts` の `adminControlsEnabled()` が行い、`NODE_ENV !== "production"`（開発環境）では常に有効、本番では `ENABLE_ADMIN_CONTROLS === "1"` のときのみ有効になる。
+収集トリガー（`triggerIngest`）・SNS URL 投入（`submitSnsUrl`）はいずれも `/admin` 配下（オーナー限定）に置かれ、同一の認可モデルを共有する。以前は 2 つの異なる仕組み（収集ボタン: 無認証で公開 + DB クールダウンのみ、URL 投入: `ENABLE_ADMIN_CONTROLS` 環境変数フラグ）を使い分けていたが、収集ボタンを `/admin` へ移したことで両者を Basic 認証に一本化した。`ENABLE_ADMIN_CONTROLS` は廃止し、`adminControlsEnabled()` は削除した。
 
-**実際のアクセス制御は Server Action 側の再検証である。** UI がフォームを描画するかどうかの判定に `adminControlsEnabled()` を使うのは見た目の制御にすぎず、それ自体は防御にならない（Server Action は URL さえ知っていれば UI を経由せず直接呼び出せるため）。そのため `submitSnsUrl()` は自身の実行時にも必ず `adminControlsEnabled()` を再評価し、無効であれば処理を行わずに `ok: false` と日本語メッセージを返す。UI 側で該当フォームを非表示にする実装は、この再検証があって初めて意味を持つ補助的な措置として扱うこと。
+**多層防御は 2 段構成**:
 
-**`triggerIngest()`（収集ボタン）はこのフラグの対象外である。** 収集ボタンは本番でも常に公開され、`adminControlsEnabled()` によるガードを持たない。これは意図した設計であり、代わりの濫用防止策は §6.4 の DB クールダウンである。
+1. **ミドルウェア（入口）**: `src/middleware.ts` が matcher `/admin/:path*` で Basic 認証（`ADMIN_BASIC_AUTH_USER` / `ADMIN_BASIC_AUTH_PASSWORD`）を強制する。Edge ランタイムのため Web Crypto (`crypto.subtle`) でタイミングセーフに比較する。未設定の場合、本番環境は `503`、開発環境は無認証で通す（`NODE_ENV` で分岐。ページの入口としてローカル開発の利便性を優先している）。
+2. **Server Action（多層防御）**: `src/lib/auth.ts` の `isBasicAuthorized()` が `triggerIngest()` / `submitSnsUrl()` それぞれの実行時にも同じ資格情報を再検証する。**実際のアクセス制御はこの再検証である**。ミドルウェアだけでは防御にならない（Server Action は URL さえ知っていれば UI・ミドルウェアを経由せず直接呼び出せるため）。`isBasicAuthorized()` は `isBearerAuthorized`（CRON_SECRET）と同じ **fail-closed** 方針を取り、環境変数が未設定なら無条件に拒否し、`NODE_ENV` によって認証ロジックを分岐させない。**そのためミドルウェアと異なり、ローカル開発でも `ADMIN_BASIC_AUTH_USER` / `ADMIN_BASIC_AUTH_PASSWORD` を設定しない限り、収集ボタン・SNS URL 投入フォームの実行は常に失敗する**（詳細は `.env.local.example`）。認証に失敗した場合、両 Server Action とも生の認証エラーの内部情報を含まない固定文言（`ADMIN_DISABLED_MESSAGE`）を返す。
 
-### §6.4 収集トリガーの排他ロック（lease）とグローバルクールダウン（cooldown）
+Server Action 自身（Node ランタイム）は `node:crypto` の `timingSafeEqual` を使い、ミドルウェア（Edge ランタイム）とはロジックが別実装になる。ランタイム制約により一本化できない。
 
-`triggerIngest()` は無認証で本番の公開トップページに置かれるため、UI 側の表示制御（連打防止のボタン無効化等）だけでは、複数タブや直接の Server Action 呼び出しによる濫用（Gemini API 予算の焼き付き）を防げない。`src/lib/pipeline/cooldown.ts` は目的の異なる 2 つの機構を組み合わせてこれをサーバー側で強制する。**この 2 つは互いに独立した概念であり、混同しないこと**（以前はこれらを 1 つの機構に混ぜており、Cron 経路が両方を迂回できてしまうバグがあった。詳細は次項）。
+### §6.4 収集トリガーの排他ロック（lease）とクールダウン（cooldown: claim + extend の 2 段階）
 
-| 機構     | 何を守るか                           | 対象経路                              | key（`config` テーブル） | 幅                             |
-| -------- | ------------------------------------ | ------------------------------------- | ------------------------ | ------------------------------ |
-| lease    | **同時実行の禁止**（排他）           | 公開ボタン・Cron の**両方**           | `ingest_lease_until`     | `INGEST_LEASE_TTL_MS`（10 分） |
-| cooldown | **実行頻度の制限**（レートリミット） | **公開ボタン経路のみ**（Cron は免除） | `last_ingest_at`         | `INGEST_COOLDOWN_MS`（4 時間） |
+`/admin` はミドルウェア＋ Server Action の Basic 認証で保護されているが（§6.2）、認証済みのオーナーであっても、複数タブでの連打や Gemini API 予算の焼き付きは防ぐ必要がある。`src/lib/pipeline/cooldown.ts` は目的の異なる 2 つの機構を組み合わせてこれをサーバー側で強制する。**この 2 つは互いに独立した概念であり、混同しないこと**。
+
+| 機構     | 何を守るか                      | 対象経路                                             | key（`config` テーブル） | 幅                                                                                         |
+| -------- | ------------------------------- | ---------------------------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------ |
+| lease    | **同時実行の禁止**（排他）      | `/admin` の手動トリガー・Cron の**両方**             | `ingest_lease_until`     | `INGEST_LEASE_TTL_MS`（2 分）                                                              |
+| cooldown | **連打防止・Gemini 予算の保護** | **`/admin` の手動トリガー経路のみ**（Cron は対象外） | `ingest_cooldown_until`  | `INGEST_BASE_COOLDOWN_MS`（15 分）→ `INGEST_FULL_COOLDOWN_MS`（4 時間、Gemini 使用時のみ） |
 
 #### lease（排他ロック）
 
-「今まさに `runIngest()` を実行しているのは高々 1 経路だけ」を保証する。**全経路（公開ボタン・Cron）が実行前に必ず取得し、実行完了後（成功・失敗いずれも）に必ず解放する。**
+「今まさに `runIngest()` を実行しているのは高々 1 経路だけ」を保証する。**全経路（`/admin` の手動トリガー・Cron）が実行前に必ず取得し、実行完了後（成功・失敗いずれも）に必ず解放する。**
 
-- **`INGEST_LEASE_TTL_MS`**: リースの TTL（10 分 = `10 * 60 * 1000` ミリ秒）。`runIngest()` の実測実行時間は長くても 60 秒程度だが、タイムアウトやクラッシュでリースが解放されないまま残った場合に、次回の呼び出しが自動的に回復できるよう十分な余裕を持たせている。
+- **`INGEST_LEASE_TTL_MS`**: リースの TTL（2 分 = `2 * 60 * 1000` ミリ秒）。`runIngest()` の実測実行時間は長くても 60 秒程度（Route Handler / Server Action の `maxDuration` も 60 秒）であるため、タイムアウトやクラッシュでリースが解放されないまま残っても、この程度の余裕で十分に回復できる（以前は 10 分だったが、`maxDuration` に対して過剰に長く、不必要な機会損失を生んでいたため縮小した）。
 - **`acquireIngestLease(now?)`**: リースの原子的な取得。`src/lib/db/repository.ts` の `claimIngestLease()` が発行する単一の `INSERT ... ON CONFLICT(key) DO UPDATE ... WHERE config.value <= ?` により、保存されているリース期限が現在時刻以下（＝期限切れ）の場合にのみ、新しいリース期限（`now + INGEST_LEASE_TTL_MS`）で上書きして true を返す。取得に失敗したら false（＝別の経路が実行中）。
 - **`releaseIngestLease(now?)`**: リース期限を過去日時で無条件上書きし、即座に解放する。取得に成功した経路は `finally` で必ず呼ぶこと。
 
-#### cooldown（グローバルクールダウン）
+#### cooldown（claim → extend の 2 段階）
 
-**公開ボタン経路のみ**に課すレートリミット。Cron は 1 日 1 回にしか叩かれず認証済みであるため評価を免除されるが、実行後に `last_ingest_at` を更新することで、Cron 実行の直後に公開ボタンが押されても不必要な再実行が起きないようにする。
+**`/admin` の手動トリガー経路のみ**に課す。Cron 経路はクールダウンの評価・更新のどちらにも一切触れない（1 日 1 回しか叩かれない Cron の実行有無と、認証済みの手動実行を短時間に連打しないためのこのクールダウンの間に本来因果関係はないため）。代わりに Cron は独立した観測用キー `last_cron_ingest_at` を無条件で記録する（§6.1 参照）。
 
-- **`INGEST_COOLDOWN_MS`**: クールダウン幅（4 時間 = `4 * 60 * 60 * 1000` ミリ秒）。
-- **`claimIngestSlot(now?)`**: cooldown 判定と `last_ingest_at` の更新を 1 呼び出しで行う。`src/lib/db/repository.ts` の `claimLastIngestAt()` が発行する単一の条件付き `INSERT ... ON CONFLICT DO UPDATE ... WHERE` により、4 時間以上経過していれば（または初回であれば）`last_ingest_at` を `now`（＝実行開始時刻）に更新して `{ claimed: true, cooldownUntil }` を返す。経過していなければ DB を書き換えずに `{ claimed: false, cooldownUntil }` を返す。`ClaimResult` は `{ claimed: boolean; cooldownUntil: string }`（両バリアントのフィールドが同一なため判別共用体にしていない）。奪取に失敗した場合の `cooldownUntil` は `getCooldownUntil()` に計算を委譲しており、重複実装しない。この関数は**呼び出し前に lease を取得済みであることが前提**（呼び出しが既に直列化されているため、内部の原子的 CAS は多重防御として働く）。
-- **`getCooldownUntil(now?)`**: 読み取り専用。実行はせず、現在のクールダウン状態（クールダウン中でなければ `null`）を返す。公開ページの初期描画（`src/app/actions.ts` の `getIngestCooldown()`）に使う。
-- **`markIngestStart(now?)`**: `last_ingest_at` を無条件に `now`（＝実行開始時刻）で上書きする。Vercel Cron 経路（`src/app/api/ingest/route.ts`、認証済みリクエスト）専用。cooldown の評価は迂回するが、`runIngest()` を呼ぶ**前**にこの関数で記録を更新する。
+`config.ingest_cooldown_until` は「クールダウンの起点時刻」ではなく**期限そのもの**（絶対時刻の ISO8601 文字列）を保持する。読み取り（`getCooldownUntil`）は保存値と `now` を比較するだけで、算術（時刻の加算）を一切行わない。
+
+- **`claimIngestSlot(now?)`**: 実行開始時に `INGEST_BASE_COOLDOWN_MS`（15 分）だけ確保する（claim）。目的は Gemini 予算の保護ではなく、同時多重実行の防止と空振り実行（新着ゼロ等で Gemini を一切呼ばなかった実行）の連打防止。`src/lib/db/repository.ts` の `claimIngestCooldown()` が発行する単一の条件付き `INSERT ... ON CONFLICT DO UPDATE ... WHERE` により、保存済みの値が `now` 以下（＝期限切れ、または行が存在しない）のときだけ `now + INGEST_BASE_COOLDOWN_MS` を書き込んで `{ claimed: true, cooldownUntil }` を返す。経過していなければ DB を書き換えずに `{ claimed: false, cooldownUntil }` を返す。`ClaimResult` は `{ claimed: boolean; cooldownUntil: string }`。奪取に失敗した場合の `cooldownUntil` は `getCooldownUntil()` に計算を委譲しており、重複実装しない。この関数は**呼び出し前に lease を取得済みであることが前提**。
+- **`extendIngestCooldownAfterRun(claimedCooldownUntil, geminiCalls, now?)`**: ラン完了後、`runIngest()` が実際に Gemini を呼んでいれば（`geminiCalls > 0`）クールダウンを `INGEST_FULL_COOLDOWN_MS`（4 時間）へ延長する。Gemini 予算の保護という実質的なレートリミットはこちらが担う（`claimIngestSlot()` の 15 分は空振り用の短い間隔に過ぎない）。延長は `src/lib/db/repository.ts` の `extendIngestCooldown()` による **CAS（Compare-And-Swap）** で行う: `claimedCooldownUntil`（`claimIngestSlot()` が返した値）と保存済みの値が完全一致し、かつ新しい値の方が新しい（単調増加）ときのみ書き換える。これにより、自分の claim 後に他の呼び出しが新たに cooldown を確保していた場合にそれを無条件延長で上書きしてしまう事故と、期限を短縮する方向への書き込み事故の両方を防ぐ。戻り値は持たない（void）ため、延長後の実際の値を知りたい呼び出し元は `getCooldownUntil()` を読み直す（`src/app/actions.ts` の `resolveCooldownAfterRun()` を参照）。
+- **`getCooldownUntil(now?)`**: 読み取り専用。実行はせず、現在のクールダウン状態（クールダウン中でなければ `null`）を返す。`/admin` の初期描画（`src/app/actions.ts` の `getIngestCooldown()`）に使う。
 
 #### 読み取り＝フェイルソフト／書き込み＝fail-closed（`config` テーブル未作成時の非対称な挙動）
 
 `config` テーブルが存在しない環境（マイグレーション未適用の本番、`scripts/smoke-test.sh` が意図的に空にする DB 等）では、`src/lib/db/repository.ts` の読み取り関数と書き込み関数を**意図的に非対称**に扱う。
 
-- **読み取り（`getLastIngestAt()`）はフェイルソフト**: クエリが失敗したら（`src/lib/db/query.ts` の `getFeedCards` と同じ `try/catch` + `console.warn` + 安全側デフォルトのパターンで）例外を投げずに `null` を返す。`null` は「一度も実行していない」を意味し、テーブルが無い状態は意味的にもこれと一致する。これにより `getCooldownUntil()` → `getIngestCooldown()` と伝播して `{ cooldownUntil: null }` になり、`src/app/page.tsx` の初期描画（ビルド時の SSG を含む）がテーブル未作成でもクラッシュしない。これが本来のバグ（`config` テーブル未作成の環境でトップページが 500 になる）の修正本体である。
-- **書き込み（`claimLastIngestAt()` / `claimIngestLease()` / それらが経由する `writeConfigValue()`）は fail-closed のまま**: 例外を握りつぶさず、そのまま呼び出し元に伝播させる。ここを読み取りと同様にフェイルソフトにしてしまうと、テーブルが無い環境で「クールダウン/lease の取得（＝書き込み）に成功した」と誤認し、濫用防止（レートリミット・排他ロック）そのものが丸ごと無効化されてしまうため。
-- `triggerIngest()`（`src/app/actions.ts`）は `acquireIngestLease()` / `claimIngestSlot()` の呼び出しを `try/catch` で囲み、これらが例外を投げても Server Action 自体は未処理例外で落とさず、`{ ok: false, ran: false, busy: false, errors: [固定文言], cooldownUntil: null }`（`ingestUnavailableResult()`）を返す。`claimIngestSlot()` が例外を投げた時点で lease は既に取得済みのため、`releaseIngestLease()` で解放してから返す（解放自体が失敗しても、その例外もここで吸収し未処理例外にしない）。生の例外は `console.error` にのみ出力する。
-
-#### 起点の統一（実行開始時刻）
-
-cooldown の起点は、公開ボタン・Cron の**両経路とも「実行開始時刻」に統一されている**。公開ボタン経路は `claimIngestSlot()` が奪取と同時に `now`（呼び出し時点）を書き込み、Cron 経路は `runIngest()` を呼ぶ**前**に `markIngestStart(now)` を呼ぶ。以前は Cron 経路が `runIngest()` の**完了後**に記録していたため、実行に時間がかかるとクールダウンの起点が経路によって食い違うバグがあった。
+- **読み取り（`getIngestCooldownValue()` / `readLastRunSummary()`）はフェイルソフト**: クエリが失敗したら（`src/lib/db/query.ts` の `getFeedCards` と同じ `try/catch` + `console.warn` + 安全側デフォルトのパターンで）例外を投げずに `null` を返す。`null` は「一度も実行していない／未保存」を意味し、テーブルが無い状態は意味的にもこれと一致する。これにより `getCooldownUntil()` → `getIngestCooldown()` と伝播して `{ cooldownUntil: null }` になり、`src/app/admin/page.tsx` の初期描画がテーブル未作成でもクラッシュしない。
+- **書き込み（`claimIngestCooldown()` / `extendIngestCooldown()` / `claimIngestLease()` / それらが経由する `writeConfigValue()`）は fail-closed のまま**: 例外を握りつぶさず、そのまま呼び出し元に伝播させる。ここを読み取りと同様にフェイルソフトにしてしまうと、テーブルが無い環境で「クールダウン/lease の取得（＝書き込み）に成功した」と誤認し、濫用防止（レートリミット・排他ロック）そのものが丸ごと無効化されてしまうため。
+- `triggerIngest()`（`src/app/actions.ts`）は `acquireIngestLease()` / `claimIngestSlot()` / `extendIngestCooldownAfterRun()` の呼び出しをそれぞれ `try/catch` で囲み、これらが例外を投げても Server Action 自体は未処理例外で落とさず、安全な `IngestResult` を返す。生の例外は `console.error` にのみ出力する。
 
 #### 両経路の実行順序
 
 ```
+0. /admin の手動トリガー経路のみ: Basic 認証の再検証（isBasicAuthorized）
+   失敗 → 認証エラーとして即座に返す（lease/cooldown に一切触れない）
 1. lease 取得（acquireIngestLease）
    失敗 → 「実行中」として即座に返す（runIngest() を呼ばない）
-2. 公開ボタン経路のみ: cooldown 判定（claimIngestSlot）
+2. /admin の手動トリガー経路のみ: cooldown 判定（claimIngestSlot、15分を確保）
    クールダウン中 → lease を解放して返す（runIngest() を呼ばない）
-3. last_ingest_at を実行開始時刻で更新
-   （公開ボタン経路は手順 2 の claimIngestSlot() が兼ねる。Cron 経路は markIngestStart()）
-4. runIngest() 実行
+3. runIngest("manual" | "cron") 実行
+4. /admin の手動トリガー経路のみ: Gemini を実際に呼んでいれば cooldown を
+   4時間へ延長（extendIngestCooldownAfterRun）。呼んでいなければ15分のまま。
+   runIngest() が例外を投げた場合は Gemini を呼んだ可能性を否定できないため、
+   安全側に倒し無条件で4時間へ延長する（予算保護を優先する判断）。
 5. finally で lease を解放（releaseIngestLease）
 ```
 
-- `triggerIngest()`（`src/app/actions.ts`）は上記を実装し、`IngestResult` で 3 つの終端状態を区別する: lease 取得失敗（`busy: true, ran: false`）、cooldown 中の見送り（`busy: false, ran: false, errors: []`）、実行（`ran: true`。成功時 `ok: true` で `errors` は `runIngest()` の `summary.errors` を件数のみに要約したもの、例外時 `ok: false` で `errors` は固定文言 `["収集処理でエラーが発生しました。時間をおいてお試しください。"]`）。`claimIngestSlot()` が `{ claimed: true }` を返した後に `runIngest()` が例外を投げた場合でも、実行権（クールダウンの枠）は消費されたままにする。これは、失敗直後にユーザーがリトライを連打できてしまうと、無認証で公開しているボタンから外部 API（RSS フィード・Gemini）呼び出しが際限なく繰り返される事態を防ぐための意図的な判断である。
-- `src/app/api/ingest/route.ts`（Cron・curl 経路）は lease 取得失敗時に `409` を返す。cooldown 判定は行わない。
+- `triggerIngest()`（`src/app/actions.ts`）は上記を実装し、`IngestResult` で 4 つの終端状態を区別する: 認証失敗（`ran: false, busy: false, cooldownUntil: null`）、lease 取得失敗（`busy: true, ran: false`）、cooldown 中の見送り（`busy: false, ran: false, errors: []`）、実行（`ran: true`。成功時 `ok: true` で `errors` は `runIngest()` の `summary.errors` を件数のみに要約したもの、例外時 `ok: false` で `errors` は固定文言 `["収集処理でエラーが発生しました。時間をおいてお試しください。"]`）。
+- `src/app/api/ingest/route.ts`（Cron・curl 経路）は lease 取得失敗時に `409` を返す。cooldown の評価・更新は一切行わない。
 
 #### 公開面への例外メッセージの非漏洩
 
-`runIngest()` や `triggerIngest()` の `try/catch` が投げる例外（Gemini SDK / libSQL / undici 等）の `message` にはホスト名・URL・リクエスト断片が混ざり得るため、`IngestResult.errors`（無認証の公開面に返る）には**生の例外メッセージを一切含めない**。実際の例外は `console.error` でサーバーログにのみ出力する。`runIngest()` の `summary.errors`（ソースごとの取得・キュレーション失敗メッセージ）も同様の理由で公開前に要約する（`src/app/actions.ts` 側でサニタイズし、件数のみの日本語メッセージに置換する。原文は `console.error` に残す）。
+`runIngest()` や `triggerIngest()` の `try/catch` が投げる例外（Gemini SDK / libSQL / undici 等）の `message` にはホスト名・URL・リクエスト断片が混ざり得るため、`IngestResult.errors`（`/admin` の画面に返る）には**生の例外メッセージを一切含めない**。実際の例外は `console.error` でサーバーログにのみ出力する。`runIngest()` の `summary.errors`（ソースごとの取得・キュレーション失敗メッセージ）も同様の理由で公開前に要約する（`src/app/actions.ts` 側でサニタイズし、件数のみの日本語メッセージに置換する。原文は `console.error` に残す）。
+
+### §6.5 `/` の動的レンダリング（ISR の撤去）
+
+`src/app/page.tsx` は `export const dynamic = "force-dynamic"` を宣言しており、`src/lib/db/query.ts` の `getFeedCards()` は毎リクエスト DB を直接読む（`unstable_cache` は使わない）。
+
+**経緯**: 以前は ISR（`unstable_cache` による 5 分キャッシュ + `ingest` / `submit-url` からの `revalidateTag` による明示的失効）だった。しかしデプロイをまたいで残った stale なキャッシュエントリが stale-while-revalidate で配信され続け、「体験談 0 件なのに更新制限」という誤解を招く報告につながった（実測では本番 DB に投稿が存在し収集自体は成功していたが、訪問するたびに前回訪問時点のスナップショットが配信される状態になっていた）。
+
+**判断根拠**: このページのトラフィックはほぼゼロで、`getFeedCards()` のクエリも最大12件×2レーンの単純な SELECT に過ぎない。ISR の利得（DB 負荷の軽減）より、「オーナーが `/admin` から収集した直後に結果をここで確認できない」ことの損失の方が大きいと判断し、キャッシュ層ごと撤去した。これに伴い `FEED_CACHE_TAG` 定数と、`ingest.ts` / `submit-url.ts` の `revalidateTag()` 呼び出しも削除した。`/admin`（`src/app/admin/page.tsx`）も同様に `force-dynamic` とし、クールダウン状態と直近ラン結果（`last_run_summary`）を常に最新の DB 状態で表示する。
 
 ---
 

@@ -3,11 +3,9 @@ import { SubmitUrlForm } from "@/components/admin/submit-url-form";
 
 /**
  * 運用者専用コントロール（SNS URL 投入）をまとめた折りたたみパネル。
- * 収集トリガー（IngestTrigger）は訪問者向け機能として独立し、フィード側の
- * 主導線（CollectPanel・各レーンの空状態）に移った。ここに残るのは
- * 判断力が要る・濫用防止のため無認証公開できない操作のみ。
- * 読者向けの導線とは切り離し、ページ最下部に控えめに配置することで
- * フィード自体の視線誘導を妨げない。ネイティブ <details> なので JS 不要で
+ * `/admin`（`src/middleware.ts` の Basic 認証配下）にのみ置かれ、収集トリガー
+ * （`IngestStatusPanel`）と同じページに同居する。判断力が要る・濫用防止のため
+ * 公開面には出せない操作をここに集約する。ネイティブ <details> なので JS 不要で
  * 開閉でき、開閉状態を持つのはここだけ（中身は SubmitUrlForm が
  * "use client" として自律的にペンディング状態を扱う）。
  */

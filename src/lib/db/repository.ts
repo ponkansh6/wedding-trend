@@ -1,4 +1,4 @@
-import { eq, inArray, lte } from "drizzle-orm";
+import { and, eq, inArray, lt, lte } from "drizzle-orm";
 import { db } from "./index";
 import { config, posts } from "./schema";
 import type { Category, EmbedProvider, PostStatus, SourceType, TrendTag } from "@/lib/types";
@@ -223,30 +223,44 @@ export async function saveEmbed(url: string, embed: EmbedResult): Promise<boolea
   }
 }
 
-// ── config テーブル（収集トリガーの排他ロック・グローバルクールダウン）──
-// 業務ロジック（4時間/10分という時間幅・cooldownUntil の算出）は
-// `src/lib/pipeline/cooldown.ts` に置き、ここでは DB アクセスのみを担う。
+// ── config テーブル（収集トリガーの排他ロック・クールダウン・テレメトリ）──
+// 業務ロジック（クールダウン幅・claim/extend の使い分けなど）は
+// `src/lib/pipeline/cooldown.ts` / `src/lib/pipeline/ingest.ts` に置き、
+// ここでは DB アクセスのみを担う。
 //
-// 2 つの key を持つ:
-// - "last_ingest_at": グローバルクールダウン（公開ボタン経路のみが評価する）
+// 4 つの key を持つ:
+// - "ingest_cooldown_until": クールダウンの**期限そのもの**（起点時刻ではなく
+//   絶対的な満了時刻の ISO8601 文字列）を保持する。claim（原子的な条件付き
+//   確保）と extend（CAS による延長）の 2 段階で書き込まれる。
 // - "ingest_lease_until": 実行排他ロック（全経路が必ず取得する）
-// 両方とも「原子的な条件付き書き込み」と「無条件上書き」の 2 操作を
-// `writeConfigValue` という単一のヘルパーに集約している（詳細はその JSDoc）。
+// - "last_cron_ingest_at": Cron 経路の実行時刻を記録する観測用の値。
+//   cooldown・lease とは独立しており、何の判定にも使われない。
+// - "last_run_summary": 直近の収集ランの結果を保持する JSON 文字列
+//   （`src/lib/pipeline/ingest.ts` の `LastRunSummary` 参照）。テレメトリ用途で、
+//   他の 3 キーとは異なり値が ISO8601 ではない（`assertIso8601` を通さない）。
+//
+// 「原子的な条件付き書き込み」と「無条件上書き」の全操作を `writeConfigValue`
+// という単一のヘルパーに集約している（詳細はその JSDoc）。
 
-const LAST_INGEST_AT_KEY = "last_ingest_at";
+const INGEST_COOLDOWN_KEY = "ingest_cooldown_until";
 const INGEST_LEASE_KEY = "ingest_lease_until";
+const LAST_CRON_INGEST_AT_KEY = "last_cron_ingest_at";
+const LAST_RUN_SUMMARY_KEY = "last_run_summary";
 
 /**
- * `writeConfigValue` に渡す `value` / `nowISO` / `cutoff` が
- * `Date#toISOString()` と同じ ISO8601 形式であることを強制する。
+ * `writeConfigValue` に渡す ISO8601 系の値（`value` / `nowISO` / 条件に含まれる
+ * 時刻文字列）が `Date#toISOString()` と同じ形式であることを強制する。
  *
  * ⚠️ なぜこの検証が必須か: `config.value` は cooldown / lease の期限判定で
- * **文字列（辞書順）比較**される（`WHERE config.value <= ?`）。ISO8601 以外の
+ * **文字列（辞書順）比較**される（`WHERE config.value <= ?` 等）。ISO8601 以外の
  * 形式――特に SQLite の `datetime('now')` が返す空白区切り形式
  * （`"YYYY-MM-DD HH:MM:SS"`）――が紛れ込むと、空白 (`0x20`) は `"T"` (`0x54`)
  * より辞書順で小さいため、あらゆる `cutoff` に対して常に「期限切れ」と
  * 判定されてしまい、cooldown・lease のいずれも恒久的に無効化される
  * （＝濫用防止が黙って壊れる）。
+ *
+ * `last_run_summary`（JSON 文字列）はそもそも時刻ではないため、この検証を
+ * 通さない（`writeConfigValue` の `validateValue: false` を参照）。
  */
 function assertIso8601(value: string, context: string): void {
   const ISO_8601_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
@@ -258,12 +272,28 @@ function assertIso8601(value: string, context: string): void {
 }
 
 /**
- * `config` テーブルへの**唯一の書き込み経路**。cooldown（"last_ingest_at"）と
- * lease（"ingest_lease_until"）の両方の書き込みがこの関数を経由する。
+ * 条件付き書き込みの種類。`writeConfigValue` の `options.condition` に渡す。
  *
- * - `cutoff` を省略すると無条件上書き（常に成功、戻り値は常に true）。
- * - `cutoff` を指定すると、`INSERT ... ON CONFLICT(key) DO UPDATE ... WHERE
- *   config.value <= cutoff` という単一の SQL 文で原子的な条件付き書き込みを行う
+ * - `"cutoff"`: 保存済みの `value` が `cutoff` **以下**（＝期限切れ、または
+ *   行が存在しない）ときのみ書き込む。claim（cooldown の確保）・lease の
+ *   取得の両方がこの形。
+ * - `"cas"`: 保存済みの `value` が `expected` と**完全一致**し、かつ新しい
+ *   `value` の方が辞書順で**後**（＝時系列で後）のときのみ書き込む。
+ *   cooldown の延長（extend）専用。「一致」と「単調増加」を単一の WHERE に
+ *   畳み込むことで、(a) 自分が確保した期限とは異なる値（＝他の書き手が
+ *   新たに確保した期限）を静かに上書きしてしまう事故と、(b) 期限を短縮する
+ *   方向への書き込みの両方を同時に防ぐ。
+ */
+type WriteCondition = { type: "cutoff"; cutoff: string } | { type: "cas"; expected: string };
+
+/**
+ * `config` テーブルへの**唯一の書き込み経路**。cooldown（"ingest_cooldown_until"）・
+ * lease（"ingest_lease_until"）・観測用キー（"last_cron_ingest_at" /
+ * "last_run_summary"）のすべての書き込みがこの関数を経由する。
+ *
+ * - `options.condition` を省略すると無条件上書き（常に成功、戻り値は常に true）。
+ * - `condition` を指定すると、`INSERT ... ON CONFLICT(key) DO UPDATE ... WHERE ...`
+ *   という単一の SQL 文で原子的な条件付き書き込みを行う
  *   （drizzle の `onConflictDoUpdate({ setWhere })`）。「読んでから書く」の
  *   2 段構えでは複数リクエストが同時に「まだ有効ではない」と読み取ってから
  *   両方とも書き込んでしまう TOCTOU 競合を避けられないため、読み取りと
@@ -272,33 +302,50 @@ function assertIso8601(value: string, context: string): void {
  *   高々 1 件に限られる。
  *   - 行が存在しない初回は ON CONFLICT が発火せず通常の INSERT として成功する
  *     （`rowsAffected` = 1 → true）。
- *   - 保存済みの `value` が `cutoff` 以下（＝期限切れ）なら UPDATE が発火する
- *     （`rowsAffected` = 1 → true）。
- *   - 保存済みの `value` が `cutoff` より新しい（＝まだ有効）なら WHERE 条件が
- *     偽になり UPDATE は発火しない（`rowsAffected` = 0 → false）。
- *
- * ISO8601 形式の強制については `assertIso8601` を参照。
+ *   - WHERE 条件（`cutoff` 以下、または `cas` の一致＋単調増加）を満たせば
+ *     UPDATE が発火する（`rowsAffected` = 1 → true）。
+ *   - 満たさなければ WHERE 条件が偽になり UPDATE は発火しない
+ *     （`rowsAffected` = 0 → false）。
+ * - `options.validateValue: false` を指定すると `value` への `assertIso8601`
+ *   検証をスキップする（`last_run_summary` の JSON 値専用。`nowISO` と
+ *   `condition` に含まれる時刻文字列は種類によらず常に検証する）。
  *
  * ⚠️ **この関数（＝すべての書き込み経路）は意図的に fail-closed のままにする。
  * クエリ失敗（例: `config` テーブルが存在しない）を握りつぶして `true` や
  * 成功扱いにフォールバックしないこと。** 例外はそのまま呼び出し元に伝播させる
- * （`claimLastIngestAt` / `claimIngestLease` / `setLastIngestAt` /
+ * （`claimIngestCooldown` / `extendIngestCooldown` / `claimIngestLease` /
  * `releaseIngestLease` いずれもここで catch しない）。テーブルが無い環境で
  * 「クールダウン/lease の取得（＝書き込み）に成功した」と誤認すると、
  * レートリミット・排他ロックという濫用防止機構そのものが丸ごと無効化される
- * ため。これは読み取り専用の `getLastIngestAt()` が意図的にフェイルソフト
+ * ため。これは読み取り専用の `getIngestCooldownValue()` が意図的にフェイルソフト
  * （テーブルが無ければ `null` を返す）にしているのとは非対称であり、その
- * 非対称性は意図的である（詳細は `getLastIngestAt` の JSDoc を参照）。
+ * 非対称性は意図的である（詳細は `getIngestCooldownValue` の JSDoc を参照）。
+ *
+ * `last_run_summary`（`saveLastRunSummary`）はこの原則の例外ではない
+ * ――この関数自体は同じく fail-closed（例外を投げる）のままだが、
+ * その**呼び出し元**（`src/lib/pipeline/ingest.ts`）がテレメトリ用途として
+ * 意図的に catch して握りつぶす。書き込みが本処理（収集ラン）を落としては
+ * ならないため。
  */
 async function writeConfigValue(
   key: string,
   value: string,
   nowISO: string,
-  cutoff?: string,
+  options?: { condition?: WriteCondition; validateValue?: boolean },
 ): Promise<boolean> {
-  assertIso8601(value, key);
+  const validateValue = options?.validateValue ?? true;
+  if (validateValue) assertIso8601(value, key);
   assertIso8601(nowISO, key);
-  if (cutoff !== undefined) assertIso8601(cutoff, key);
+
+  const condition = options?.condition;
+  let setWhere: ReturnType<typeof lte> | ReturnType<typeof and> | undefined;
+  if (condition?.type === "cutoff") {
+    assertIso8601(condition.cutoff, key);
+    setWhere = lte(config.value, condition.cutoff);
+  } else if (condition?.type === "cas") {
+    assertIso8601(condition.expected, key);
+    setWhere = and(eq(config.value, condition.expected), lt(config.value, value));
+  }
 
   const result = await db
     .insert(config)
@@ -306,34 +353,59 @@ async function writeConfigValue(
     .onConflictDoUpdate({
       target: config.key,
       set: { value, updatedAt: nowISO },
-      ...(cutoff !== undefined ? { setWhere: lte(config.value, cutoff) } : {}),
+      ...(setWhere ? { setWhere } : {}),
     });
-  return cutoff !== undefined ? (result.rowsAffected ?? 0) > 0 : true;
+  return condition ? (result.rowsAffected ?? 0) > 0 : true;
 }
 
 /**
- * `last_ingest_at` の原子的な奪取（Compare-And-Swap 相当）。
- * クールダウン判定用。詳細は `writeConfigValue` を参照。
+ * `ingest_cooldown_until` の原子的な確保（claim）。
  *
- * @param nowISO 現在時刻（この呼び出しが奪取に成功した場合に保存する値）。
- * @param cutoffISO `now - INGEST_COOLDOWN_MS` の ISO8601 文字列。
+ * 以前は「起点時刻」（`last_ingest_at`）を保存して都度クールダウン幅を
+ * 加算していたが、この関数は**期限そのもの**（`deadlineISO`）を保存する。
+ * 保存済みの値が `nowISO` 以下（＝期限切れ、または行が存在しない）のときだけ
+ * `deadlineISO` を書き込んで奪取に成功する。詳細は `writeConfigValue` を参照。
+ *
+ * @param nowISO 現在時刻（＝期限切れ判定のカットオフ）。
+ * @param deadlineISO 奪取に成功した場合に保存する新しい期限
+ *   （呼び出し元が `now + INGEST_BASE_COOLDOWN_MS` として計算する）。
  * @returns 奪取に成功したら true。
  */
-export async function claimLastIngestAt(nowISO: string, cutoffISO: string): Promise<boolean> {
-  return writeConfigValue(LAST_INGEST_AT_KEY, nowISO, nowISO, cutoffISO);
+export async function claimIngestCooldown(nowISO: string, deadlineISO: string): Promise<boolean> {
+  return writeConfigValue(INGEST_COOLDOWN_KEY, deadlineISO, nowISO, {
+    condition: { type: "cutoff", cutoff: nowISO },
+  });
 }
 
 /**
- * `last_ingest_at` を条件なしで上書きする。
- * 収集の実行開始時刻を記録するために、公開ボタン・Cron の両経路から使う
- * （起点を「実行開始時刻」に統一するため。詳細は `src/lib/pipeline/cooldown.ts`）。
+ * `ingest_cooldown_until` の延長（CAS）。ラン完了後、Gemini を実際に呼んだ
+ * 場合のみ呼び出し元（`src/lib/pipeline/cooldown.ts`）から呼ばれる。
+ *
+ * 保存済みの値が `claimedDeadlineISO`（自分が claim 時点で確保した期限）と
+ * **完全一致**し、かつ `newDeadlineISO` の方が新しい（時系列で後）ときのみ
+ * 書き換える。CAS にしている理由: 自分の claim 後に他の書き手が新たに
+ * cooldown を確保していた場合、その新しい期限を無条件延長で静かに上書きして
+ * しまうため。単調増加のみを許すのは、既に確保済みの期限を短縮する方向へ
+ * 書き込んでしまう事故（例: 呼び出し順序の入れ替わり）を防ぐため。
+ * 詳細は `writeConfigValue` の `WriteCondition["cas"]` を参照。
+ *
+ * @returns 延長に成功したら true（CAS が一致しなかった場合は false）。
  */
-export async function setLastIngestAt(nowISO: string): Promise<void> {
-  await writeConfigValue(LAST_INGEST_AT_KEY, nowISO, nowISO);
+export async function extendIngestCooldown(
+  nowISO: string,
+  claimedDeadlineISO: string,
+  newDeadlineISO: string,
+): Promise<boolean> {
+  return writeConfigValue(INGEST_COOLDOWN_KEY, newDeadlineISO, nowISO, {
+    condition: { type: "cas", expected: claimedDeadlineISO },
+  });
 }
 
 /**
- * 保存されている `last_ingest_at`（ISO8601 文字列）。未実行なら null。
+ * 保存されている `ingest_cooldown_until`（ISO8601 文字列、期限そのもの）。
+ * 未設定なら null。**算術（時刻の加算）は一切行わない生の読み取り**であり、
+ * 「クールダウン中かどうか」の判定は呼び出し元（`getCooldownUntil`）が
+ * `value > now` を比較して行う。
  *
  * **読み取り経路はフェイルソフト**（`src/lib/db/query.ts` の `getFeedCards` と
  * 同じパターン: `try/catch` + `console.warn` + 安全側デフォルトを返す）。
@@ -343,24 +415,24 @@ export async function setLastIngestAt(nowISO: string): Promise<void> {
  * 意味的にも妥当（`null` は「クールダウンなし＝ボタンが押せる」を表す）。
  *
  * ⚠️ この読み取り経路のフェイルソフトは、**書き込み経路
- * （`claimLastIngestAt` / `claimIngestLease` / `writeConfigValue`）には適用しない**
- * （それらのコメントを参照）。読み取りだけを緩めるのは、失敗時に「実行して
- * よい」と誤認させず、単に「クールダウン情報が不明＝実行可能とみなしても実害
- * がない読み取り専用の初期表示」に限定して安全側に倒しているため。書き込み
- * 側まで握りつぶすと、`config` テーブルが無い環境で「クールダウン/lease の
- * 取得に成功した」と誤認し、濫用防止（レートリミット・排他ロック）が丸ごと
- * 無効化されてしまう。
+ * （`claimIngestCooldown` / `extendIngestCooldown` / `claimIngestLease` /
+ * `writeConfigValue`）には適用しない**（それらのコメントを参照）。読み取り
+ * だけを緩めるのは、失敗時に「実行してよい」と誤認させず、単に「クールダウン
+ * 情報が不明＝実行可能とみなしても実害がない読み取り専用の初期表示」に
+ * 限定して安全側に倒しているため。書き込み側まで握りつぶすと、`config`
+ * テーブルが無い環境で「クールダウン/lease の取得に成功した」と誤認し、
+ * レートリミット・排他ロックが丸ごと無効化されてしまう。
  */
-export async function getLastIngestAt(): Promise<string | null> {
+export async function getIngestCooldownValue(): Promise<string | null> {
   try {
     const rows = await db
       .select({ value: config.value })
       .from(config)
-      .where(eq(config.key, LAST_INGEST_AT_KEY))
+      .where(eq(config.key, INGEST_COOLDOWN_KEY))
       .limit(1);
     return rows[0]?.value ?? null;
   } catch (err) {
-    console.warn("[db] getLastIngestAt query error:", err);
+    console.warn("[db] getIngestCooldownValue query error:", err);
     return null;
   }
 }
@@ -378,7 +450,9 @@ export async function getLastIngestAt(): Promise<string | null> {
  * @returns 奪取に成功したら true。
  */
 export async function claimIngestLease(nowISO: string, leaseUntilISO: string): Promise<boolean> {
-  return writeConfigValue(INGEST_LEASE_KEY, leaseUntilISO, nowISO, nowISO);
+  return writeConfigValue(INGEST_LEASE_KEY, leaseUntilISO, nowISO, {
+    condition: { type: "cutoff", cutoff: nowISO },
+  });
 }
 
 /**
@@ -389,4 +463,50 @@ export async function claimIngestLease(nowISO: string, leaseUntilISO: string): P
 export async function releaseIngestLease(nowISO: string): Promise<void> {
   const EXPIRED = "1970-01-01T00:00:00.000Z";
   await writeConfigValue(INGEST_LEASE_KEY, EXPIRED, nowISO);
+}
+
+/**
+ * `last_cron_ingest_at` を条件なしで上書きする。Cron 経路（`/api/ingest`）が
+ * 実行時刻を記録する観測用の値であり、`ingest_cooldown_until` とは完全に
+ * 独立している（Cron はクールダウンの評価も更新も一切行わない。詳細は
+ * `src/app/api/ingest/route.ts` の JSDoc を参照）。cooldown・lease のような
+ * 排他制御ではなく、単なる「最後にいつ Cron が動いたか」の記録のため無条件
+ * 上書きでよい。
+ */
+export async function recordCronIngestAt(nowISO: string): Promise<void> {
+  await writeConfigValue(LAST_CRON_INGEST_AT_KEY, nowISO, nowISO);
+}
+
+/**
+ * `last_run_summary` に直近の収集ラン結果を JSON 文字列として無条件保存する。
+ * 排他制御の対象ではない（最後に書いたランの結果を常に上書きするだけでよい）
+ * ため条件なし。`value` は ISO8601 ではなく JSON なので `validateValue: false`
+ * で `assertIso8601` をスキップする。
+ *
+ * この関数自体は他の書き込み経路と同様に fail-closed（例外を投げる）だが、
+ * 呼び出し元（`src/lib/pipeline/ingest.ts`）はテレメトリ用途としてこれを
+ * 意図的に catch し、保存失敗で収集ラン自体を失敗させない。
+ */
+export async function saveLastRunSummary(json: string, nowISO: string): Promise<void> {
+  await writeConfigValue(LAST_RUN_SUMMARY_KEY, json, nowISO, { validateValue: false });
+}
+
+/**
+ * `last_run_summary` の生 JSON 文字列。未保存なら null。
+ * JSON としてのパース・スキーマ検証は呼び出し元（`getLastRunSummary`）が行う
+ * （ここでは文字列をそのまま返すだけ）。読み取り専用のためフェイルソフト
+ * （`getIngestCooldownValue` と同じ方針。詳細はそちらの JSDoc を参照）。
+ */
+export async function readLastRunSummary(): Promise<string | null> {
+  try {
+    const rows = await db
+      .select({ value: config.value })
+      .from(config)
+      .where(eq(config.key, LAST_RUN_SUMMARY_KEY))
+      .limit(1);
+    return rows[0]?.value ?? null;
+  } catch (err) {
+    console.warn("[db] readLastRunSummary query error:", err);
+    return null;
+  }
 }

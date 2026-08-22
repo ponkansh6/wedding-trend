@@ -1,14 +1,17 @@
 "use server";
 
+import { headers } from "next/headers";
 import { z } from "zod";
+import { isBasicAuthorized } from "@/lib/auth";
 import { detectEmbedProvider } from "@/lib/embed/providers";
 import {
   acquireIngestLease,
   claimIngestSlot,
+  extendIngestCooldownAfterRun,
   getCooldownUntil,
   releaseIngestLease,
 } from "@/lib/pipeline/cooldown";
-import { runIngest } from "@/lib/pipeline/ingest";
+import { getLastRunSummary, runIngest, type LastRunSummary } from "@/lib/pipeline/ingest";
 import { runSubmitUrl } from "@/lib/pipeline/submit-url";
 import type { FeedCard } from "@/lib/types";
 
@@ -22,17 +25,17 @@ export type IngestResult = {
   /**
    * 今回のこの呼び出しで実際に `runIngest()` を実行したかどうか。
    *
-   * `false` はクールダウン中で見送ったことを意味する（エラーではない）。
-   * `ok` とは独立したフィールドであり、これを分けているのは
+   * `false` はクールダウン中で見送ったこと、または認証に失敗したことを意味する
+   * （エラーではない）。`ok` とは独立したフィールドであり、これを分けているのは
    * 「実行したが失敗した」（`ran: true, ok: false`）と「実行しなかった」
    * （`ran: false, ok: false`）を呼び出し側が区別できるようにするため。
-   * `cooldownUntil` は実行の有無にかかわらず値が入るため、
+   * `cooldownUntil` は実行の有無にかかわらず値が入り得るため、
    * 「実行されなかった」の判定には `cooldownUntil` の真偽ではなく
    * 必ずこの `ran` を使うこと。
    */
   ran: boolean;
   /**
-   * 別の収集処理（公開ボタンの別呼び出し、または Cron 経路）が実行中で、
+   * 別の収集処理（`/admin` の別タブ、または Cron 経路）が実行中で、
    * 今回の呼び出しが弾かれた場合に true。
    *
    * `busy: true` のとき `ran` は必ず false（＝実行権の奪取より前で弾かれるため
@@ -52,9 +55,10 @@ export type IngestResult = {
    *
    * `busy: false` のときは `ran` の値に関わらず、この呼び出し時点で判明して
    * いるクールダウン満了時刻が常に入る。実行した場合（`ran: true`、成功・
-   * 失敗いずれも）は「今回消費した枠」の満了時刻、見送った場合
-   * （`ran: false`）は「既存の枠」の満了時刻。null になるのは、クールダウンの
-   * 状態を確定できなかった場合のみ（実質的に発生しない）。
+   * 失敗いずれも）は「今回消費した枠」の満了時刻（Gemini を実際に呼んでいれば
+   * 4 時間後、呼んでいなければ 15 分後）、見送った場合（`ran: false`）は
+   * 「既存の枠」の満了時刻。null になるのは、クールダウンの状態を確定できな
+   * かった場合、または認証に失敗した場合のみ。
    *
    * `busy: true` のときは lease 取得より前で弾かれているため、この値は
    * あくまで参考情報（現在クールダウン中かどうか）であり、クールダウン中
@@ -82,16 +86,10 @@ export type SubmitUrlResult = {
 };
 
 /**
- * 管理操作（収集トリガー・URL 投入）が有効かどうか。
- *
- * 本番では既定で無効。UI を隠すだけでは防御にならないため、
- * 各 Server Action 自身も実行時に同じ判定を行う。
+ * 管理操作（収集トリガー・URL 投入・ラン結果の閲覧）が未認証・認証失敗の場合に
+ * 画面へそのまま表示する文言。生の認証エラーの内部情報（どちらの資格情報が
+ * 一致しなかったか等）は一切含めない。
  */
-export async function adminControlsEnabled(): Promise<boolean> {
-  return process.env.NODE_ENV !== "production" || process.env.ENABLE_ADMIN_CONTROLS === "1";
-}
-
-/** 管理操作が無効な場合に画面へそのまま表示する文言。 */
 const ADMIN_DISABLED_MESSAGE = "この操作は現在無効になっています。管理者にお問い合わせください。";
 
 /**
@@ -104,8 +102,10 @@ const NEEDS_SOURCE_TEXT_MESSAGE =
   "この投稿は本文を取得できませんでした。Instagramの埋め込みAPIはキャプション文を返さないため、AIが要約する元の文章が存在しません。埋め込み自体は保存済みです。投稿フォームの「補足メモ」欄に投稿内容の要点を入力し、再度お試しください。";
 
 /**
- * 収集ボタンの初期描画用。実行はせず、現在のクールダウン状態のみを返す
- * （クールダウン中でなければ `cooldownUntil: null`）。
+ * `/admin`（Basic 認証配下）の収集ボタンの初期描画用。実行はせず、現在の
+ * クールダウン状態のみを返す（クールダウン中でなければ `cooldownUntil: null`）。
+ * 読み取り専用のためここでは認証を要求しない（`getCooldownUntil()` 自体が
+ * フェイルソフトで、クールダウンの残り時間という非機密情報を返すのみ）。
  *
  * `triggerIngest()` が返す `IngestResult.cooldownUntil` とは null の意味が
  * 異なる点に注意: こちらは「今このボタンを押せるか」の事前確認であり、
@@ -117,28 +117,40 @@ export async function getIngestCooldown(): Promise<{ cooldownUntil: string | nul
 }
 
 /**
+ * `/admin` に直近の収集ラン結果（`last_run_summary`）を表示するための読み取り
+ * 専用ラッパー。`triggerIngest()` / `submitSnsUrl()` と同じく Basic 認証を
+ * 多層防御として再検証する（`/admin` 配下は `src/middleware.ts` が保護している
+ * が、Server Action は URL さえ知っていれば直接呼び出せるため）。
+ *
+ * 未認証・認証失敗の場合は `null` を返す（「まだ実行されていない」場合の
+ * 応答と区別しない。認証に失敗した相手に「実行履歴があるかどうか」という
+ * 情報自体を与えないため）。
+ */
+export async function getIngestStatus(): Promise<LastRunSummary | null> {
+  if (!isBasicAuthorized(await headers())) {
+    return null;
+  }
+  return getLastRunSummary();
+}
+
+/**
  * 収集処理が例外を投げた場合に公開面へそのまま返す固定文言。
  *
  * Gemini SDK / libSQL / undici 等が投げる例外の `message` にはホスト名・URL・
- * リクエスト断片が混ざり得るため、公開ページ（無認証の誰でも見える面）には
- * 絶対に生の例外メッセージを出さない。実際の例外は console.error でサーバー
- * ログにのみ出力する。
+ * リクエスト断片が混ざり得るため、公開面には絶対に生の例外メッセージを出さない。
+ * 実際の例外は console.error でサーバーログにのみ出力する。
  */
 const INGEST_ERROR_MESSAGE = "収集処理でエラーが発生しました。時間をおいてお試しください。";
 
 /**
- * `runIngest()` が返す `summary.errors`（ソースごとの取得・キュレーション
- * 失敗メッセージ）を公開面向けにサニタイズする。
- *
- * `src/lib/pipeline/ingest.ts` は編集対象外のため、そこが生成する各要素
- * （ソース ID・LLM 例外メッセージ等を含みうる）をここで安全な文言に置換する。
- * 原文は console.error でサーバーログにのみ残し、公開面には件数のみを返す。
+ * `runIngest()` が例外を投げた場合、実際に Gemini を呼んでいたかどうかは
+ * `summary` が存在しないため判別できない。安全側に倒し「呼んだ可能性がある」
+ * とみなして無条件でクールダウンを 4 時間へ延長する（予算保護を優先する判断。
+ * 詳細は `resolveCooldownAfterRun` を参照）。`extendIngestCooldownAfterRun()`
+ * は `geminiCalls > 0` かどうかだけを見るため、実際の呼び出し回数ではなく
+ * 「延長を強制する」ことを表す正の値として `1` を渡す。
  */
-function sanitizeIngestErrors(rawErrors: string[]): string[] {
-  if (rawErrors.length === 0) return [];
-  console.error("[actions] triggerIngest: runIngest reported per-source errors:", rawErrors);
-  return [`一部のソースを取得できませんでした（${rawErrors.length}件）`];
-}
+const ASSUME_GEMINI_CALLED = 1;
 
 /**
  * lease / cooldown の取得（＝ `config` テーブルへの読み書き）自体が例外を
@@ -168,32 +180,112 @@ function ingestUnavailableResult(): IngestResult {
 }
 
 /**
- * RSS 巡回パイプラインを実行する公開 Server Action。
+ * Basic 認証の検証に失敗した場合に返す `IngestResult`。lease/cooldown には
+ * 一切触れていない（＝実行権を消費していない）ため `cooldownUntil: null`、
+ * `ran: false`。
+ */
+function ingestUnauthorizedResult(): IngestResult {
+  return {
+    ok: false,
+    ran: false,
+    busy: false,
+    fetched: 0,
+    inserted: 0,
+    curated: 0,
+    skipped: 0,
+    errors: [ADMIN_DISABLED_MESSAGE],
+    cooldownUntil: null,
+  };
+}
+
+/**
+ * `runIngest()` が返す `summary.errors`（ソースごとの取得・キュレーション
+ * 失敗メッセージ）を公開面向けにサニタイズする。
  *
- * 収集ボタンは無認証で本番の公開トップページに置かれる方針のため、
- * `adminControlsEnabled()` によるガードは行わない（`submitSnsUrl` とは
- * 異なり、意図的に誰でも呼び出せる）。代わりに 2 段の防御を DB 側で必ず
- * 強制する:
+ * `src/lib/pipeline/ingest.ts` は編集対象外のため、そこが生成する各要素
+ * （ソース ID・LLM 例外メッセージ等を含みうる）をここで安全な文言に置換する。
+ * 原文は console.error でサーバーログにのみ残し、公開面には件数のみを返す。
+ */
+function sanitizeIngestErrors(rawErrors: string[]): string[] {
+  if (rawErrors.length === 0) return [];
+  console.error("[actions] triggerIngest: runIngest reported per-source errors:", rawErrors);
+  return [`一部のソースを取得できませんでした（${rawErrors.length}件）`];
+}
+
+/**
+ * `claimIngestSlot()` が確保した 15 分のクールダウンを、ラン完了後に必要なら
+ * 4 時間へ延長し（`extendIngestCooldownAfterRun`）、その後の実際の
+ * `cooldownUntil` を読み直して返す。
  *
- * 1. **lease（排他ロック、全経路共通）**: `acquireIngestLease()` が失敗したら
+ * `extendIngestCooldownAfterRun()` 自体は戻り値を持たない（void）ため、
+ * 延長後の値を UI へ正しく返すには読み直しが必要。読み直しに
+ * `getCooldownUntil()`（読み取り専用・フェイルソフト）を使うことで、
+ * 延長が CAS の不一致で失敗したケース（他の呼び出しが既に新しい cooldown を
+ * 確保していた場合）でも、内部で計算式を重複実装せず常に DB 上の実際の値を
+ * 返せる。
+ *
+ * `extendIngestCooldownAfterRun()` 自体が書き込み経路のため fail-closed
+ * （例外を投げ得る）。ここで catch し、失敗しても `triggerIngest()` 全体を
+ * 未処理例外で落とさない（延長できなかった場合は、`claimIngestSlot()` が
+ * 確保した 15 分のクールダウンがそのまま有効な状態として扱われる）。
+ */
+async function resolveCooldownAfterRun(
+  claimedCooldownUntil: string,
+  geminiCalls: number,
+  now: Date,
+): Promise<string> {
+  try {
+    await extendIngestCooldownAfterRun(claimedCooldownUntil, geminiCalls, now);
+  } catch (err) {
+    console.error(
+      "[actions] triggerIngest: extendIngestCooldownAfterRun failed (cooldown may remain at the base 15-minute window):",
+      err,
+    );
+  }
+  const current = await getCooldownUntil(now);
+  return current ?? claimedCooldownUntil;
+}
+
+/**
+ * RSS 巡回パイプラインを実行する Server Action。`/admin`（`src/middleware.ts`
+ * の Basic 認証配下）の収集ボタンから呼ばれる、オーナー限定の操作。
+ *
+ * 収集ボタンは以前、無認証で本番の公開トップページに置かれていたが、
+ * 「体験談 0 件なのに更新制限」という誤解を招く報告（実際は ISR の stale
+ * ページが原因）をきっかけに、オーナー限定（`/admin`）へ移した。UI を隠す
+ * だけでは防御にならないため、3 段の防御を組み合わせる:
+ *
+ * 1. **Basic 認証の再検証（多層防御）**: `/admin` は `src/middleware.ts` で
+ *    保護されているが、Server Action は URL さえ知っていれば直接呼び出せる
+ *    ため、`isBasicAuthorized()` でこの Server Action 自身も再検証する。
+ *    失敗したら `runIngest()` は一切呼ばず、安全な固定文言を返す。
+ * 2. **lease（排他ロック、全経路共通）**: `acquireIngestLease()` が失敗したら
  *    ＝別の経路（Cron を含む）が実行中ということなので、`runIngest()` を
  *    呼ばずに `busy: true` を返す。
- * 2. **cooldown（レートリミット、この公開ボタン経路のみ）**: lease を取得した
- *    後、`claimIngestSlot()` が 4 時間のグローバルクールダウンを DB 側で
- *    原子的に強制する。クールダウン中であれば lease を解放し、`runIngest()`
- *    を呼ばずに待機状態を返す。
+ * 3. **cooldown（連打防止、claim → extend の 2 段階）**: lease を取得した後、
+ *    `claimIngestSlot()` が 15 分のクールダウンを DB 側で原子的に確保する
+ *    （同時多重実行・空振り連打の防止が目的）。クールダウン中であれば lease
+ *    を解放し、`runIngest()` を呼ばずに待機状態を返す。実行後、実際に
+ *    Gemini を呼んでいれば（`summary.geminiCalls > 0`）
+ *    `extendIngestCooldownAfterRun()` が 4 時間へ延長する（Gemini 予算の
+ *    保護が目的。詳細は `src/lib/pipeline/cooldown.ts` を参照）。
  *
- * 両方を突破した場合のみ `last_ingest_at` を実行開始時刻で確定させた上で
- * `runIngest()` を実行し、成功・失敗いずれの場合も `finally` で必ず lease を
- * 解放する（呼び忘れると次の実行が `INGEST_LEASE_TTL_MS` の間ブロックされる）。
+ * 全段を突破した場合のみ `runIngest("manual")` を実行し、成功・失敗いずれの
+ * 場合も `finally` で必ず lease を解放する（呼び忘れると次の実行が
+ * `INGEST_LEASE_TTL_MS` の間ブロックされる）。
  *
  * lease/cooldown の取得自体が例外を投げた場合（§ `ingestUnavailableResult`）も、
  * この Server Action は決して未処理例外で落とさず `IngestResult` を返す。
  */
 export async function triggerIngest(): Promise<IngestResult> {
+  // 0. Basic 認証の多層防御。lease/cooldown を消費する前に検証する。
+  if (!isBasicAuthorized(await headers())) {
+    return ingestUnauthorizedResult();
+  }
+
   const now = new Date();
 
-  // 1. lease（排他ロック）取得。全経路（この公開ボタン経路・Cron）が対象。
+  // 1. lease（排他ロック）取得。全経路（`/admin` の手動トリガー・Cron）が対象。
   // acquireIngestLease() は fail-closed な書き込み経路を通るため例外を投げ得る
   // （典型例: config テーブル未作成）。ここで確実に catch し、生の例外を
   // サーバーログにのみ残した上で安全な IngestResult を返す。
@@ -225,12 +317,11 @@ export async function triggerIngest(): Promise<IngestResult> {
     };
   }
 
-  // 2. cooldown（レートリミット）判定。この公開ボタン経路のみが評価する
-  // （Cron 経路はこの評価を免除される）。claimIngestSlot() は「クールダウン中
-  // でなければ last_ingest_at を実行開始時刻に更新する」ところまでを原子的に
-  // 行う。lease 同様、書き込み経路を通るため fail-closed（例外を投げ得る）。
-  // ここに到達した時点で lease は既に取得済みなので、例外時は解放してから返す
-  // （解放そのものが失敗しても、この Server Action は未処理例外で落ちない）。
+  // 2. cooldown（連打防止）判定。claimIngestSlot() は「クールダウン中でなければ
+  // 15 分の枠を確保する」ところまでを原子的に行う。lease 同様、書き込み経路を
+  // 通るため fail-closed（例外を投げ得る）。ここに到達した時点で lease は既に
+  // 取得済みなので、例外時は解放してから返す（解放そのものが失敗しても、
+  // この Server Action は未処理例外で落ちない）。
   let claim: Awaited<ReturnType<typeof claimIngestSlot>>;
   try {
     claim = await claimIngestSlot(now);
@@ -269,31 +360,39 @@ export async function triggerIngest(): Promise<IngestResult> {
   }
 
   // ここに到達した時点で claim.claimed === true、つまり claimIngestSlot() が
-  // last_ingest_at を実行開始時刻に更新済みで、実行権の枠を既に消費している。
-  // claim.cooldownUntil は「今回の奪取によって新たに開始したクールダウン」の
-  // 満了時刻であり、この後 runIngest() が成功しようが失敗しようが変わらない
-  // （枠を返却しない設計のため）。そのため成功時・失敗時のどちらの応答にも
-  // claim.cooldownUntil をそのまま含める。null を返すと、UI が「今すぐ実行可能」
-  // と誤って解釈し、直後に押すとクールダウン拒否になる不整合が生じるため。
-  // 両分岐とも ran: true（＝実際に runIngest() を実行した）で統一する。
+  // 15 分のクールダウンを確保済みで、実行権の枠を既に消費している。
   try {
-    const summary = await runIngest();
+    const summary = await runIngest("manual");
+    // runIngest() が実際に Gemini を呼んでいれば（geminiCalls > 0）クールダウンを
+    // 4 時間へ延長する。呼んでいなければ 15 分のまま（空振りはタダでやり直せる）。
+    const cooldownUntil = await resolveCooldownAfterRun(
+      claim.cooldownUntil,
+      summary.geminiCalls,
+      now,
+    );
+    const { fetched, inserted, curated, skipped, errors } = summary;
     return {
       ok: true,
       ran: true,
       busy: false,
-      ...summary,
-      errors: sanitizeIngestErrors(summary.errors),
-      cooldownUntil: claim.cooldownUntil,
+      fetched,
+      inserted,
+      curated,
+      skipped,
+      errors: sanitizeIngestErrors(errors),
+      cooldownUntil,
     };
   } catch (err) {
     // サーバーログには生の例外を残す（ホスト名等が混ざり得るため公開面には出さない）。
     console.error("[actions] triggerIngest failed:", err);
-    // 実行権の枠（クールダウン）は claimIngestSlot() の時点で既に消費済みであり、
-    // ここでは返却しない（= cooldownUntil を null にせず claim.cooldownUntil を返す）。
-    // runIngest() が失敗した直後にユーザーがリトライを連打できてしまうと、外部 API
-    // （RSS フィード・Gemini）への呼び出しが際限なく繰り返され、無認証で公開している
-    // ボタンからの予算焼き付きを防げなくなるため。
+    // runIngest() が例外を投げた場合、実際に Gemini を呼んでいたかは summary が
+    // 無いため判別できない。安全側（予算保護優先）に倒し、無条件で 4 時間へ
+    // 延長する（ASSUME_GEMINI_CALLED の JSDoc を参照）。
+    const cooldownUntil = await resolveCooldownAfterRun(
+      claim.cooldownUntil,
+      ASSUME_GEMINI_CALLED,
+      now,
+    );
     return {
       ok: false,
       ran: true,
@@ -303,10 +402,10 @@ export async function triggerIngest(): Promise<IngestResult> {
       curated: 0,
       skipped: 0,
       errors: [INGEST_ERROR_MESSAGE],
-      cooldownUntil: claim.cooldownUntil,
+      cooldownUntil,
     };
   } finally {
-    // 5. 成功・失敗いずれの場合も lease を必ず解放する。
+    // 成功・失敗いずれの場合も lease を必ず解放する。
     await releaseIngestLease(now);
   }
 }
@@ -346,12 +445,16 @@ const SnsUrlSchema = z
   });
 
 /**
- * SNS 投稿 URL を 1 件取り込む。
- * `note` は運営が添える補足メモ（省略可）。空白のみの入力は「補足なし」として扱う。
+ * SNS 投稿 URL を 1 件取り込む。`/admin`（Basic 認証配下）の運用フォームから
+ * 呼ばれる、オーナー限定の操作。`note` は運営が添える補足メモ（省略可）。
+ * 空白のみの入力は「補足なし」として扱う。
  */
 export async function submitSnsUrl(url: string, note?: string): Promise<SubmitUrlResult> {
-  // UI 側でボタンを隠していても、Server Action は直接叩けるため必ず再検証する。
-  if (!(await adminControlsEnabled())) {
+  // /admin は src/middleware.ts の Basic 認証で保護されているが、Server Action
+  // は URL さえ知っていれば UI・ミドルウェアを経由せず直接呼び出せるため、
+  // 必ず自身の実行時にも再検証する（多層防御。src/lib/auth.ts の
+  // isBasicAuthorized 参照）。
+  if (!isBasicAuthorized(await headers())) {
     return { ok: false, message: ADMIN_DISABLED_MESSAGE, card: null, needsNote: false };
   }
 

@@ -1,5 +1,4 @@
-import { revalidateTag } from "next/cache";
-import { AI_SUMMARY_VALIDATE_MAX_CHARS, AI_TITLE_MAX_CHARS, FEED_CACHE_TAG } from "@/lib/constants";
+import { AI_SUMMARY_VALIDATE_MAX_CHARS, AI_TITLE_MAX_CHARS } from "@/lib/constants";
 import { getPostsByUrls, markCurated, saveEmbed, upsertPosts } from "@/lib/db/repository";
 import { detectEmbedProvider } from "@/lib/embed/providers";
 import { fetchOEmbed, type OEmbedResult } from "@/lib/embed/oembed";
@@ -197,7 +196,8 @@ export async function runSubmitUrl(url: string, note?: string): Promise<SubmitOu
     });
   }
 
-  revalidateTag(FEED_CACHE_TAG, { expire: 0 });
+  // `/` は force-dynamic（`src/app/page.tsx`）でキャッシュを経由しないため、
+  // 以前ここにあったフィードキャッシュの明示的失効（revalidateTag）は不要になった。
 
   // 直前に確定させた値からそのまま FeedCard を組み立てる（再クエリせず、
   // キャッシュの反映タイミングに依存しない）。id のみ DB から取得する。

@@ -1,11 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { setupTestDb } from "./helpers/test-db";
 
-vi.mock("next/cache", () => ({
-  unstable_cache: (fn: any) => fn,
-  revalidateTag: vi.fn(),
-}));
-
 // vi.mock ファクトリより先に評価される必要があるため vi.hoisted() で宣言する
 // （通常の const 宣言だと vi.mock 側の巻き上げより後に実行され参照エラーになる）。
 const { hatenaFetch, hatenaToPost, googleNewsFetch, googleNewsToPost } = vi.hoisted(() => ({
@@ -30,14 +25,16 @@ vi.mock("@/lib/sources/registry", () => ({
 }));
 
 vi.mock("@/lib/llm/batch", () => ({
-  curatePosts: vi.fn().mockResolvedValue([
-    { title: "AI Curated Title", summary: "AI Summary", category: "その他", tag: "trend" },
-    { title: "AI Curated Title 2", summary: "AI Summary 2", category: "その他", tag: "classic" },
-  ]),
+  curatePosts: vi.fn().mockResolvedValue({
+    results: [
+      { title: "AI Curated Title", summary: "AI Summary", category: "その他", tag: "trend" },
+      { title: "AI Curated Title 2", summary: "AI Summary 2", category: "その他", tag: "classic" },
+    ],
+    geminiCalls: 1,
+  }),
 }));
 
 import { curatePosts } from "@/lib/llm/batch";
-import { revalidateTag } from "next/cache";
 import { runIngest } from "@/lib/pipeline/ingest";
 
 describe("runIngest (src/lib/pipeline/ingest.ts)", () => {
@@ -72,7 +69,7 @@ describe("runIngest (src/lib/pipeline/ingest.ts)", () => {
     });
   });
 
-  it("happy path: fetches from every adapter, upserts, curates, and revalidates the feed cache", async () => {
+  it("happy path: fetches from every adapter, upserts, and curates", async () => {
     const summary = await runIngest();
 
     expect(summary.fetched).toBe(2);
@@ -80,8 +77,8 @@ describe("runIngest (src/lib/pipeline/ingest.ts)", () => {
     expect(summary.curated).toBe(2);
     expect(summary.skipped).toBe(0);
     expect(summary.errors).toEqual([]);
+    expect(summary.geminiCalls).toBe(1);
     expect(curatePosts).toHaveBeenCalledTimes(1);
-    expect(revalidateTag).toHaveBeenCalledWith("feed-cards", { expire: 0 });
   });
 
   it("resilience: one adapter throwing does not stop ingestion from the other sources, and no error is thrown", async () => {
@@ -96,7 +93,5 @@ describe("runIngest (src/lib/pipeline/ingest.ts)", () => {
     expect(summary.errors).toHaveLength(1);
     expect(summary.errors[0]).toContain("hatena-bookmark");
     expect(summary.errors[0]).toContain("RSS feed unreachable");
-    // 1 ソースの失敗があってもキャッシュ失効は必ず実行される。
-    expect(revalidateTag).toHaveBeenCalledWith("feed-cards", { expire: 0 });
   });
 });
