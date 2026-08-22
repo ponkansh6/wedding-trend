@@ -56,7 +56,10 @@ async function main() {
   if (match) {
     const colBlock = match[1];
 
-    const colRegex = /\"(\w+)\"/g;
+    // 列定義行（propName: type("col_name"）の最初の引用符付き文字列だけを
+    // 列名として抽出する。ブロック内の全引用符を grep すると enum 値や
+    // .default() の値、JSDoc 内の例示まで誤検出する。
+    const colRegex = /^\s*\w+:\s*\w+\(\"(\w+)\"/gm;
     const expectedCols = new Set();
     let c;
     while ((c = colRegex.exec(colBlock)) !== null) {
