@@ -1,10 +1,13 @@
 import { Flame } from "lucide-react";
 import { FeedCard } from "@/components/feed/feed-card";
 import { EmptyState } from "@/components/feed/empty-state";
+import { SubmitUrlForm } from "@/components/admin/submit-url-form";
 import type { FeedCard as FeedCardData } from "@/lib/types";
 
 type FeedLaneTrendProps = {
   cards: FeedCardData[];
+  /** 運用者向け操作を表示するか（本番では既定で false）。 */
+  adminEnabled?: boolean;
 };
 
 /**
@@ -12,7 +15,7 @@ type FeedLaneTrendProps = {
  * モバイルでは横スクロールの「速報レール」、デスクトップではグリッドに
  * 切り替え、視覚優先・高速なリズムを演出する。
  */
-export function FeedLaneTrend({ cards }: FeedLaneTrendProps) {
+export function FeedLaneTrend({ cards, adminEnabled = false }: FeedLaneTrendProps) {
   return (
     <section aria-labelledby="lane-trend-heading" className="flex flex-col gap-4">
       <header className="flex flex-col gap-1.5">
@@ -35,7 +38,12 @@ export function FeedLaneTrend({ cards }: FeedLaneTrendProps) {
         <EmptyState
           variant="visual"
           title="速報はまだありません"
-          description="SNS の新しい投稿が見つかり次第、ここに一覧表示されます。しばらくしてから見に来てください。"
+          description={
+            adminEnabled
+              ? "このレーンはSNS投稿URLの追加でのみ埋まります。下のフォームにURLを貼り付けてください。"
+              : "SNS の新しい投稿が見つかり次第、ここに一覧表示されます。しばらくしてから見に来てください。"
+          }
+          action={adminEnabled ? <SubmitUrlForm compact /> : undefined}
         />
       ) : (
         <div

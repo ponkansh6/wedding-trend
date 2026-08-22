@@ -1,10 +1,13 @@
 import { Landmark } from "lucide-react";
 import { FeedCard } from "@/components/feed/feed-card";
 import { EmptyState } from "@/components/feed/empty-state";
+import { IngestTrigger } from "@/components/admin/ingest-trigger";
 import type { FeedCard as FeedCardData } from "@/lib/types";
 
 type FeedLaneClassicProps = {
   cards: FeedCardData[];
+  /** 運用者向け操作を表示するか（本番では既定で false）。 */
+  adminEnabled?: boolean;
 };
 
 /**
@@ -12,7 +15,7 @@ type FeedLaneClassicProps = {
  * 卒花ブログのレポート記事を、密度高めの縦リストで落ち着いて読ませる。
  * 上段の「速い」リズムと対比する「じっくり」のリズム。
  */
-export function FeedLaneClassic({ cards }: FeedLaneClassicProps) {
+export function FeedLaneClassic({ cards, adminEnabled = false }: FeedLaneClassicProps) {
   return (
     <section aria-labelledby="lane-classic-heading" className="flex flex-col gap-4">
       <header className="flex flex-col gap-1.5">
@@ -35,7 +38,12 @@ export function FeedLaneClassic({ cards }: FeedLaneClassicProps) {
         <EmptyState
           variant="editorial"
           title="定番の体験談はまだありません"
-          description="卒花ブログの記事が見つかり次第、ここに一覧表示されます。しばらくしてから見に来てください。"
+          description={
+            adminEnabled
+              ? "RSS取得元をまだ巡回していません。下のボタンから収集を実行してください。"
+              : "卒花ブログの記事が見つかり次第、ここに一覧表示されます。しばらくしてから見に来てください。"
+          }
+          action={adminEnabled ? <IngestTrigger compact /> : undefined}
         />
       ) : (
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">

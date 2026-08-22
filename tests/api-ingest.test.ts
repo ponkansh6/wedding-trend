@@ -74,10 +74,26 @@ describe("Ingest API Route", () => {
     expect(res.status).toBe(401);
   });
 
-  it("handles GET request with instruction message", async () => {
-    const res = await GET();
+  it("returns 401 for GET when unauthorized (Vercel Cron path without a valid CRON_SECRET)", async () => {
+    const req = new Request("http://localhost/api/ingest", { method: "GET" });
+    const res = await GET(req);
+    expect(res.status).toBe(401);
+  });
+
+  it("GET runs the same ingest pipeline as POST when authorized (Vercel Cron sends GET)", async () => {
+    const req = new Request("http://localhost/api/ingest", {
+      method: "GET",
+      headers: { authorization: "Bearer secret" },
+    });
+
+    const res = await GET(req);
+    expect(res.status).toBe(200);
     const json = await res.json();
-    expect(json.message).toBeDefined();
+    expect(json.fetched).toBe(1);
+    expect(json.inserted).toBe(1);
+    expect(json.curated).toBe(1);
+    expect(json.skipped).toBe(0);
+    expect(json.errors).toEqual([]);
   });
 
   it("successfully crawls, upserts, curates and revalidates when authorized", async () => {

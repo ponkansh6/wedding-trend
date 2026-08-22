@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Flame, Landmark } from "lucide-react";
 import { cn } from "@/lib/cn";
 
@@ -5,6 +6,12 @@ type EmptyStateProps = {
   variant: "visual" | "editorial";
   title: string;
   description: string;
+  /**
+   * 運用者向け操作（収集トリガー・SNS URL 投入フォームなど）。
+   * 空状態こそ、そのレーンを埋める手段を最も欲しがっている瞬間なので、
+   * 渡されていれば説明文の下にそのまま差し込む。
+   */
+  action?: ReactNode;
 };
 
 /**
@@ -12,7 +19,7 @@ type EmptyStateProps = {
  * レーンごとのリズムに合わせて見せ方を変え、単なる
  * 「データがありません」で終わらせない。
  */
-export function EmptyState({ variant, title, description }: EmptyStateProps) {
+export function EmptyState({ variant, title, description, action }: EmptyStateProps) {
   const Icon = variant === "visual" ? Flame : Landmark;
   return (
     <div
@@ -37,6 +44,7 @@ export function EmptyState({ variant, title, description }: EmptyStateProps) {
       <p className="max-w-sm text-[13px] leading-jp-body tracking-jp-body text-[var(--color-muted-foreground)]">
         {description}
       </p>
+      {action && <div className="mt-1 w-full max-w-sm">{action}</div>}
     </div>
   );
 }

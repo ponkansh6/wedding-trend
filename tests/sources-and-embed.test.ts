@@ -74,13 +74,21 @@ describe("Sources and Embed", () => {
   });
 
   describe("hatena-bookmark adapter", () => {
-    it("fetches and parses Hatena Bookmark RSS tags", async () => {
+    // HATENA_BOOKMARK_TAGS は現在空（constants.ts 参照: 内容が議論・炎上寄りの
+    // ため一旦停止中）。解析経路の検証にはタグを注入する。
+    it("fetches and parses Hatena Bookmark RSS when tags are configured", async () => {
+      vi.resetModules();
+      vi.doMock("@/lib/constants", async () => {
+        const actual = await vi.importActual<typeof import("@/lib/constants")>("@/lib/constants");
+        return { ...actual, HATENA_BOOKMARK_TAGS: ["結婚式"] };
+      });
       global.fetch = vi.fn().mockResolvedValue({
         ok: true,
         text: async () => RSS_FIXTURE,
       } as Response);
 
-      const items = await fetchHatenaBookmark(5);
+      const { fetchHatenaBookmark: fetchWithTags } = await import("@/lib/sources/hatena-bookmark");
+      const items = await fetchWithTags(5);
       expect(items.length).toBeGreaterThan(0);
       expect(items[0].title).toBe("Test Post 1");
       expect(items[0].link).toBe("https://example.com/post1");
@@ -135,15 +143,41 @@ describe("Sources and Embed", () => {
   });
 
   describe("ameblo adapter", () => {
-    it("fetches and parses ameblo RSS", async () => {
+    // AMEBLO_BLOG_IDS は既定で空（constants.ts のコメント参照: ジャンル経由で
+    // 発見できるブログは内容が卒花レポではなく実用に耐えないため意図的に空）。
+    // アダプタ本体の解析経路を検証するため、ここでは ID を注入する。
+    it("fetches and parses ameblo RSS when blog IDs are configured", async () => {
+      // 静的 import 済みのモジュールはキャッシュされているため、
+      // doMock を効かせるにはレジストリをリセットしてから再 import する。
+      vi.resetModules();
+      vi.doMock("@/lib/constants", async () => {
+        const actual = await vi.importActual<typeof import("@/lib/constants")>("@/lib/constants");
+        return { ...actual, AMEBLO_BLOG_IDS: ["some-blog"] };
+      });
       global.fetch = vi.fn().mockResolvedValue({
         ok: true,
         text: async () => RSS_FIXTURE,
       } as Response);
 
-      const items = await fetchAmeblo(5);
+      const { fetchAmeblo: fetchWithIds } = await import("@/lib/sources/ameblo");
+      const items = await fetchWithIds(5);
+
       expect(items.length).toBeGreaterThan(0);
       expect(items[0].title).toBe("Test Post 1");
+      vi.doUnmock("@/lib/constants");
+      vi.resetModules();
+    });
+
+    // 空リスト時にネットワークを叩かずに [] を返すことは、現在の既定動作その
+    // ものなので固定しておく。ここが壊れると死活監視が誤報する。
+    it("returns an empty array without any network call when no blog IDs are configured", async () => {
+      const fetchSpy = vi.fn();
+      global.fetch = fetchSpy;
+
+      const items = await fetchAmeblo(5);
+
+      expect(items).toEqual([]);
+      expect(fetchSpy).not.toHaveBeenCalled();
     });
   });
 

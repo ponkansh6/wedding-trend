@@ -40,3 +40,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# ローカル開発用 SQLite（file: スキーム）
+local.db
+local.db-*

@@ -1,12 +1,15 @@
 import { getFeedCards } from "@/lib/db/query";
 import { FeedLaneTrend } from "@/components/feed/feed-lane-trend";
 import { FeedLaneClassic } from "@/components/feed/feed-lane-classic";
+import { OperatorPanel } from "@/components/admin/operator-panel";
 import { Separator } from "@/components/ui/separator";
+import { adminControlsEnabled } from "@/app/actions";
 
 export default async function Home() {
-  const [trendCards, classicCards] = await Promise.all([
+  const [trendCards, classicCards, adminEnabled] = await Promise.all([
     getFeedCards({ sourceType: "sns", limit: 12 }),
     getFeedCards({ sourceType: "blog", limit: 12 }),
+    adminControlsEnabled(),
   ]);
 
   return (
@@ -16,11 +19,18 @@ export default async function Home() {
         「今」のトレンドと「リアル」な体験談を1分で俯瞰できる、結婚式準備のキュレーションフィードです。すべてのカードは元投稿のAI要約で、原文には各カードのボタンから移動できます。
       </p>
 
-      <FeedLaneTrend cards={trendCards} />
+      <FeedLaneTrend cards={trendCards} adminEnabled={adminEnabled} />
 
       <Separator />
 
-      <FeedLaneClassic cards={classicCards} />
+      <FeedLaneClassic cards={classicCards} adminEnabled={adminEnabled} />
+
+      {adminEnabled && (
+        <>
+          <Separator />
+          <OperatorPanel />
+        </>
+      )}
     </div>
   );
 }

@@ -24,7 +24,29 @@ ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 PATH="$ROOT/node_modules/.bin:$PATH"
 export PATH
 BUILD_LOG="$(mktemp)"
-if ! next build > "$BUILD_LOG" 2>&1; then
+# このゲートが検証するのは「DB が空のときにフェイルソフトして正しく描画されるか」。
+# Next.js は .env.local をシェルの環境変数より優先するため、ローカル開発用の
+# .env.local(file:./local.db) があると開発データが静的HTMLに焼き込まれ、
+# 空状態の検証にならない。実行中だけ退避し、終了時に必ず戻す。
+ENV_LOCAL="$ROOT/.env.local"
+ENV_LOCAL_BAK="$ROOT/.env.local.smoke-bak"
+if [ -f "$ENV_LOCAL" ]; then
+  mv "$ENV_LOCAL" "$ENV_LOCAL_BAK"
+fi
+SERVER_PID=""
+BODY_FILE=""
+
+# trap EXIT は後勝ちで上書きされるため、後始末は必ずこの 1 箇所に集約する。
+cleanup() {
+  [ -n "$SERVER_PID" ] && kill -- "-$SERVER_PID" 2>/dev/null || true
+  [ -n "$BODY_FILE" ] && rm -f "$BODY_FILE"
+  if [ -f "$ENV_LOCAL_BAK" ]; then
+    mv "$ENV_LOCAL_BAK" "$ENV_LOCAL"
+  fi
+}
+trap cleanup EXIT INT TERM
+
+if ! TURSO_DATABASE_URL=":memory:" TURSO_AUTH_TOKEN="" next build > "$BUILD_LOG" 2>&1; then
   echo "❌ [smoke] build failed"
   cat "$BUILD_LOG"
   rm -f "$BUILD_LOG"
@@ -35,7 +57,6 @@ rm -f "$BUILD_LOG"
 echo "[smoke] Starting server on :${PORT} (in-memory DB)..."
 TURSO_DATABASE_URL=":memory:" TURSO_AUTH_TOKEN="" PORT="$PORT" setsid next start > "$LOG_FILE" 2>&1 &
 SERVER_PID=$!
-trap 'kill -- "-$SERVER_PID" 2>/dev/null || true' EXIT
 
 # Wait for the server to accept connections (max 30s)
 READY=0
@@ -52,11 +73,15 @@ if [ "$READY" -ne 1 ]; then
   exit 1
 fi
 
-BODY="$(curl -s "http://localhost:${PORT}/")"
+# NOTE: 本文はファイルに落としてから grep する。
+# `printf '%s' "$BODY" | grep -q` は grep が一致時に早期終了してパイプを閉じるため
+# printf が SIGPIPE で死に、`set -o pipefail` によって「一致したのに失敗」になる。
+BODY_FILE="$(mktemp)"
+curl -s "http://localhost:${PORT}/" > "$BODY_FILE"
 
 # Assertions (HTTP 200 is NOT a valid success signal — the broken state also
 # returns 200 with an RSC error digest in the body).
-if echo "$BODY" | grep -q 'E{"digest"'; then
+if grep -q 'E{"digest"' "$BODY_FILE"; then
   echo "❌ [smoke] RSC error digest found in response body"
   exit 1
 fi
@@ -64,11 +89,11 @@ if grep -q "Cookies can only be modified" "$LOG_FILE"; then
   echo "❌ [smoke] cookie write error in server log"
   exit 1
 fi
-if ! echo "$BODY" | grep -q "ウエディング・トレンド"; then
+if ! grep -q "ウエディング・トレンド" "$BODY_FILE"; then
   echo "❌ [smoke] page did not render (missing 'ウエディング・トレンド' heading)"
   exit 1
 fi
-if ! echo "$BODY" | grep -q "速報はまだありません"; then
+if ! grep -q "速報はまだありません" "$BODY_FILE"; then
   echo "❌ [smoke] empty-state not rendered (missing '速報はまだありません')"
   exit 1
 fi

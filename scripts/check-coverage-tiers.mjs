@@ -63,7 +63,13 @@ const TIERS = [
     name: "Tier 5: API ルート",
     target: 70,
     metric: "statements",
-    patterns: [/\/app\/api\/ingest\/route\.ts$/, /\/app\/api\/submit-url\/route\.ts$/],
+    patterns: [
+      /\/app\/api\/ingest\/route\.ts$/,
+      /\/app\/api\/submit-url\/route\.ts$/,
+      // ルートハンドラから切り出した本体。以前はルート側で計測されていた。
+      /\/lib\/pipeline\/ingest\.ts$/,
+      /\/lib\/pipeline\/submit-url\.ts$/,
+    ],
   },
   {
     name: "Tier 6: データアクセス",
