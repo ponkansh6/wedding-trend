@@ -5,13 +5,14 @@ import { AI_TITLE_MAX_CHARS } from "@/lib/constants";
 const validSummary =
   "結婚式の準備における費用感や演出のポイントについて、実際の体験に基づいた内容がまとめられています。会場選びやゲスト対応など具体的な工夫点が紹介されています。";
 
-/** 有用度判定 5 項目（すべて必須のブール値）。テストのデフォルト値として使い回す。 */
+/** 有用度判定 6 項目（すべて必須のブール値）。テストのデフォルト値として使い回す。 */
 const validUsefulness = {
   firsthand: true,
   ceremonyDecision: true,
   specific: true,
   tradeoff: false,
   promotional: false,
+  preDecisionOrPhotoShoot: false,
 };
 
 describe("CurationItemSchema", () => {

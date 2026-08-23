@@ -39,6 +39,7 @@ vi.mock("@/lib/llm/batch", () => ({
         specific: true,
         tradeoff: false,
         promotional: false,
+        preDecisionOrPhotoShoot: false,
       })),
       geminiCalls: 1,
     }),
@@ -54,7 +55,7 @@ import {
   upsertPosts,
 } from "@/lib/db/repository";
 import { db } from "@/lib/db";
-import { postUsefulness } from "@/lib/db/schema";
+import { postUsefulnessCriteria } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { runIngest } from "@/lib/pipeline/ingest";
 
@@ -119,11 +120,13 @@ describe("runIngest (src/lib/pipeline/ingest.ts)", () => {
   it("happy path: also writes post_usefulness for every curated post", async () => {
     await runIngest();
 
-    const rows = await db.select().from(postUsefulness);
+    const rows = await db.select().from(postUsefulnessCriteria);
     expect(rows).toHaveLength(2);
     for (const row of rows) {
-      expect(row.firsthand).toBe(1);
-      expect(row.ceremonyDecision).toBe(1);
+      const criteria = JSON.parse(row.criteriaJson);
+      expect(criteria.firsthand).toBe(true);
+      expect(criteria.ceremonyDecision).toBe(true);
+      expect(criteria.preDecisionOrPhotoShoot).toBe(false);
     }
   });
 
@@ -177,8 +180,12 @@ describe("runIngest (src/lib/pipeline/ingest.ts)", () => {
     // post_usefulness も新しい signature・値で upsert されている。
     const states = await getPostsByUrls(["https://example.com/stale-blog-post"]);
     const postId = states.get("https://example.com/stale-blog-post")!.id;
-    const rows = await db.select().from(postUsefulness).where(eq(postUsefulness.postId, postId));
+    const rows = await db
+      .select()
+      .from(postUsefulnessCriteria)
+      .where(eq(postUsefulnessCriteria.postId, postId));
     expect(rows).toHaveLength(1);
     expect(rows[0].signature).toBe(computeCurationSignature());
+    expect(JSON.parse(rows[0].criteriaJson).ceremonyDecision).toBe(true);
   });
 });

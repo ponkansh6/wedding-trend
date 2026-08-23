@@ -288,6 +288,7 @@ export async function runIngest(trigger: IngestTrigger = "manual"): Promise<Inge
                       specific: result.specific,
                       tradeoff: result.tradeoff,
                       promotional: result.promotional,
+                      preDecisionOrPhotoShoot: result.preDecisionOrPhotoShoot,
                     },
                   }
                 : undefined,

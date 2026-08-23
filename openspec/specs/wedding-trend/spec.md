@@ -117,18 +117,21 @@ Next.js 16 (App Router), React 19, TypeScript strict, Tailwind CSS v4, Drizzle O
   （`last_run_summary` のみ JSON 文字列で例外） (Text)
 - `updated_at`: タイムスタンプ (Text)
 
-### `post_usefulness` テーブル（体験談レーンの有用度採点結果）
+### `post_usefulness_criteria` テーブル（体験談レーンの有用度採点結果）
 
 体験談レーン（`sourceType: "blog"`）の掲載順を決めるための採点結果を保持する
 （判定項目・重み・掲載順ルールの詳細は §9 編集方針を参照）。`posts` へのカラム
 追加ではなく別テーブルにしているのは、本番 Turso が news-watch と DB を共有
 しており、追加専用の安全装置 (`scripts/apply-migrations-remote.mjs`) が
 `ALTER TABLE` を含む文を一切許可しない（`CREATE TABLE` / `CREATE INDEX` の
-みを許可し、それ以外が現れると exit 1 する）ためである。
+みを許可し、それ以外が現れると exit 1 する）ためである。さらに、将来的な
+判定項目の追加・変更に際して DDL の変更（マイグレーション）を不要にするため、
+判定結果は個別のカラムではなく単一の JSON カラム `criteria_json` にシリアライズ
+して保存する設計（shared_plan/02 案C）を採用している。
 
 - `post_id`: `posts.id` と同じ型（Integer）の主キー。採点対象の投稿。
-- `firsthand` / `ceremony_decision` / `specific` / `tradeoff` / `promotional`:
-  判定項目 5 つ（SQLite に boolean 型が無いため 0/1 の Integer）。
+- `criteria_json`: 6つの判定項目（`UsefulnessCriteria` 型）のブール値オブジェクトを
+  `JSON.stringify()` したテキスト（`firsthand`, `ceremonyDecision`, `specific`, `tradeoff`, `promotional`, `preDecisionOrPhotoShoot`）。
 - `signature`: 採点時点の `computeCurationSignature()`（`src/lib/llm/signature.ts`）
   の値。`posts.curation_signature` と比較し、プロンプト/モデルが変わった
   記事を再スコア対象として検出する。
@@ -136,10 +139,11 @@ Next.js 16 (App Router), React 19, TypeScript strict, Tailwind CSS v4, Drizzle O
 - `scored_at`: ISO8601 文字列（`config` / `posts` と同じ規約）。
 
 **合計スコアはこのテーブルに保存しない。** 重みは `src/lib/scoring/usefulness.ts`
-の純関数 `computeUsefulnessScore()` に置き、DB には判定項目 5 つのブール値
+の純関数 `computeUsefulnessScore()` に置き、DB には判定項目 6 つの JSON オブジェクト
 のみを保存する設計とした。合計スコアを保存すると、重みを調整するたびに
 既存データのマイグレーションが必要になってしまうため、表示時に毎回その場で
-計算する。
+計算する。旧 `post_usefulness` テーブルは過去のマイグレーション履歴に残るが実運用では
+使用されず孤立している（削除しない）。
 
 ---
 
@@ -316,39 +320,42 @@ spec.md とで想定読者の定義が乖離しないようにするため）。
 
 ### §9.3 判定項目とスコア計算
 
-LLM には次の 5 つのブール値のみを判定させ、点数そのものは出させない
+LLM には次の 6 つのブール値のみを判定させ、点数そのものは出させない
 （点数は `src/lib/scoring/usefulness.ts` の純関数 `computeUsefulnessScore()`
 がコード側で計算する。この分離により、重み調整が再課金ゼロのコード変更で
 済む）。
 
-| 項目               | 定義                                                                                                                                                                                                                       |
-| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `firsthand`        | 書き手自身または近しい当事者が実際に挙式・披露宴を経験した立場から書かれている。新婦本人に限らず、新郎・両家家族、およびプランナー・司会者・カメラマン・装花担当など式に立ち会う職能者が実務経験に基づいて書いたものを含む |
-| `ceremonyDecision` | 挙式・披露宴の**中身**の意思決定に効く（進行・タイムライン・演出・席次・席札・余興・スピーチ・BGM・装花・料理・引出物・ペーパーアイテム・写真映像・ゲストの過ごしやすさ・当日段取り）                                      |
-| `specific`         | 具体を含む（固有の選択・数字・実際にやったこと / やらなかった理由）。心構えのみは false                                                                                                                                    |
-| `tradeoff`         | 判断の理由・後悔・「やってよかった / 要らなかった」の評価が述べられている                                                                                                                                                  |
-| `promotional`      | 事業者による集客・自社サービスへの誘導が主目的（減点）。判別基準は「読者が別の会場・別の業者で式を挙げる場合にも役立つか」                                                                                                 |
+| 項目                      | 定義                                                                                                                                                                                                                                             |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `firsthand`               | 書き手自身または近しい当事者が実際に挙式・披露宴を経験した立場から書かれている。新婦本人に限らず、新郎・両家家族、およびプランナー・司会者・カメラマン・装花担当など式に立ち会う職能者が実務経験に基づいて書いたものを含む                       |
+| `ceremonyDecision`        | 挙式・披露宴の**中身**の意思決定に効く（進行・タイムライン・演出・席次・席札・余興・スピーチ・BGM・装花・料理・引出物・ペーパーアイテム・挙式当日の写真・映像、ゲストの過ごしやすさ・当日段取り）                                                |
+| `preDecisionOrPhotoShoot` | 内容がフォトウェディング・前撮り・式場探し等、式決定前/別撮影の話題に限られるか（true ならゲート不通過）。(a) フォトウェディング・前撮り・後撮りなどの別撮影、(b) 式場探し・見積もり比較・日取り決定までの段階。挙式当日の写真・映像は含めない。 |
+| `specific`                | 具体を含む（固有の選択・数字・実際にやったこと / やらなかった理由）。心構えのみは false                                                                                                                                                          |
+| `tradeoff`                | 判断の理由・後悔・「やってよかった / 要らなかった」の評価が述べられている                                                                                                                                                                        |
+| `promotional`             | 事業者による集客・自社サービスへの誘導が主目的（減点）。判別基準は「読者が別の会場・別の業者で式を挙げる場合にも役立つか」                                                                                                                       |
 
 スコア計算式（`USEFULNESS_GATE_BONUS` 等の重み定数は `src/lib/constants.ts`
 に定義する）:
 
 ```
-score = (ceremonyDecision ? USEFULNESS_GATE_BONUS(10) : 0)
+gate  = (ceremonyDecision && !preDecisionOrPhotoShoot) ? USEFULNESS_GATE_BONUS(10) : 0
+score = gate
       + USEFULNESS_WEIGHT_FIRSTHAND(3)   * firsthand
       + USEFULNESS_WEIGHT_SPECIFIC(2)    * specific
       + USEFULNESS_WEIGHT_TRADEOFF(2)    * tradeoff
       - USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY(4) * promotional
 ```
 
-`ceremonyDecision` は加算項の一つではなく**ゲート**である。単純な加算項に
+`ceremonyDecision` と `preDecisionOrPhotoShoot` によるゲート条件（`ceremonyDecision && !preDecisionOrPhotoShoot`）は加算項の一つではなく**ゲート**である。単純な加算項に
 すると、「衣装だけの記事だが実体験・具体的・トレードオフあり」（3+2+2=7）が
 「式の中身に触れているが浅い記事」（10）を上回ってしまい、「これから式の
 中身を決める読者に効く記事を優先する」という編集方針そのものが反転する。
-挙式・披露宴の中身に関する記事であることを他の加点の前提条件にすることで、
-この逆転を構造的に防ぐ。
+挙式・披露宴の中身に関する記事であり、かつフォトウェディング・前撮りや式場探し等の事前検討に偏っていないことを他の加点の前提条件にすることで、この逆転を構造的に防ぐ。
+
+`preDecisionOrPhotoShoot` は陽性識別極性（positive-identification polarity: 該当しない場合は false）を採用しており、抜粋から情報が得られない場合は false となる。これにより、情報不足の記事を誤って重く罰することを防いでいる。
 
 重みは、抜粋（記事冒頭）から LLM が判定できる確信度に比例させている。話題
-（`ceremonyDecision`）・書き手の立場（`firsthand`）・宣伝性（`promotional`）
+（`ceremonyDecision` / `preDecisionOrPhotoShoot`）・書き手の立場（`firsthand`）・宣伝性（`promotional`）
 は記事冒頭からでも判定しやすい一方、具体性（`specific`）やトレードオフ
 （`tradeoff`）は本文中盤以降にしか現れないことが多く、抜粋だけからの判定は
 確信度が落ちる。そのため `firsthand`（3）を `specific`/`tradeoff`（各 2）

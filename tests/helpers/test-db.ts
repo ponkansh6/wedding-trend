@@ -10,7 +10,7 @@ const MIGRATIONS_DIR = path.resolve(__dirname, "../../src/lib/db/migrations");
  * ここにも追記すること（マイグレーション SQL のファイル名は決め打ちしない
  * ため、テーブル一覧だけは手動で保守する）。
  */
-const KNOWN_TABLES = ["posts", "config", "post_usefulness"];
+const KNOWN_TABLES = ["posts", "config", "post_usefulness", "post_usefulness_criteria"];
 
 /**
  * `src/lib/db/migrations/*.sql` を採番順（ファイル名の辞書順 = drizzle-kit の

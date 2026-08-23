@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray, isNull, lt, lte, ne, or } from "drizzle-orm";
 import { db } from "./index";
-import { config, posts, postUsefulness } from "./schema";
+import { config, posts, postUsefulnessCriteria } from "./schema";
 import type { Category, EmbedProvider, PostStatus, SourceType, TrendTag } from "@/lib/types";
 import type { UsefulnessCriteria } from "@/lib/scoring/usefulness";
 
@@ -196,11 +196,7 @@ export async function markCurated(
     const { postId, criteria, modelId } = u.usefulness;
     return {
       postId,
-      firsthand: criteria.firsthand ? 1 : 0,
-      ceremonyDecision: criteria.ceremonyDecision ? 1 : 0,
-      specific: criteria.specific ? 1 : 0,
-      tradeoff: criteria.tradeoff ? 1 : 0,
-      promotional: criteria.promotional ? 1 : 0,
+      criteriaJson: JSON.stringify(criteria),
       // posts.curationSignature と同じ値を保存する。両者は必ず一致させる
       // （getStaleCurationCandidates は posts.curationSignature だけを見て
       // 再スコア対象を判定するため、ここがズレると検出漏れになる）。
@@ -211,15 +207,15 @@ export async function markCurated(
   };
 
   /**
-   * 1 件分の posts 更新（＋あれば post_usefulness upsert）を 1 つの
-   * ステートメント配列にまとめる。`posts` の更新と `post_usefulness` の更新が
+   * 1 件分の posts 更新（＋あれば post_usefulness_criteria upsert）を 1 つの
+   * ステートメント配列にまとめる。`posts` の更新と `post_usefulness_criteria` の更新が
    * 食い違わないよう（例: signature だけ更新されて有用度だけ古いまま残る）、
    * この 2 つは常にペアで `db.batch()` に渡し、フォールバック（個別実行）時も
    * ペアのまま実行する。
    */
   const buildStatements = (u: CurationUpdate): unknown[] => {
     const now = new Date().toISOString();
-    // posts の update 文と post_usefulness の insert/upsert 文はビルダーの型が
+    // posts の update 文と post_usefulness_criteria の insert/upsert 文はビルダーの型が
     // 異なる（drizzle の SQLiteUpdateBase / SQLiteInsertBase）ため、この配列は
     // `unknown[]` として扱う。呼び出し側でどのみち `db.batch()` に渡す直前に
     // `Parameters<typeof db.batch>[0]` へキャストしているため実害はない。
@@ -230,9 +226,9 @@ export async function markCurated(
     if (usefulnessValues) {
       stmts.push(
         db
-          .insert(postUsefulness)
+          .insert(postUsefulnessCriteria)
           .values(usefulnessValues)
-          .onConflictDoUpdate({ target: postUsefulness.postId, set: usefulnessValues }),
+          .onConflictDoUpdate({ target: postUsefulnessCriteria.postId, set: usefulnessValues }),
       );
     }
     return stmts;

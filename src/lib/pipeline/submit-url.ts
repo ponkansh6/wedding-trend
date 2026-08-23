@@ -56,6 +56,7 @@ function buildFallbackCuration(title: string, excerpt: string | null): CurationR
     specific: false,
     tradeoff: false,
     promotional: false,
+    preDecisionOrPhotoShoot: false,
   };
 }
 

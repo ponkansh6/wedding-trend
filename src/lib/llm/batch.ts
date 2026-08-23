@@ -153,6 +153,7 @@ export async function curateBatch(
       specific: item.specific,
       tradeoff: item.tradeoff,
       promotional: item.promotional,
+      preDecisionOrPhotoShoot: item.preDecisionOrPhotoShoot,
     };
   });
 

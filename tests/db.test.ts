@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeEach, vi } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { postUsefulness } from "@/lib/db/schema";
+import { postUsefulnessCriteria } from "@/lib/db/schema";
 import {
   upsertPosts,
   getPostsByUrls,
@@ -93,6 +93,7 @@ describe("Database Repository and Queries", () => {
             specific: true,
             tradeoff: false,
             promotional: false,
+            preDecisionOrPhotoShoot: false,
           },
         },
       },
@@ -101,19 +102,20 @@ describe("Database Repository and Queries", () => {
 
     const usefulnessRows = await db
       .select()
-      .from(postUsefulness)
-      .where(eq(postUsefulness.postId, postId));
+      .from(postUsefulnessCriteria)
+      .where(eq(postUsefulnessCriteria.postId, postId));
     expect(usefulnessRows).toHaveLength(1);
-    expect(usefulnessRows[0]).toMatchObject({
-      postId,
-      firsthand: 1,
-      ceremonyDecision: 1,
-      specific: 1,
-      tradeoff: 0,
-      promotional: 0,
-      signature: "sig1",
-      modelId: "test-model",
+    expect(usefulnessRows[0].postId).toBe(postId);
+    expect(JSON.parse(usefulnessRows[0].criteriaJson)).toEqual({
+      firsthand: true,
+      ceremonyDecision: true,
+      specific: true,
+      tradeoff: false,
+      promotional: false,
+      preDecisionOrPhotoShoot: false,
     });
+    expect(usefulnessRows[0].signature).toBe("sig1");
+    expect(usefulnessRows[0].modelId).toBe("test-model");
 
     // 5. Test saveEmbed
     const embedRes = await saveEmbed("https://example.com/post1", {
@@ -174,7 +176,7 @@ describe("Database Repository and Queries", () => {
     ]);
     expect(markRes.succeeded).toContain("https://example.com/sns1");
 
-    const usefulnessRows = await db.select().from(postUsefulness);
+    const usefulnessRows = await db.select().from(postUsefulnessCriteria);
     expect(usefulnessRows).toHaveLength(0);
   });
 
@@ -312,6 +314,7 @@ describe("Database Repository and Queries", () => {
         blogPostInput("https://example.com/b", "2024-01-02T00:00:00.000Z"),
         blogPostInput("https://example.com/b2", "2024-01-05T00:00:00.000Z"),
         blogPostInput("https://example.com/d", "2024-01-03T00:00:00.000Z"),
+        blogPostInput("https://example.com/p", "2024-01-06T00:00:00.000Z"),
         blogPostInput("https://example.com/c", "2024-01-10T00:00:00.000Z"),
       ]);
 
@@ -320,6 +323,7 @@ describe("Database Repository and Queries", () => {
         "https://example.com/b",
         "https://example.com/b2",
         "https://example.com/d",
+        "https://example.com/p",
         "https://example.com/c",
       ]);
 
@@ -331,6 +335,7 @@ describe("Database Repository and Queries", () => {
           specific: boolean;
           tradeoff: boolean;
           promotional: boolean;
+          preDecisionOrPhotoShoot: boolean;
         } | null,
       ) => ({
         url,
@@ -359,6 +364,7 @@ describe("Database Repository and Queries", () => {
           specific: true,
           tradeoff: true,
           promotional: false,
+          preDecisionOrPhotoShoot: false,
         }),
         // score = 10(gate) = 10
         buildUpdate("https://example.com/b", {
@@ -367,6 +373,7 @@ describe("Database Repository and Queries", () => {
           specific: false,
           tradeoff: false,
           promotional: false,
+          preDecisionOrPhotoShoot: false,
         }),
         // score = 10(gate) = 10（b と同点。publishedAt が新しい方が先）
         buildUpdate("https://example.com/b2", {
@@ -375,6 +382,7 @@ describe("Database Repository and Queries", () => {
           specific: false,
           tradeoff: false,
           promotional: false,
+          preDecisionOrPhotoShoot: false,
         }),
         // ceremonyDecision=false のためゲート不通過: 3+2+2 = 7 に留まる
         buildUpdate("https://example.com/d", {
@@ -383,6 +391,16 @@ describe("Database Repository and Queries", () => {
           specific: true,
           tradeoff: true,
           promotional: false,
+          preDecisionOrPhotoShoot: false,
+        }),
+        // preDecisionOrPhotoShoot=true のためゲート不通過: 3+2+2 = 7 に留まる（publishedAt が 01-06 で d(01-03) より新しい）
+        buildUpdate("https://example.com/p", {
+          firsthand: true,
+          ceremonyDecision: true,
+          specific: true,
+          tradeoff: true,
+          promotional: false,
+          preDecisionOrPhotoShoot: true,
         }),
         // 有用度未スコア（post_usefulness 行なし）: UNSCORED_USEFULNESS_SCORE(3) 扱い
         buildUpdate("https://example.com/c", null),
@@ -393,6 +411,7 @@ describe("Database Repository and Queries", () => {
         "https://example.com/a",
         "https://example.com/b2",
         "https://example.com/b",
+        "https://example.com/p",
         "https://example.com/d",
         "https://example.com/c",
       ]);

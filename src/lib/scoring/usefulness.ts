@@ -25,6 +25,8 @@ export interface UsefulnessCriteria {
   tradeoff: boolean;
   /** 事業者による集客・自社サービスへの誘導が主目的か（該当すれば減点）。 */
   promotional: boolean;
+  /** 内容がフォトウェディング・前撮り・式場探し等、式決定前/別撮影の話題に限られるか（true ならゲート不通過）。 */
+  preDecisionOrPhotoShoot: boolean;
 }
 
 /**
@@ -42,19 +44,20 @@ export const UNSCORED_USEFULNESS_SCORE = 3;
  * 5 つのブール判定から有用度スコアを計算する純関数。
  *
  * ```
- * score = (ceremonyDecision ? USEFULNESS_GATE_BONUS : 0)
+ * score = (ceremonyDecision && !preDecisionOrPhotoShoot ? USEFULNESS_GATE_BONUS : 0)
  *       + USEFULNESS_WEIGHT_FIRSTHAND   * firsthand
  *       + USEFULNESS_WEIGHT_SPECIFIC    * specific
  *       + USEFULNESS_WEIGHT_TRADEOFF    * tradeoff
  *       - USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY * promotional
  * ```
  *
- * `ceremonyDecision` は加算項の一つではなく**ゲート**として扱う。もし単純な
- * 加算項にすると、「衣装だけの記事だが実体験・具体的・トレードオフあり」
+ * `ceremonyDecision` と `preDecisionOrPhotoShoot` は加点項の一つではなく**ゲート**として働く。もし単純な
+ * 加点項にすると、「衣装だけの記事だが実体験・具体的・トレードオフあり」
  * （3+2+2=7）が「式の中身に触れているが浅い記事」（10）を上回ってしまい、
  * 「これから式の中身を決める読者に効く記事を優先する」というオーナーの
  * 意図が反転する。挙式・披露宴の中身に関する記事であることを他の加点の
- * 前提条件にすることで、この逆転を構造的に防ぐ。
+ * 前提条件にしつつ、フォト婚・前撮り・式場探し等の話題（`preDecisionOrPhotoShoot === true`）はゲート不通過（0点）とすることで、この逆転を構造的に防ぐ。
+ * フォト婚・前撮り・式場探しの記事はゲート不通過帯（0〜7点）に落ちる。除外はせず下に置くだけ（オーナー方針）。
  *
  * 各項目の重みは、抜粋（記事冒頭）から LLM が判定できる確信度に比例させて
  * いる。話題（ceremonyDecision）・書き手の立場（firsthand）・宣伝性
@@ -67,7 +70,8 @@ export const UNSCORED_USEFULNESS_SCORE = 3;
  * したもの（詳細は spec.md の編集方針セクションを参照）。
  */
 export function computeUsefulnessScore(criteria: UsefulnessCriteria): number {
-  const gate = criteria.ceremonyDecision ? USEFULNESS_GATE_BONUS : 0;
+  const gate =
+    criteria.ceremonyDecision && !criteria.preDecisionOrPhotoShoot ? USEFULNESS_GATE_BONUS : 0;
   const firsthand = criteria.firsthand ? USEFULNESS_WEIGHT_FIRSTHAND : 0;
   const specific = criteria.specific ? USEFULNESS_WEIGHT_SPECIFIC : 0;
   const tradeoff = criteria.tradeoff ? USEFULNESS_WEIGHT_TRADEOFF : 0;

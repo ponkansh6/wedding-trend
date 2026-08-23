@@ -45,8 +45,9 @@ export const LLM_SINGLE_MAX_TOKENS = 800;
  * （openspec/specs/wedding-trend/spec.md §9 編集方針）。bump により全投稿の
  * curationSignature が不一致になり、次回以降の ingest で段階的に、または
  * scripts/backfill-usefulness.mjs で一括して再キュレーションされる。
+ * v3: 新たな判定項目 `preDecisionOrPhotoShoot`（フォト婚・前撮り・式場探し等の話題か）を追加し、`ceremonyDecision` の定義を「挙式当日の写真・映像」に限定した（shared_plan/02）。bump により全投稿の curationSignature が不一致になり、再キュレーションされる。
  */
-export const CURATION_PROMPT_VERSION = 2;
+export const CURATION_PROMPT_VERSION = 3;
 
 // ── キュレーション予算・締切 ──────────────────────────────────
 /** 1 回の ingest 実行で LLM に投げる投稿数の上限。 */

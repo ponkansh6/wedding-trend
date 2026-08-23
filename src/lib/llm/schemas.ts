@@ -46,6 +46,7 @@ export const CurationItemSchema = z.object({
   specific: z.boolean(),
   tradeoff: z.boolean(),
   promotional: z.boolean(),
+  preDecisionOrPhotoShoot: z.boolean(),
 });
 
 export type CurationItem = z.infer<typeof CurationItemSchema>;

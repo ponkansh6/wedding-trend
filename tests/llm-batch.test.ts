@@ -20,13 +20,14 @@ function textResponse(text: string) {
   return { response: { text: () => text } };
 }
 
-/** 有用度判定 5 項目のデフォルト値（テストの主眼ではないため固定値で埋める）。 */
+/** 有用度判定 6 項目のデフォルト値（テストの主眼ではないため固定値で埋める）。 */
 const USEFULNESS_FIELDS = {
   firsthand: true,
   ceremonyDecision: true,
   specific: false,
   tradeoff: false,
   promotional: false,
+  preDecisionOrPhotoShoot: false,
 };
 
 function batchJson(items: Array<{ index: number; title: string }>) {

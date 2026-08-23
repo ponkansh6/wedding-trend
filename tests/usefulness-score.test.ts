@@ -12,6 +12,7 @@ const ALL_FALSE: UsefulnessCriteria = {
   specific: false,
   tradeoff: false,
   promotional: false,
+  preDecisionOrPhotoShoot: false,
 };
 
 describe("computeUsefulnessScore", () => {
@@ -44,9 +45,11 @@ describe("computeUsefulnessScore", () => {
       specific: true,
       tradeoff: true,
       promotional: true,
+      preDecisionOrPhotoShoot: true,
     };
-    // 10 (gate) + 3 (firsthand) + 2 (specific) + 2 (tradeoff) - 4 (promotional)
-    expect(computeUsefulnessScore(allTrue)).toBe(13);
+    // preDecisionOrPhotoShoot: true によりゲート不通過となるため、ゲートの 10 が消え、
+    // 残りの和 3 (firsthand) + 2 (specific) + 2 (tradeoff) - 4 (promotional) = 3 となる。
+    expect(computeUsefulnessScore(allTrue)).toBe(3);
   });
 
   it("each positive criterion adds its own weight independently of the others", () => {
@@ -98,5 +101,57 @@ describe("computeUsefulnessScore", () => {
 
     expect(UNSCORED_USEFULNESS_SCORE).toBeLessThan(gatePassingFloor);
     expect(UNSCORED_USEFULNESS_SCORE).toBeGreaterThan(nonGatePassingFloor);
+  });
+
+  it("preDecisionOrPhotoShoot true blocks the gate even when ceremonyDecision is true", () => {
+    const photoShoot = computeUsefulnessScore({
+      ...ALL_FALSE,
+      ceremonyDecision: true,
+      preDecisionOrPhotoShoot: true,
+      firsthand: true,
+      specific: true,
+      tradeoff: true,
+    });
+    // ゲート不通過 → 3+2+2 = 7（ゲート不通過帯）。ceremonyDecision のみの 10 より下。
+    expect(photoShoot).toBe(7);
+    expect(photoShoot).toBeLessThan(
+      computeUsefulnessScore({ ...ALL_FALSE, ceremonyDecision: true }),
+    );
+  });
+
+  it("photo-wedding equivalent scores lower than a Canva-DIY equivalent (core change of plan 02)", () => {
+    const photoWedding = computeUsefulnessScore({
+      ...ALL_FALSE,
+      firsthand: true,
+      ceremonyDecision: true,
+      specific: true,
+      tradeoff: true,
+      preDecisionOrPhotoShoot: true,
+    }); // ゲート不通過 → 7
+    const canvaDiy = computeUsefulnessScore({
+      ...ALL_FALSE,
+      firsthand: true,
+      ceremonyDecision: true,
+      specific: true,
+    }); // 15
+    expect(photoWedding).toBeLessThan(canvaDiy);
+  });
+
+  it("preDecisionOrPhotoShoot article stays above a gate-passing promotional article (no double penalty)", () => {
+    const preShoot = computeUsefulnessScore({
+      ...ALL_FALSE,
+      firsthand: true,
+      ceremonyDecision: true,
+      specific: true,
+      tradeoff: true,
+      preDecisionOrPhotoShoot: true,
+    }); // 7
+    const promotional = computeUsefulnessScore({
+      ...ALL_FALSE,
+      ceremonyDecision: true,
+      promotional: true,
+    }); // 6
+    // 独立減点（-8）にしていないため、宣伝記事より上に留まる（二重計上していないことの確認）。
+    expect(preShoot).toBeGreaterThan(promotional);
   });
 });

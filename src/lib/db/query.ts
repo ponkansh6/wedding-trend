@@ -1,6 +1,6 @@
 import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
 import { db } from "./index";
-import { posts, postUsefulness } from "./schema";
+import { posts, postUsefulnessCriteria } from "./schema";
 import {
   USEFULNESS_GATE_BONUS,
   USEFULNESS_WEIGHT_FIRSTHAND,
@@ -34,23 +34,25 @@ const FEED_ROW_FIELDS = {
 } as const;
 
 /**
- * 体験談レーン専用の並び順キー。`post_usefulness` の 5 つのブール値から
+ * 体験談レーン専用の並び順キー。`post_usefulness_criteria` の `criteria_json`
+ * カラムから `json_extract` を使って各判定項目を取り出し、
  * `src/lib/scoring/usefulness.ts` の `computeUsefulnessScore()` と**同じ重み**
- * を使ってスコアを SQL 上で組み立てる（重みを SQL 側に数値として直書きせず、
+ * およびゲート条件 `(ceremonyDecision && !preDecisionOrPhotoShoot)` を使って
+ * スコアを SQL 上で組み立てる（重みを SQL 側に数値として直書きせず、
  * `src/lib/constants.ts` の定数から式を組み立てることで、重みを変更したときに
  * ここを個別に修正し忘れる事故を防ぐ）。
  *
- * `post_usefulness` に対応行が無い（＝未スコア。LLM キュレーション未実行、
+ * `post_usefulness_criteria` に対応行が無い（＝未スコア。LLM キュレーション未実行、
  * または一時的な失敗）場合は `UNSCORED_USEFULNESS_SCORE`（ゲート不通過帯の
- * 中位）を使う。`leftJoin` なので未スコア行は `post_usefulness.post_id` が
+ * 中位）を使う。`leftJoin` なので未スコア行は `post_usefulness_criteria.post_id` が
  * NULL になる。
  */
-const USEFULNESS_SCORE_SQL = sql<number>`CASE WHEN ${postUsefulness.postId} IS NULL THEN ${UNSCORED_USEFULNESS_SCORE} ELSE
-  (CASE WHEN ${postUsefulness.ceremonyDecision} = 1 THEN ${USEFULNESS_GATE_BONUS} ELSE 0 END)
-  + ${USEFULNESS_WEIGHT_FIRSTHAND} * ${postUsefulness.firsthand}
-  + ${USEFULNESS_WEIGHT_SPECIFIC} * ${postUsefulness.specific}
-  + ${USEFULNESS_WEIGHT_TRADEOFF} * ${postUsefulness.tradeoff}
-  - ${USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY} * ${postUsefulness.promotional}
+const USEFULNESS_SCORE_SQL = sql<number>`CASE WHEN ${postUsefulnessCriteria.postId} IS NULL THEN ${UNSCORED_USEFULNESS_SCORE} ELSE
+  (CASE WHEN json_extract(${postUsefulnessCriteria.criteriaJson}, '$.ceremonyDecision') = 1 AND json_extract(${postUsefulnessCriteria.criteriaJson}, '$.preDecisionOrPhotoShoot') = 0 THEN ${USEFULNESS_GATE_BONUS} ELSE 0 END)
+  + ${USEFULNESS_WEIGHT_FIRSTHAND} * json_extract(${postUsefulnessCriteria.criteriaJson}, '$.firsthand')
+  + ${USEFULNESS_WEIGHT_SPECIFIC} * json_extract(${postUsefulnessCriteria.criteriaJson}, '$.specific')
+  + ${USEFULNESS_WEIGHT_TRADEOFF} * json_extract(${postUsefulnessCriteria.criteriaJson}, '$.tradeoff')
+  - ${USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY} * json_extract(${postUsefulnessCriteria.criteriaJson}, '$.promotional')
 END`;
 
 /**
@@ -96,7 +98,7 @@ export async function getFeedCards(params: {
         ? await db
             .select(FEED_ROW_FIELDS)
             .from(posts)
-            .leftJoin(postUsefulness, eq(posts.id, postUsefulness.postId))
+            .leftJoin(postUsefulnessCriteria, eq(posts.id, postUsefulnessCriteria.postId))
             .where(whereClause)
             .orderBy(desc(USEFULNESS_SCORE_SQL), desc(posts.publishedAt))
             .limit(params.limit)

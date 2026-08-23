@@ -98,34 +98,37 @@ export const config = sqliteTable("config", {
 });
 
 /**
- * 体験談レーン（`sourceType: "blog"`）の記事に対する有用度採点結果。
- * `posts` へのカラム追加ではなく別テーブルにしているのは、本番 Turso が
- * news-watch と DB を共有しており、追加専用の安全装置
- * （`scripts/apply-migrations-remote.mjs`）が `ALTER TABLE` を一切許可しない
- * ため（新テーブルの `CREATE TABLE` のみ許可される）。
+ * 体験談レーン（`sourceType: "blog"`）の有用度採点結果（判定項目の保存先）。
  *
- * 合計スコアはここに保存しない。5 つのブール値だけを LLM から受け取り、
- * 重み付けは `src/lib/scoring/usefulness.ts` の純関数（コード側）で行う設計
- * のため、スコアを DB に保存すると重み変更のたびにデータ移行が必要になって
- * しまう。表示順に使う実際のスコアは読み取り時に毎回計算する。
+ * 本番 Turso が news-watch と DB を共有しており、追加専用の安全装置
+ * （`scripts/apply-migrations-remote.mjs`）が `ALTER TABLE` を一切許可しない
+ * （`CREATE TABLE` / `CREATE INDEX` のみ許可）ため、判定項目を増やすたびに
+ * カラムを追加する設計は採れない。そこで判定項目 6 つを 1 つの JSON カラム
+ * `criteria_json` にまとめた（shared_plan/02 の選択肢 C）。これにより、以後の
+ * 判定項目の増減は DDL 不要の純粋なコード変更になる。
+ *
+ * 合計スコアは保存しない。5+1 つのブール値を JSON にし、重み付けは
+ * `src/lib/scoring/usefulness.ts` の純関数 `computeUsefulnessScore()` が
+ * コード側で行う（表示時に毎回計算）。`criteria_json` のキーは
+ * `UsefulnessCriteria` のプロパティ名（`firsthand` / `ceremonyDecision` /
+ * `specific` / `tradeoff` / `promotional` / `preDecisionOrPhotoShoot`）と一致する。
  *
  * - `postId`: `posts.id`（採点対象の投稿）。
- * - `firsthand` / `ceremonyDecision` / `specific` / `tradeoff` / `promotional`:
- *   判定項目 5 つ（boolean は SQLite に無いため 0/1 の integer で表現）。
- *   定義は `openspec/specs/wedding-trend/spec.md` の編集方針セクションを参照。
+ * - `criteria_json`: 判定項目の JSON 文字列（SQLite に boolean 型が無いため
+ *   JSON 内では true/false として表現され、`json_extract(..., '$.x')` で
+ *   取り出すと 1/0 になる）。
  * - `signature`: 採点時点の `computeCurationSignature()` の値。`posts` 側の
- *   `curationSignature` と比較し、プロンプト/モデルが変わった記事を
- *   再スコア対象として検出する（混成ヴィンテージ対策）。
+ *   `curationSignature` と比較し、プロンプト/モデルが変わった記事を再スコア
+ *   対象として検出する（混成ヴィンテージ対策）。
  * - `modelId`: 採点した Gemini モデル ID。
- * - `scoredAt`: ISO8601 文字列（`config` / `posts` と同じ規約）。
+ * - `scoredAt`: ISO8601 文字列。
+ *
+ * 旧 `post_usefulness` テーブルは参照をやめた時点で孤児になる（共有 DB のため
+ * ここでは DROP せず、オーナーが手動で削除するか放置するかを判断する）。
  */
-export const postUsefulness = sqliteTable("post_usefulness", {
+export const postUsefulnessCriteria = sqliteTable("post_usefulness_criteria", {
   postId: integer("post_id").primaryKey(),
-  firsthand: integer("firsthand").notNull(),
-  ceremonyDecision: integer("ceremony_decision").notNull(),
-  specific: integer("specific").notNull(),
-  tradeoff: integer("tradeoff").notNull(),
-  promotional: integer("promotional").notNull(),
+  criteriaJson: text("criteria_json").notNull(),
   signature: text("signature").notNull(),
   modelId: text("model_id").notNull(),
   scoredAt: text("scored_at").notNull(),
