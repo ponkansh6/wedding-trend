@@ -187,6 +187,17 @@ Next.js 16 (App Router), React 19, TypeScript strict, Tailwind CSS v4, Drizzle O
 実在しない ID やタグをプレースホルダーとして残すと死活監視が「正常」と誤報するため、
 未採用のソースは必ず空リストにすること。
 
+#### 非 RSS のエバーグリーン経路（§6.1 のトリガー外・手動実行）
+
+「式決定後の意思決定」に特化した定番記事は RSS フィードが構造的に存在しないため、
+§6.1 の収集トリガーとは独立した手動経路で摂取する。運営が CLI
+`node scripts/submit-evergreen.mjs <url> [--source-name <出典名>]` で URL を投入すると、
+`src/lib/pipeline/evergreen.ts` の `curateEvergreenUrl()` が URL 正規化 → OGP/JSON-LD
+メタデータ取得（本文 DOM は読まない）→ 原文テキスト（og:description）の有無で分岐し、
+LLM キュレーションまたは pending 保存を行う。原文テキスト不在時の挙動と出典クレジットの
+解決規則は §10-4 に定義する。対象トピックの選定基準（商用排除・当事者の体験談限定）は
+§9 の編集方針に従う。
+
 ### §6.2 管理操作の認可モデル（Basic 認証・多層防御）
 
 収集トリガー（`triggerIngest`）・SNS URL 投入（`submitSnsUrl`）はいずれも `/admin` 配下（オーナー限定）に置かれ、同一の認可モデルを共有する。以前は 2 つの異なる仕組み（収集ボタン: 無認証で公開 + DB クールダウンのみ、URL 投入: `ENABLE_ADMIN_CONTROLS` 環境変数フラグ）を使い分けていたが、収集ボタンを `/admin` へ移したことで両者を Basic 認証に一本化した。`ENABLE_ADMIN_CONTROLS` は廃止し、`adminControlsEnabled()` は削除した。
@@ -473,8 +484,12 @@ false（0点）より上」の**楽観的な中位**に意図的に置いてお�
 1. **元ソースへの導線が最優先 CTA**: すべてのカードにおいて、元投稿・記事へのリンク（または公式埋め込み）を明確なメインアクションとして配置する。
 2. **著作者名の必須クレジット**: 引用（著作権法第32条）の要件を満たすため、カード上に著者名・情報源名を必ず表示する。
 3. **要約の表現制限**: AI による要約は原文のクリエイティブな表現（言い回し）をそのまま再現せず、客観的な事実や要点の抽出に留める（翻案権・複製権への配慮）。これらは `src/lib/llm/prompts.ts` 内のプロンプトおよび UI 表示において厳格に担保される。
-4. **原文テキストが存在しない場合は AI 要約を生成しない**: `src/lib/pipeline/submit-url.ts` の `runSubmitUrl` は、LLM キュレーション（`curateSingle`）を呼び出す前に「要約対象となる原文テキストが存在するか」を判定する。原文テキストとは oEmbed が返すキャプション（`embed.title`）と、運営が投稿時に添える補足メモ（`note`、空白のみは「補足なし」として扱う）の 2 つのみを指す。
+4. **原文テキストが存在しない場合は AI 要約を生成しない（経路独立の不変条件）**: すべての摂取経路において、LLM キュレーション（`curateSingle`）を呼び出す前に「要約対象となる原文テキストが存在するか」を判定する。「原文テキスト」の定義は経路ごとに異なり、新たな摂取経路を追加する際は必ず本項に定義を追記する。
+   - **SNS 手動投入経路**（`src/lib/pipeline/submit-url.ts` の `runSubmitUrl`）: oEmbed が返すキャプション（`embed.title`）と、運営が投稿時に添える補足メモ（`note`、空白のみは「補足なし」として扱う）の 2 つのみを指す。
+   - **エバーグリーン経路**（`src/lib/pipeline/evergreen.ts` の `curateEvergreenUrl`）: OGP メタデータの `og:description` / `<meta name="description">`（`meta.description`）のみを指す。`<title>` / `og:title` は表示ラベルであり要約の材料にしない。本文 DOM は一切読まない（`src/lib/sources/ogp.ts` は meta タグと JSON-LD のみを走査する。`tests/ogp.test.ts` がこの不変条件を固定する）。
    - Instagram のキーなし oEmbed エンドポイント（`graph.facebook.com/.../instagram_oembed`）はキャプション本文を一切返さない（`version` / `provider_name` / `provider_url` / `type` / `width` / `html` のみで `title` が欠落する。2026-08-22 の実リクエストで確認済み）。これに対し YouTube の oEmbed は `title` を返す。
-   - 原文テキストが両方とも存在しない場合、`runSubmitUrl` は `curateSingle` を一切呼ばず、`status: "pending"` のまま投稿を保存する（`aiTitle` / `aiSummary` は null のまま）。取得済みの embed（`embedProvider` / `embedHtml` / `embedFetchedAt`）と `url` は保存し、再取得コストを避ける。呼び出し元には安定コード `"needs_source_text"` を返す。
-   - `aiTitle` / `aiSummary` が null の投稿は `src/lib/db/query.ts` の `getFeedCards` が除外するため、運営が補足メモを添えて再投入するまでフィードには表示されない（意図した挙動）。
-   - 原文テキストが存在する場合（oEmbed にキャプションがある、または運営が補足メモを添えた場合）は、従来通り `curateSingle` によるキュレーションを行う。
+   - SNS 経路で原文テキストが両方とも存在しない場合、`runSubmitUrl` は `curateSingle` を一切呼ばず、`status: "pending"` のまま投稿を保存する（`aiTitle` / `aiSummary` は null のまま）。取得済みの embed（`embedProvider` / `embedHtml` / `embedFetchedAt`）と `url` は保存し、再取得コストを避ける。呼び出し元には安定コード `"needs_source_text"` を返す。
+   - エバーグリーン経路で原文テキストが存在しない場合も同様に、`curateEvergreenUrl` は `curateSingle` を一切呼ばず、取得済みのメタデータ（タイトル・著者・サムネイル・公開日）と `url` を `status: "pending"` で保存する。呼び出し元には安定コード `"needs_source_text"` を返す。LLM 失敗時のフォールバック要約も原文テキスト（excerpt）のみから生成し、title へのフォールバックは行わない。
+   - `aiTitle` / `aiSummary` が null の投稿は `src/lib/db/query.ts` の `getFeedCards` が除外するため、運営が補足を添えて再投入するまでフィードには表示されない（意図した挙動。経路共通）。
+   - 原文テキストが存在する場合は、従来通り `curateSingle` によるキュレーションを行う。
+   - **出典クレジット（第 2 項）の解決規則（エバーグリーン経路）**: 出典名は「運営の明示指定（CLI の `--source-name`、前後空白は trim）→ `og:site_name` → URL ホスト名（`www.` を除去した実在ドメイン）」の順で解決する。いずれも解決できない場合、架空のソース名を捏造せずに保存を拒否する（安定コード `"no_source_name"`）。サイト名を示さない固定文字列へのフォールバック生成は禁止。

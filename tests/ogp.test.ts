@@ -75,4 +75,53 @@ describe("parseOgpMetadata (src/lib/sources/ogp.ts)", () => {
     expect(meta.title).toBe('Reversed "Attr" Order');
     expect(meta.description).toBe("Description <test>");
   });
+
+  // T5: 本文 DOM を一切読まないことの証明（実パーサに通し、モックしない）
+  it("T5: never reads body DOM — a distinctive body-only string does not leak into any parsed field", () => {
+    const html = `
+      <html>
+        <head>
+          <title>Head Title</title>
+          <meta property="og:title" content="OGP Title" />
+          <meta property="og:description" content="OGP Description" />
+          <meta property="og:image" content="https://example.com/img.jpg" />
+          <meta property="og:site_name" content="Site Name" />
+        </head>
+        <body>
+          <p>UNIQUE_BODY_MARKER_9f3a2c</p>
+          <div>UNIQUE_BODY_MARKER_9f3a2c another</div>
+        </body>
+      </html>
+    `;
+
+    const meta = parseOgpMetadata(html);
+    const serialized = JSON.stringify(meta);
+
+    expect(serialized).not.toContain("UNIQUE_BODY_MARKER_9f3a2c");
+    expect(meta.title).toBe("OGP Title");
+    expect(meta.description).toBe("OGP Description");
+    expect(meta.siteName).toBe("Site Name");
+  });
+
+  // T5b: og:description が無いページでは description は null のまま。
+  // 本文テキストへの「親切な」フォールバックが存在しないことの証明
+  // （§10-4 / P1 ガード: 原文テキスト不在時に要約材料を捏造しないための前提）。
+  it("T5b: with no meta description at all, description stays null — no body-text fallback exists", () => {
+    const html = `
+      <html>
+        <head>
+          <title>Head Title Only</title>
+        </head>
+        <body>
+          <p>UNIQUE_BODY_MARKER_b7e41d</p>
+          <article>UNIQUE_BODY_MARKER_b7e41d creative prose</article>
+        </body>
+      </html>
+    `;
+
+    const meta = parseOgpMetadata(html);
+
+    expect(meta.description).toBeNull();
+    expect(JSON.stringify(meta)).not.toContain("UNIQUE_BODY_MARKER_b7e41d");
+  });
 });

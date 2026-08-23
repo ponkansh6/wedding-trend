@@ -3,8 +3,8 @@
 - 対象: `wedding-trend`（本プロジェクト）
 - 参照: `shared_plan/03-source-expansion-validation.md` の V0/V1 実測結果
 - 作成日: 2026-08-23
-- 前提コミット: `4c4a8b5 docs(plan): plan03 V1 ドライラン結果を記録`
-- 状態: **実装完了・検証通過** (95.0% ゲート通過達成、非RSS エバーグリーン摂取経路 `src/lib/pipeline/evergreen.ts` および `scripts/submit-evergreen.mjs` 実装済み)
+- 前提コミット: `db932bf feat(pipeline): add non-RSS evergreen manual curation ingestion path`
+- 状態: **実装済み / 検証完了** — 第三者検証（2026-08-23、§6）で指摘された §7 の P1〜P3 を実装し、T1〜T5 を意図的に壊して失敗することを確認済み。P4 再測定（同日、ログは `shared_plan/04-evergreen-revalidation-2026-08-23.log`）で本群 6/6 通過（100%）・対照群 0/4 通過（0%）を確認。旧記載「検証通過・95.0% ゲート通過達成」は §6.2-3 のとおり裏付けが取れないため撤回済み
 
 ---
 
@@ -96,3 +96,223 @@ plan 03 の V0/V1 で判明した根本課題:
 - RSS パイプラインの更なる最適化（構造的にエバーグリーンを供給できないため無駄）
 - ゲート基準の緩和（§10 の安全網を崩すため不可）
 - 本文スクレイピング（§10・plan 03 §4.1 により不可）
+
+---
+
+## 6. 第三者検証の結果（2026-08-23 実施）
+
+`db932bf` 時点の実装に対して、プラン記述を根拠に使わず**コードの実態のみ**から検証した結果を記録する。
+
+### 6.1 通過した検証ゲート
+
+`oxlint` / `type-check` / `eslint src/`（RSC 境界）/ `check-spec-refs` / `oxfmt --check .`（127 ファイル）/ `vitest run --coverage` / `check-coverage-tiers.mjs` — **すべて通過（exit 0）**。Tier 1〜6 の目標を全て満たす。
+
+ただし `src/lib/pipeline/evergreen.ts` の branch coverage は **70.83%**（statements 96%）。行は通っているが分岐が抜けており、これは §6.2-4 と符合する。
+
+**ゲートが緑であることと、ゲートが機能していることは別である**（AGENTS.md）。以下の欠落はどのゲートにも検出されなかった。
+
+### 6.2 検出された乖離
+
+#### 1. 【重大・§10-4 違反経路】`hasSourceText` 相当のガードが存在しない
+
+既存の SNS 経路には、要約対象の原文テキストが無い場合に LLM を呼ばないガードがある。
+
+```
+src/lib/pipeline/submit-url.ts:145   const hasSourceText = embedTitle !== null || normalizedNote !== null;
+src/lib/pipeline/submit-url.ts:147   if (!hasSourceText) return submitWithoutSourceText(canonical, provider, embed);
+```
+
+`evergreen.ts` にはこれに相当する判定が**一切ない**。
+
+```
+evergreen.ts:46   if (!meta || !meta.title) return { ok: false, reason: "no_metadata", card: null };
+evergreen.ts:49   const excerpt = meta.description;          // null になりうる
+evergreen.ts:51   const curationResult = await curateSingle({ title: sourceTitle, excerpt });
+```
+
+`meta.title` さえ非 null なら、`meta.description`（= og:description）が `null` でも無条件に `curateSingle` に進む。
+`src/lib/llm/prompts.ts:67` は `excerpt` が null のとき「本文抜粋: （本文抜粋なし）」として送るため、
+**LLM はページタイトルだけを材料に要約を生成しうる**。これは spec.md §10-4 が禁じている当のケースである。
+
+さらに LLM 失敗時のフォールバックも同じ穴を持つ。
+
+```
+evergreen.ts:19   const summarySource = excerpt && excerpt.trim() !== "" ? excerpt : title;
+```
+
+`excerpt` が空なら **title を要約本文に流用**する。ラベルではなく要約枠に入るため、`submit-url.ts` の
+`placeholderTitle = "SNS 投稿"`（「ラベルであり要約ではないため捏造にあたらない」とコメントされている）とは性質が異なる。
+
+**皮肉な構造**: 本文スクレイピングを避けた判断（plan 03 §4.1 に忠実で正しい）は、取得できるテキストを
+`og:description` のみに絞る。つまり**この経路こそ §10-4 のガードを最も必要とする**のに、ガードだけが移植されていない。
+
+#### 2. 【重大・§10-2 違反】`sourceName` のフォールバックがクレジットを捏造する
+
+```
+evergreen.ts:60,107   sourceName: opts?.sourceName ?? meta.siteName ?? "エバーグリーン"
+```
+
+`og:site_name` を持たないページでは、情報源名として**実在しない「エバーグリーン」という媒体名**が保存・表示される。
+spec.md §10-2 は「著者名・情報源名を必ず表示する」と定めており、これは著作権法32条の引用要件に紐づく仕様要件である。
+クレジット欄が空になるより悪い ── **誤った出所表示**にあたる。`author` も `meta.author ?? null`（L63, L109）で null 化する。
+
+plan 03 §4.3 では「`sourceName` を常時必須のクレジット枠に昇格させる」ことを提案したが、その `sourceName` 自体が
+信頼できない値を取りうるため、先に本項を解消しないと §4.3 の対応は無意味になる。
+
+#### 3. 【重大】「95.0% ゲート通過達成」は裏付けが取れない
+
+- `scripts/evergreen-validation.mjs` 自身が定義する目標値は **`>= 30%`**（L173 の出力文言、L178 の判定）。本書 §3 の成功基準とも一致する。**95% という基準はスクリプトのどこにも存在しない。**
+- 母数は `SAMPLE_URLS` に**ハードコードされた 20 件**。しかも各エントリの `title` / `excerpt` は**手打ちの日本語文字列**で、URL は fetch されない。`curatePosts` を実 LLM で呼ぶ点はモックではないが、**入力が人間の手書きである以上、これは「非RSS 摂取機構の検証」ではなく「良い文章を渡せば良い判定が返るか」の確認にすぎない**。本書 §3 が掲げた「ソース品質と摂取機構を分離する」という検証の意義を満たしていない。
+- スクリプトの実行ログは**コミットにもリポジトリにも存在しない**。数値は追跡不能。
+- リポジトリ全体で `95%` が出現する他の箇所は `AGENTS.md:68` と `spec.md:276` の**カバレッジ Tier 1 目標値**のみで、本件と無関係。
+
+20 件中 19 件通過なら 95.0% になるため実行自体はされた可能性があるが、**記録がない以上、検証済みとは扱えない**。
+
+#### 4. 【重大】§10 の不変条件を固定するテストが存在しない
+
+`tests/pipeline-evergreen.test.ts` の 5 ケース（`invalid_url` / happy path / `no_metadata` / LLM 失敗フォールバック / `save_failed`）は
+すべて `fetchOgpMetadata` をモック化している。したがって、
+
+- 「本文 HTML を取得・解析しないこと」を保証するテスト — **なし**
+- 「原文テキストが無いとき AI 要約を生成しないこと」を保証するテスト — **なし**（ケース2 はむしろ要約が生成される前提でアサートしている）
+
+AGENTS.md の「新しく検証機構を追加した場合は、意図的に壊して実際に落ちることを確認するまで完了と見なさない」に到達していない。
+
+#### 5. 【設計】「RSS posts UNION evergreen posts」は実装されていない
+
+`src/lib/db/query.ts` は `db932bf` で**無変更**。`getFeedCards` は `sourceType` と `status` でしか絞り込まないため、
+evergreen 投稿（`sourceType: "blog"`, `status: "published"`）は**既存クエリの絞り込みの緩さの副作用として混入している**だけである。
+意図された合流点が存在しないため、今後 evergreen 分だけを制御・除外・比率調整したくなった時に効かせる場所がない。
+
+### 6.3 正しく実装できている点
+
+- **本文 HTML を一切取得・解析していない**（`src/lib/sources/ogp.ts` は `og:*` / `<title>` / JSON-LD の 6 フィールドのみを抽出）。plan 03 §4.1 の結論に忠実であり、方向性としては正しい。
+- RSS パイプラインに手を入れずに独立経路として実装しており、本書 §2 の方針と一致する。
+- 手動投入（`scripts/submit-evergreen.mjs`、1 件ごとに 4 秒 sleep）から始めており、本書 §2 末尾のリスク軽減方針と一致する。
+
+---
+
+## 7. 改善プラン
+
+### P1【ブロッカー】§10-4 ガードの移植
+
+**原文テキストの定義を決める**: この経路における原文由来テキストは **`meta.description`（og:description / JSON-LD description）のみ**とする。
+`meta.title` はページのラベルであって原文の要約ではないため、**単体では要約の材料にしない**。
+
+1. `evergreen.ts` に `hasSourceText = excerpt !== null && excerpt.trim() !== ""` を追加し、`curateSingle` の**前**に判定する。
+2. 偽のとき、既存の `submitWithoutSourceText`（`submit-url.ts`）と同じ構造の `saveEvergreenWithoutSourceText` を通す:
+   - `curateSingle` を呼ばない
+   - `status: "pending"` で保存し、`aiTitle` / `aiSummary` は null のまま
+   - `url` / `thumbnailUrl` / `author` / `publishedAt` など取得済みメタデータは保存し、再取得コストを避ける
+   - 戻り値は `reason: "needs_source_text"`（既存経路と同じ安定コードを使う）
+3. `aiSummary` が null の投稿は `getFeedCards` が除外するため、フィード露出は自動的に防がれる（spec.md §10-4 の既存挙動と同一。新たな除外ロジックは不要）。
+4. `buildFallbackCuration`（L16-38）の `summarySource = excerpt || title` を修正する。`excerpt` が空のときは**フォールバック要約を作らない**（P1-2 の経路に倒す）。
+
+### P2【ブロッカー】クレジットの健全化
+
+1. `"エバーグリーン"` フォールバックを**削除**する。
+2. 解決順を `opts.sourceName` → `meta.siteName` → **URL の登録可能ドメイン**（例: `zexy.net`）とする。ドメインは事実であり捏造にあたらない。
+3. どれも解決できない場合は**保存しない**（`reason: "no_source_name"`）。捏造したクレジットを出すくらいなら取り込まない、を既定とする。
+4. `scripts/submit-evergreen.mjs` に `--source-name` を渡せるようにし、手動投入時は明示指定を推奨する。
+5. 本項の完了後に、plan 03 §4.3（`sourceName` を常時クレジット枠に昇格、`author` は追加行）に着手する。順序を逆にしない。
+
+### P3【ブロッカー】§10 不変条件のテスト固定
+
+以下を追加し、**それぞれ意図的に壊して実際に落ちることを確認するまで完了としない**（AGENTS.md 検証ルール）。
+
+| #   | 固定する不変条件                                            | 検証方法                                                                                                                                |
+| --- | ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| T1  | `og:description` が null のとき `curateSingle` が呼ばれない | モックの呼び出し回数が 0 であることをアサート                                                                                           |
+| T2  | T1 のとき `aiTitle` / `aiSummary` が null で保存される      | `upsertPosts` に渡る引数を検証                                                                                                          |
+| T3  | T1 のとき `getFeedCards` の対象にならない                   | 除外挙動をクエリ層のテストで固定                                                                                                        |
+| T4  | `sourceName` が解決できないとき保存されない                 | `upsertPosts` が呼ばれないことをアサート                                                                                                |
+| T5  | `ogp.ts` が本文 DOM を読まない                              | 本文に特徴的な文字列を埋めた HTML を食わせ、出力 6 フィールドのいずれにもその文字列が現れないことをアサート（モックせず実パーサに通す） |
+
+あわせて `evergreen.ts` の branch coverage 70.83% を解消する。
+
+### P4 検証実験のやり直し（§3 の再実施）
+
+「95.0%」は §6.2-3 のとおり撤回する。**成功基準は §3 の `≥30%` を維持**する。
+
+1. `evergreen-validation.mjs` の `SAMPLE_URLS` から手打ちの `title` / `excerpt` を**削除**し、実 URL を `fetchOgpMetadata` に通した値で評価する。これで初めて「摂取機構の検証」になる。
+2. §1.5 の**除外すべきトピック**から対照群を混ぜ、通過率の差を見る（`scripts/v1-control-group.mjs` の構成を流用）。対照群が同程度に通過するなら、ゲートが機能していないというより深刻な問題を意味する。
+3. `og:description` の**欠落率**を同時に測る。P1 適用後はこれがそのまま「要約を作れず pending に落ちる率」になり、経路の実用性を左右する。plan 03 §5 V2-G7 と同じ観点。
+4. 実行結果を `shared_plan/` に**ログとして記録**し、数値を追跡可能にする。記録のない数値は主張しない。
+
+#### P4 再測定結果（2026-08-23 実施）
+
+実行ログ: `shared_plan/04-evergreen-revalidation-2026-08-23.log`（`pnpm exec tsx scripts/evergreen-validation.mjs`）
+
+| 項目                  | 本群            | 対照群                                                      |
+| --------------------- | --------------- | ----------------------------------------------------------- |
+| サンプル数            | 6               | 5                                                           |
+| 取得失敗 / メタ無し   | 0               | 0                                                           |
+| `og:description` 欠損 | 0/6             | 1/5（brass.ne.jp — P1 適用で pending 保存となる経路を実証） |
+| LLM 評価対象          | 6               | 4                                                           |
+| ゲート通過            | **6/6（100%）** | **0/4（0%）**                                               |
+
+- 成功基準 `≥30%` を満たす（§3）。
+- 対照群（式場探し）は全件 `preDecisionOrPhotoShoot: true` で不通過 — §1.5 の除外トピックをゲートが正しく排除している。
+- 本群の通過 6 件はすべて `ceremonyDecision: true` かつ `preDecisionOrPhotoShoot: false`。うち 4 件が `firsthand: true`、2 件が `tradeoff: true`。
+- サンプルは手動選定のため選定バイアスに注意（§11）。根拠は絶対値ではなく対照群との差（100% vs 0%）とする。
+
+### P5 `sourceId` による明示的なレーン制御
+
+`getFeedCards` に `sourceId` の扱いを持たせ、evergreen 投稿の混入を「副作用」から「意図された合流」に変える。
+最小対応として、現状の混入挙動をクエリ層のテストで固定するだけでもよい。**UNION 構造は現時点では不要**（§9）。
+
+### P6 spec.md の更新
+
+spec.md §10-4 は `src/lib/pipeline/submit-url.ts` の `runSubmitUrl` に閉じた記述になっており、
+摂取経路が 2 本になった現状と乖離している。
+
+1. §10-4 を「摂取経路によらず、原文テキストが存在しない場合は `curateSingle` を呼ばない」という**不変条件として一般化**し、各経路における「原文テキスト」の定義（SNS: oEmbed キャプション + 補足メモ / evergreen: og:description）を併記する。
+2. §6.3（収集ソースの採否）に evergreen 経路を追記する。
+3. AGENTS.md のとおり spec.md は唯一の参照先であり、実装が先行して spec が古いままの状態を残さない。
+
+---
+
+## 8. 実行順
+
+1. **P1** → **P2** → **P3**（ここまでが本番投入のブロッカー。順序依存あり: P2 は P1 の後、plan 03 §4.3 は P2 の後）
+2. **P6**（spec 更新。P1/P2 で決めた定義をそのまま反映する）
+3. **P4**（再測定。P1 適用後でないと `og:description` 欠落率が測れないため、P1 の後に実施する）
+4. **P5**（P4 の結果、evergreen の供給量が実用水準と分かってから）
+
+P4 が `≥30%` を満たさなかった場合は、経路の問題ではなくゲート基準の誤キャリブレーションを疑う（§3 の記載どおり）。その場合 P5 には進まず、plan 03 の V0-1（母集団・retention）に立ち返る。
+
+---
+
+## 9. 意図的に採用しないもの
+
+- **`og:description` 欠落時に title から要約を生成すること**（現行挙動）— spec.md §10-4 違反。P1 で塞ぐ
+- **`"エバーグリーン"` のような汎用フォールバック名でのクレジット表示** — §10-2 違反。ドメイン表示か、取り込まないかの二択にする
+- **本文スクレイピングによる `excerpt` の補完** — plan 03 §4.1 の結論を覆さない。`og:description` が薄いことは、本文を取りに行く理由にならない
+- **「95.0%」という数値の維持** — 出所不明のため撤回する（§6.2-3）
+- **`getFeedCards` の UNION 化** — P5 の `sourceId` 制御で足りる。テーブルが 1 つである以上 UNION は不要な複雑さ
+- **ゲート基準（`ceremonyDecision && !preDecisionOrPhotoShoot`）の緩和** — §5 の記載を維持
+- **P1〜P3 未了のままでの自動化（§2 の経路 2・3）** — 手動投入で穴が塞がっていない状態を自動化すると、違反が件数に比例して増える
+
+---
+
+## 10. 完了判定
+
+- [x] P1: T1/T2/T4 統合テストで確認（`curateSingle` 非呼び出し・`aiTitle`/`aiSummary` null 保存・`needs_source_text` 返却）。再測定ログでも og:description 欠損 1 件が LLM 評価対象から除外される（P1 ガードと同一条件分岐）ことを確認
+- [x] P2: `resolveSourceName` 単体テスト＋T4（捏造フォールバック `"エバーグリーン"` の再導入時にテストが落ちることを二重確認）。コードから汎用フォールバックは削除済み
+- [x] P3: T1〜T5b を追加し、各防御層の意図的な除去/注入で落ちることを確認済み。coverage tiers 全 PASS
+- [x] P4: 再測定完了。本群 6/6（100%）/ 対照群 0/4（0%）で `≥30%` を満たす。ログ: `shared_plan/04-evergreen-revalidation-2026-08-23.log`
+- [x] P6: spec.md §10-4 を経路非依存の不変条件として一般化、§6.3 に evergreen 経路を追記済み（spec-refs 通過）
+- [x] 全検証ゲート（lint / type-check / eslint / spec-refs / oxfmt / test / coverage tiers / security / smoke test）が通過している（2026-08-23 ローカル実行。227 tests / tiers 全 PASS / smoke ✅）
+- [x] 本書ヘッダーの状態表記が実態と一致している（§6 の再検証を経て更新する）
+
+---
+
+## 11. リスク
+
+| リスク                                                                | 影響                                                                 | 対処                                                                                                                                              |
+| --------------------------------------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `og:description` の欠落率が高く、P1 適用後に大半が `pending` に落ちる | 経路の実用性が失われる                                               | P4-3 で欠落率を先に測る。高い場合は「手動投入時に編集が補足メモを添える」設計（`submit-url.ts` の `note` と同じ発想）に倒す。本文取得には倒さない |
+| ゲートが緑なので問題ないと判断される                                  | §10 違反が本番に出る                                                 | 本節 §6.1 のとおり、今回の欠落はどのゲートにも検出されなかった。P3 のテストが唯一の機械的な歯止めになる                                           |
+| 手動投入の URL 選定バイアスが数値を良く見せる                         | 経路の有効性を過大評価する                                           | P4-2 の対照群で相対比較する。絶対値だけを根拠にしない                                                                                             |
+| spec 更新を後回しにする                                               | 実装と仕様の乖離が固定化し、次の変更者が §10-4 を SNS 専用と誤読する | P6 を P4 より前に置いている（§8）。順序を入れ替えない                                                                                             |
+| 記録のない数値が再び計画に載る                                        | 検証の信頼性が壊れる                                                 | P4-4 でログ記録を完了条件に含めた。§6.2-3 の再発防止                                                                                              |

@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeEach, vi } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { postUsefulnessCriteria } from "@/lib/db/schema";
+import { posts, postUsefulnessCriteria } from "@/lib/db/schema";
 import {
   upsertPosts,
   getPostsByUrls,
@@ -178,6 +178,73 @@ describe("Database Repository and Queries", () => {
 
     const usefulnessRows = await db.select().from(postUsefulnessCriteria);
     expect(usefulnessRows).toHaveLength(0);
+  });
+
+  it("T3: getFeedCards excludes posts whose aiSummary is null even when curated otherwise", async () => {
+    await upsertPosts([
+      {
+        url: "https://example.com/summary-null",
+        sourceType: "blog",
+        sourceId: "evergreen",
+        sourceName: "Example",
+        originalTitle: "T3 Title",
+        originalExcerpt: "excerpt",
+        author: null,
+        thumbnailUrl: null,
+        publishedAt: null,
+      },
+    ]);
+    await markCurated([
+      {
+        url: "https://example.com/summary-null",
+        aiTitle: "AI Title",
+        aiSummary: "AI Summary",
+        category: "その他",
+        tag: "classic",
+        contentHash: "hash",
+        curationSignature: "sig",
+        status: "published",
+      },
+    ]);
+    // 異常系: aiSummary のみ欠落した部分データ破損を直接作る。
+    // aiTitle / category / tag が揃っていても、aiSummary が無い投稿はフィードに出てはならない。
+    await db
+      .update(posts)
+      .set({ aiSummary: null })
+      .where(eq(posts.url, "https://example.com/summary-null"));
+
+    const cards = await getFeedCards({ sourceType: "blog", limit: 10 });
+    expect(cards.find((c) => c.url === "https://example.com/summary-null")).toBeUndefined();
+  });
+
+  it("P5: evergreen posts (sourceId 'evergreen') are included in the blog feed lane via sourceId", async () => {
+    await upsertPosts([
+      {
+        url: "https://example.com/evergreen-feed",
+        sourceType: "blog",
+        sourceId: "evergreen",
+        sourceName: "Example",
+        originalTitle: "Evergreen Title",
+        originalExcerpt: "excerpt",
+        author: "Author",
+        thumbnailUrl: null,
+        publishedAt: "2026-01-01T00:00:00.000Z",
+      },
+    ]);
+    await markCurated([
+      {
+        url: "https://example.com/evergreen-feed",
+        aiTitle: "AI Title",
+        aiSummary: "AI Summary",
+        category: "その他",
+        tag: "classic",
+        contentHash: "hash",
+        curationSignature: "sig",
+        status: "published",
+      },
+    ]);
+    const cards = await getFeedCards({ sourceType: "blog", limit: 10 });
+    expect(cards.find((c) => c.url === "https://example.com/evergreen-feed")).toBeDefined();
   });
 
   it("handles database errors and fail-soft fallbacks gracefully", async () => {

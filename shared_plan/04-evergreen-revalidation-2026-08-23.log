@@ -1,0 +1,90 @@
+=== Evergreen 再測定（実 URL / 実 OGP メタデータ） ===
+本群 6 件 + 対照群 5 件
+
+### Phase A[本群]: OGP メタデータ実取得 (6 件)
+  [ok] https://www.mwed.jp/articles/11348
+       title="【ゲストが喜ぶ参加型演出】65選｜費用もわかる！クイズ・共同作業・サプライズ | みんなのウェディングニュース" desc=110字 siteName="みんなのウェディング" (参加型演出65選。各演出の費用帯と先輩花嫁の体験談)
+  [ok] https://rukamama-note.com/palace-hotel-wedding-cost-report
+       title="パレスホテル東京 挙式詳細レポ③｜披露宴の流れと詳細＆会場・装花費用" desc=90字 siteName="るかママの子育てノート" (パレスホテル東京 挙式レポ。披露宴詳細と会場・装花費用)
+  [ok] https://www.wedding-note.net/blog-saving
+       title="結婚式の費用節約ポイント。相場や持ち込み料。新郎日記15｜私たちのウェディングノート" desc=60字 siteName="私たちのウェディングノート" (新郎日記。費用節約ポイント・相場や持ち込み料の実記録)
+  [ok] https://www.wedding-note.net/hmy
+       title="ホテルモントレ横浜のリアルな結婚式費用と口コミ。卒花嫁ブログ｜私たちのウェディングノート" desc=89字 siteName="私たちのウェディングノート" (卒花嫁ブログ。見積300万→最終350万の内訳と工夫)
+  [ok] https://kizuna-bridal.com/wedding-relatives-only-regret
+       title="結婚式 親族のみで後悔しないために知っておきたいこと" desc=81字 siteName="ブライダルタイム" (親族のみ婚の後悔体験談。費用と演出のトレードオフ)
+  [ok] https://soratobu-penguin.com/blog/information/setsuyaku
+       title="知ってるだけで格段に費用が減る！結婚式披露宴の節約ポイント | おもしろいオリジナルウエディングなら結婚式プロデュースの" desc=115字 siteName="おもしろいオリジナルウエディングなら結婚式プロデュースの空飛" (披露宴の節約ポイント。持ち込み・アイテム別の削減術)
+  -> 取得失敗/メタ無し: 0/6, og:description 欠損: 0/6
+
+### Phase A[対照群]: OGP メタデータ実取得 (5 件)
+  [ok] https://dressy.pla-cole.wedding/ceremony-venue-selection
+       title="結婚式場選びで後悔しないために｜手順・チェックポイント・決め手まとめ - DRESSY【公式】ウェディングドレス・ファッ" desc=85字 siteName="プレ花嫁さん憧れのウェディングドレスを中心とした記事サイト！" ([対照] 結婚式場の選び方完全ガイド)
+  [ok] https://pairy.com/article/wedding/1096783
+       title="結婚式場選びの決め手となるポイント6選！後悔しない結婚式場の選び方 | カップル専用アプリPairy(ペアリー) - 恋" desc=55字 siteName="カップル専用アプリPairy- 大人も楽しめる評価No.1ア" ([対照] 式場選びの決め手となるポイント6選)
+  [ok] https://brass.ne.jp/media/how-to-choose-wedding-venue
+       title="結婚式場の選び方・決め方は？決め手となるポイントや後悔しないための注意点 &#8211; コラム | ブラス（BRASS" desc=null siteName=null ([対照] 結婚式場の選び方・決め方)
+  [ok] https://hana-yume.net/howto/how-to-choose
+       title="結婚式場の選び方・決め方完ぺきガイド！失敗しない5つのステップと決め手" desc=96字 siteName="ハナユメ" ([対照] 式場選び・決め方完ぺきガイド)
+  [ok] https://bridal-torisetsu.net/choose
+       title="後悔しない結婚式場の探し方！式場探しのコツを徹底的に解説" desc=121字 siteName=null ([対照] 後悔しない結婚式場の探し方)
+  -> 取得失敗/メタ無し: 0/5, og:description 欠損: 1/5
+
+### Phase B: LLM キュレーション (10 件 / pending 対象 1 件は評価外)
+
+--- [main] https://www.mwed.jp/articles/11348 ---
+Category: 演出・進行 | Tag: trend | Firsthand: false | Tradeoff: false
+CeremonyDecision: true | PreDecisionOrPhotoShoot: false | Gate: PASS
+Summary: 挙式や披露宴で取り入れられるゲスト参加型の演出を65選紹介。所要時間や費用の目安が記載されており、アフターセレモニーから披露宴まで、ゲストとの一体感を高めるための具体的なアイデアを検討する際の参考資料として活用できる。
+
+--- [main] https://rukamama-note.com/palace-hotel-wedding-cost-report ---
+Category: 会場・装花 | Tag: classic | Firsthand: true | Tradeoff: true
+CeremonyDecision: true | PreDecisionOrPhotoShoot: false | Gate: PASS
+Summary: 49名規模の披露宴における請求書明細を公開。室料、装花、演出などの内訳を実体験に基づき解説している。総額500万円以内で実施した際の節約ポイントや、実際の会場装花費用など、具体的な金額が示されており、予算配分の参考になる。
+
+--- [main] https://www.wedding-note.net/blog-saving ---
+Category: 費用・節約 | Tag: classic | Firsthand: true | Tradeoff: false
+CeremonyDecision: true | PreDecisionOrPhotoShoot: false | Gate: PASS
+Summary: 結婚式にかかる費用一覧や追加料金の仕組みについて、プランナーとの打ち合わせ経験を基に解説。演出やアイテムの費用を抑えるための考え方や、持ち込み料に関する実情に触れており、予算管理のヒントが得られる内容。
+
+--- [main] https://www.wedding-note.net/hmy ---
+Category: 会場・装花 | Tag: classic | Firsthand: true | Tradeoff: false
+CeremonyDecision: true | PreDecisionOrPhotoShoot: false | Gate: PASS
+Summary: 2014年に挙式した卒花嫁による費用明細と会場の口コミ。披露宴会場内に余興用スペースが確保されていた点が特徴として挙げられている。実際の会場設備が進行に与える影響や、費用感を知るための実例レポート。
+
+--- [main] https://kizuna-bridal.com/wedding-relatives-only-regret ---
+Category: 準備・段取り | Tag: classic | Firsthand: true | Tradeoff: true
+CeremonyDecision: true | PreDecisionOrPhotoShoot: false | Gate: PASS
+Summary: 親族のみの結婚式で発生しやすい後悔のポイントを7つ挙げ、解決策を提示。ブライダルフェアへの参加経験を基に、費用の目安や先輩カップルの体験談を交えて解説している。少人数婚を検討する際の段取りや注意点が網羅されている。
+
+--- [main] https://soratobu-penguin.com/blog/information/setsuyaku ---
+Category: 費用・節約 | Tag: classic | Firsthand: false | Tradeoff: false
+CeremonyDecision: true | PreDecisionOrPhotoShoot: false | Gate: PASS
+Summary: 見積もり金額を削減するための具体的な節約ポイントを解説。式場側が提示する見積もりから、どのようにコストを調整し、最大100万円の節約を目指すかという視点で構成されている。費用を抑えたいカップル向けのノウハウ集。
+
+--- [control] https://dressy.pla-cole.wedding/ceremony-venue-selection ---
+Category: 準備・段取り | Tag: classic | Firsthand: false | Tradeoff: true
+CeremonyDecision: false | PreDecisionOrPhotoShoot: true | Gate: FAIL
+Summary: 式場選びの手順、見学時のチェックリスト、決定の決め手を解説。先輩花嫁の失敗談を交え、理想の会場を見つけるためのプロセスをまとめている。式場決定前の段階で確認すべき項目が整理されている。
+
+--- [control] https://pairy.com/article/wedding/1096783 ---
+Category: 準備・段取り | Tag: classic | Firsthand: false | Tradeoff: false
+CeremonyDecision: false | PreDecisionOrPhotoShoot: true | Gate: FAIL
+Summary: 結婚式場を決定するまでの流れと、後悔しないための選定基準を解説。一生の思い出を左右する会場選びにおいて、何を重視すべきかという視点でまとめられている。式場探しをこれから行うカップル向けのガイド。
+
+--- [control] https://hana-yume.net/howto/how-to-choose ---
+Category: 準備・段取り | Tag: classic | Firsthand: false | Tradeoff: false
+CeremonyDecision: false | PreDecisionOrPhotoShoot: true | Gate: FAIL
+Summary: 式場探しを5つのステップに分け、後悔しないための選び方を解説。先輩花嫁が重視したポイントやアドバイスを基に、会場決定までのプロセスを網羅している。式場選びの全体像を把握したいカップル向けの内容。
+
+--- [control] https://bridal-torisetsu.net/choose ---
+Category: 準備・段取り | Tag: classic | Firsthand: false | Tradeoff: false
+CeremonyDecision: false | PreDecisionOrPhotoShoot: true | Gate: FAIL
+Summary: 式場探しの方法や注意点を徹底解説。ブライダルフェアに参加する前に知っておくべき情報や、失敗を避けるためのポイントがまとめられている。式場決定前の準備段階における情報収集に役立つガイド。
+
+========================================
+VALIDATION SUMMARY:
+A. og:description 欠損率: 本群 0/6, 対照群 1/5
+B. 取得失敗率: 本群 0/6, 対照群 0/5
+C. ゲート通過率: 本群 6/6 (100.0%) / 対照群 0/4 (0.0%)
+Gemini API Calls: 1 | Duration: 5.3s
+========================================

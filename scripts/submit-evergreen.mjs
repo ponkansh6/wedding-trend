@@ -3,7 +3,11 @@
  * 手動エバーグリーン URL 投入スクリプト。
  *
  * 使い方:
- *   pnpm exec tsx scripts/submit-evergreen.mjs [--file <path>] [url...]
+ *   pnpm exec tsx scripts/submit-evergreen.mjs [--source-name <名>] [--file <path>] [url...]
+ *
+ * --source-name を指定すると、og:site_name が取得できない場合でも捏造せずに
+ * その値を情報源クレジットとして使う（Plan 04 §7 P2）。未指定かつ
+ * og:site_name も無い場合は URL のドメインがクレジットされる。
  */
 import { existsSync, readFileSync } from "node:fs";
 
@@ -28,10 +32,14 @@ if (existsSync(".env.local")) {
 
 const args = process.argv.slice(2);
 const urls = [];
+let sourceName;
 
 for (let i = 0; i < args.length; i++) {
   const arg = args[i];
-  if (arg === "--file" && args[i + 1]) {
+  if (arg === "--source-name" && args[i + 1]) {
+    sourceName = args[i + 1];
+    i++;
+  } else if (arg === "--file" && args[i + 1]) {
     const filePath = args[i + 1];
     if (existsSync(filePath)) {
       const content = readFileSync(filePath, "utf-8");
@@ -51,7 +59,9 @@ for (let i = 0; i < args.length; i++) {
 }
 
 if (urls.length === 0) {
-  console.log("使い方: pnpm exec tsx scripts/submit-evergreen.mjs [--file <path>] [url...]");
+  console.log(
+    "使い方: pnpm exec tsx scripts/submit-evergreen.mjs [--source-name <名>] [--file <path>] [url...]",
+  );
   process.exit(1);
 }
 
@@ -60,13 +70,17 @@ const { curateEvergreenUrl } = await import("../src/lib/pipeline/evergreen.ts");
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 let hasError = false;
-console.log(`エバーグリーン記事の処理を開始します: ${urls.length} 件`);
+console.log(
+  `エバーグリーン記事の処理を開始します: ${urls.length} 件${
+    sourceName ? ` (source-name: ${sourceName})` : ""
+  }`,
+);
 
 for (let i = 0; i < urls.length; i++) {
   const url = urls[i];
   process.stdout.write(`[${i + 1}/${urls.length}] ${url} ... `);
   try {
-    const outcome = await curateEvergreenUrl(url);
+    const outcome = await curateEvergreenUrl(url, sourceName ? { sourceName } : undefined);
     if (outcome.ok) {
       console.log(`OK (reason: ${outcome.reason ?? "none"}, title: ${outcome.card?.aiTitle})`);
     } else {
