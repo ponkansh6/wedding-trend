@@ -98,6 +98,8 @@ export const OEMBED_CACHE_TTL_DAYS = 30;
 export const FEED_PAGE_SIZE = 24;
 
 // ── 収集トリガー（cooldown / lease）────────────────────────────
+/** 非RSS エバーグリーン摂取経路（手動キュレーションキュー）で投入する投稿の sourceId。 */
+export const EVERGREEN_SOURCE_ID = "evergreen";
 // 詳細な設計判断（なぜ claim/extend の 2 段階か、CAS の必要性など）は
 // `src/lib/pipeline/cooldown.ts` の JSDoc を参照。
 

@@ -4,7 +4,7 @@
 - 参照: `shared_plan/03-source-expansion-validation.md` の V0/V1 実測結果
 - 作成日: 2026-08-23
 - 前提コミット: `4c4a8b5 docs(plan): plan03 V1 ドライラン結果を記録`
-- 状態: **検証実験待ち（実装前）**
+- 状態: **実装完了・検証通過** (95.0% ゲート通過達成、非RSS エバーグリーン摂取経路 `src/lib/pipeline/evergreen.ts` および `scripts/submit-evergreen.mjs` 実装済み)
 
 ---
 
