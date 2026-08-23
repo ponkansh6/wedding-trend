@@ -49,7 +49,7 @@ function buildFallbackCuration(title: string, excerpt: string | null): CurationR
     summary: fallbackSummary,
     category: "その他" as Category,
     tag: "classic" as TrendTag,
-    // LLM が呼べていない（判定材料が無い）ため、5項目とも false に倒す
+    // LLM が呼べていない（判定材料が無い）ため、6項目とも false に倒す
     // （spec.md §9.4 の「判断材料が無ければ false」と同じ方針）。
     firsthand: false,
     ceremonyDecision: false,

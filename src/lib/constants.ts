@@ -10,8 +10,9 @@ export const LLM_MODEL = "gemini-3.1-flash-lite";
  * 生成温度。0（このSDKでの最小値）に固定している。
  *
  * すべてのキュレーション呼び出しは要約・タイトル生成と同時に有用度判定
- * （firsthand / ceremonyDecision / specific / tradeoff / promotional の5つの
- * ブール値。`src/lib/scoring/usefulness.ts` 参照）を1コールで行う設計のため、
+ * （firsthand / ceremonyDecision / specific / tradeoff / promotional /
+ * preDecisionOrPhotoShoot の6つのブール値。`src/lib/scoring/usefulness.ts`
+ * 参照）を1コールで行う設計のため、
  * 温度を上げるとこのブール判定がブレて体験談レーンの掲載順が実行のたびに
  * 揺らいでしまう。要約の事実からの逸脱・創作的表現の抑制という以前からの
  * 目的とも合致するため、0.2 から 0 へさらに下げた。
@@ -46,8 +47,17 @@ export const LLM_SINGLE_MAX_TOKENS = 800;
  * curationSignature が不一致になり、次回以降の ingest で段階的に、または
  * scripts/backfill-usefulness.mjs で一括して再キュレーションされる。
  * v3: 新たな判定項目 `preDecisionOrPhotoShoot`（フォト婚・前撮り・式場探し等の話題か）を追加し、`ceremonyDecision` の定義を「挙式当日の写真・映像」に限定した（shared_plan/02）。bump により全投稿の curationSignature が不一致になり、再キュレーションされる。
+ * v4: プロンプト本文の指示は元から6項目（v3 で `preDecisionOrPhotoShoot`
+ * を追加済み）だったが、見出し・件数表記が「5つのブール値」「以下の5項目」
+ * のまま取り残されていた（`USEFULNESS_CRITERIA_RULES` in
+ * `src/lib/llm/prompts.ts`）。LLM が実際に読むプロンプト本文自体の誤りで
+ * あり、単なるコメント陳腐化ではないため修正した。判定ロジック・判定項目の
+ * 定義自体は変わっていない（重み調整ではなくプロンプト本文の変更なので、
+ * 重み変更のときとは異なり bump が正しい——この変更は
+ * `computeCurationSignature` の対象であるプロンプトそのものの変更であり、
+ * bump により全投稿の curationSignature が不一致になり再キュレーションされる）。
  */
-export const CURATION_PROMPT_VERSION = 3;
+export const CURATION_PROMPT_VERSION = 4;
 
 // ── キュレーション予算・締切 ──────────────────────────────────
 /** 1 回の ingest 実行で LLM に投げる投稿数の上限。 */
@@ -128,11 +138,21 @@ export const INGEST_LEASE_TTL_MS = 2 * 60 * 1000;
 
 /**
  * `ceremonyDecision`（挙式・披露宴の中身に関する記事か）を満たした場合にのみ
- * 加算するゲート分。他の加点項目の合計（firsthand + specific + tradeoff =
- * 3+2+2=7）を上回る値にすることで、「中身に関する記事」であることを他の
- * 加点の前提条件として機能させ、衣装のみの記事等が逆転して上位に来ることを防ぐ。
+ * 加算するゲート分。
+ *
+ * 単に他の加点項目の合計（firsthand + specific + tradeoff = 3+2+2=7）を
+ * 上回るだけでは不十分（オーナー判断で 10→12 に引き上げ）。ゲートを通過した
+ * が `promotional` 判定を受けた記事（GATE - PROMOTIONAL_PENALTY）が、ゲート
+ * 不通過だが他の加点項目を総取りした記事（7）に負けてはならない。つまり
+ * `USEFULNESS_GATE_BONUS - USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY` が
+ * `USEFULNESS_WEIGHT_FIRSTHAND + USEFULNESS_WEIGHT_SPECIFIC +
+ * USEFULNESS_WEIGHT_TRADEOFF`（= 7）を上回っている必要がある。10 だと
+ * 10-4=6 < 7 で逆転してしまうため、7 に 4 を足した 11 を超える 12 とした。
+ * 「挙式・披露宴の中身の記事は、どれだけ質が高い的外れ記事にも常に勝つ」
+ * という強支配（strong domination）を保証するための値。この不変条件は
+ * `tests/usefulness-score.test.ts` で定数から式を組み立てて固定している。
  */
-export const USEFULNESS_GATE_BONUS = 10;
+export const USEFULNESS_GATE_BONUS = 12;
 
 /** 実体験に基づく記事であることの加点。話題性・宣伝性と同様に抜粋段階で判定しやすいため重め。 */
 export const USEFULNESS_WEIGHT_FIRSTHAND = 3;
@@ -145,6 +165,22 @@ export const USEFULNESS_WEIGHT_TRADEOFF = 2;
 
 /** 事業者による集客が主目的の記事に対する減点。ゲート通過後でも上位に出さない編集方針の強さを反映し、他の加点より大きい。 */
 export const USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY = 4;
+
+/**
+ * `preDecisionOrPhotoShoot`（フォトウェディング・前撮り・式場探し等、式決定前/
+ * 別撮影の話題に限られるか）が true の場合の独立減点。
+ *
+ * ゲート条件（`ceremonyDecision && !preDecisionOrPhotoShoot`）の AND 側は
+ * 実測データ上ほぼ発火しない（本番 43 件中 `ceremonyDecision=true` かつ
+ * `preDecisionOrPhotoShoot=true` の組み合わせは 0 件 —— そもそも
+ * `preDecisionOrPhotoShoot` の定義自体が「式決定前/別撮影の話題に限られる」
+ * であり、意味論上 `ceremonyDecision=true` とはほぼ両立しない）。そのため
+ * ゲートの AND 条件だけでは `preDecisionOrPhotoShoot=true` の記事は
+ * `ceremonyDecision=false` の記事と同点のまま区別できず、掲載順に一切
+ * 反映されていなかった。オーナー方針（「ゲートというよりは、ソートさえ
+ * できればよい」）に基づき、ゲートとは独立した減点項として加える。
+ */
+export const USEFULNESS_WEIGHT_PRE_DECISION_PENALTY = 3;
 
 // ── HTTP ステータス ───────────────────────────────────────────
 export const HTTP_STATUS_TOO_MANY_REQUESTS = 429;

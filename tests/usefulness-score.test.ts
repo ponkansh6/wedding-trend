@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  USEFULNESS_GATE_BONUS,
+  USEFULNESS_WEIGHT_FIRSTHAND,
+  USEFULNESS_WEIGHT_PRE_DECISION_PENALTY,
+  USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY,
+  USEFULNESS_WEIGHT_SPECIFIC,
+  USEFULNESS_WEIGHT_TRADEOFF,
+} from "@/lib/constants";
+import {
   computeUsefulnessScore,
   UNSCORED_USEFULNESS_SCORE,
   type UsefulnessCriteria,
@@ -38,7 +46,7 @@ describe("computeUsefulnessScore", () => {
     expect(computeUsefulnessScore(ALL_FALSE)).toBe(0);
   });
 
-  it("boundary: all criteria true scores the sum of every weight minus the penalty", () => {
+  it("boundary: all criteria true fails the gate (preDecisionOrPhotoShoot=true) and pays both the promotional and pre-decision penalties", () => {
     const allTrue: UsefulnessCriteria = {
       firsthand: true,
       ceremonyDecision: true,
@@ -47,9 +55,16 @@ describe("computeUsefulnessScore", () => {
       promotional: true,
       preDecisionOrPhotoShoot: true,
     };
-    // preDecisionOrPhotoShoot: true によりゲート不通過となるため、ゲートの 10 が消え、
-    // 残りの和 3 (firsthand) + 2 (specific) + 2 (tradeoff) - 4 (promotional) = 3 となる。
-    expect(computeUsefulnessScore(allTrue)).toBe(3);
+    // preDecisionOrPhotoShoot: true によりゲート不通過となるため、ゲート分は 0。
+    // 残りは firsthand(3) + specific(2) + tradeoff(2) - promotional(4) -
+    // preDecisionPenalty(3) = 0。定数から組み立てて検証する。
+    const expected =
+      USEFULNESS_WEIGHT_FIRSTHAND +
+      USEFULNESS_WEIGHT_SPECIFIC +
+      USEFULNESS_WEIGHT_TRADEOFF -
+      USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY -
+      USEFULNESS_WEIGHT_PRE_DECISION_PENALTY;
+    expect(computeUsefulnessScore(allTrue)).toBe(expected);
   });
 
   it("each positive criterion adds its own weight independently of the others", () => {
@@ -57,13 +72,13 @@ describe("computeUsefulnessScore", () => {
 
     expect(
       computeUsefulnessScore({ ...ALL_FALSE, ceremonyDecision: true, firsthand: true }) - gateOnly,
-    ).toBe(3);
+    ).toBe(USEFULNESS_WEIGHT_FIRSTHAND);
     expect(
       computeUsefulnessScore({ ...ALL_FALSE, ceremonyDecision: true, specific: true }) - gateOnly,
-    ).toBe(2);
+    ).toBe(USEFULNESS_WEIGHT_SPECIFIC);
     expect(
       computeUsefulnessScore({ ...ALL_FALSE, ceremonyDecision: true, tradeoff: true }) - gateOnly,
-    ).toBe(2);
+    ).toBe(USEFULNESS_WEIGHT_TRADEOFF);
   });
 
   it("promotional subtracts its own weight independently, regardless of the other criteria", () => {
@@ -74,12 +89,33 @@ describe("computeUsefulnessScore", () => {
       promotional: true,
     });
 
-    expect(gateOnly - gateAndPromotional).toBe(4);
+    expect(gateOnly - gateAndPromotional).toBe(USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY);
   });
 
-  it("promotional pulls a gate-passing article down to about the same level as a non-gate-passing article", () => {
-    // ゲートを通過しているだけの記事（他は全部 false）が宣伝目的だった場合、
-    // ゲートを通過していないが中身の濃い記事（宣伝目的ではない）を下回る。
+  it("preDecisionOrPhotoShoot subtracts its own weight independently of ceremonyDecision", () => {
+    // ゲートの AND 条件（ceremonyDecision && !preDecisionOrPhotoShoot）とは別に、
+    // preDecisionOrPhotoShoot は単独の減点としても効く。ceremonyDecision の
+    // 値に関わらず、この減点だけが差分になる。
+    const withoutPreDecision = computeUsefulnessScore({
+      ...ALL_FALSE,
+      firsthand: true,
+      specific: true,
+    });
+    const withPreDecision = computeUsefulnessScore({
+      ...ALL_FALSE,
+      firsthand: true,
+      specific: true,
+      preDecisionOrPhotoShoot: true,
+    });
+
+    expect(withoutPreDecision - withPreDecision).toBe(USEFULNESS_WEIGHT_PRE_DECISION_PENALTY);
+  });
+
+  it("even a promotional gate-passing article still outranks the richest possible gate-failing article (strong domination, 10→12 の理由そのもの)", () => {
+    // 10 のままだと、ゲートを通過したが宣伝判定を受けた記事（10-4=6）が、
+    // ゲート不通過だが他の加点項目を総取りした記事（3+2+2=7）に負けていた。
+    // GATE_BONUS を 12 に引き上げたことで、この逆転が構造的に起きなくなる
+    // ことを確認する（オーナー判断の核心）。
     const barelyQualifyingButPromotional = computeUsefulnessScore({
       ...ALL_FALSE,
       ceremonyDecision: true,
@@ -92,7 +128,7 @@ describe("computeUsefulnessScore", () => {
       tradeoff: true,
     });
 
-    expect(barelyQualifyingButPromotional).toBeLessThan(richestNonGatePassing);
+    expect(barelyQualifyingButPromotional).toBeGreaterThan(richestNonGatePassing);
   });
 
   it("UNSCORED_USEFULNESS_SCORE sits in the gate-not-passed band: below the gate-passing floor, above the gate-not-passed floor", () => {
@@ -112,8 +148,14 @@ describe("computeUsefulnessScore", () => {
       specific: true,
       tradeoff: true,
     });
-    // ゲート不通過 → 3+2+2 = 7（ゲート不通過帯）。ceremonyDecision のみの 10 より下。
-    expect(photoShoot).toBe(7);
+    // ゲート不通過 → firsthand(3)+specific(2)+tradeoff(2) - preDecisionPenalty(3)。
+    // ceremonyDecision のみの USEFULNESS_GATE_BONUS より下。
+    const expected =
+      USEFULNESS_WEIGHT_FIRSTHAND +
+      USEFULNESS_WEIGHT_SPECIFIC +
+      USEFULNESS_WEIGHT_TRADEOFF -
+      USEFULNESS_WEIGHT_PRE_DECISION_PENALTY;
+    expect(photoShoot).toBe(expected);
     expect(photoShoot).toBeLessThan(
       computeUsefulnessScore({ ...ALL_FALSE, ceremonyDecision: true }),
     );
@@ -127,17 +169,21 @@ describe("computeUsefulnessScore", () => {
       specific: true,
       tradeoff: true,
       preDecisionOrPhotoShoot: true,
-    }); // ゲート不通過 → 7
+    }); // ゲート不通過 → 3+2+2-3(preDecisionPenalty) = 4
     const canvaDiy = computeUsefulnessScore({
       ...ALL_FALSE,
       firsthand: true,
       ceremonyDecision: true,
       specific: true,
-    }); // 15
+    }); // ゲート通過 → 12+3+2 = 17
     expect(photoWedding).toBeLessThan(canvaDiy);
   });
 
-  it("preDecisionOrPhotoShoot article stays above a gate-passing promotional article (no double penalty)", () => {
+  it("preDecisionOrPhotoShoot now pays both the lost gate and the independent penalty (double effect, not double-avoided)", () => {
+    // 以前は preDecisionOrPhotoShoot はゲートの AND 条件でしか効かず、独立減点が
+    // 無かったため「宣伝記事より上に留まる」挙動だった。今回オーナー判断で
+    // 独立減点を追加したため、この関係は反転しうる——ここではその反転を
+    // 固定する（意図した仕様変更であることの記録）。
     const preShoot = computeUsefulnessScore({
       ...ALL_FALSE,
       firsthand: true,
@@ -145,13 +191,34 @@ describe("computeUsefulnessScore", () => {
       specific: true,
       tradeoff: true,
       preDecisionOrPhotoShoot: true,
-    }); // 7
+    }); // 3+2+2-3 = 4
     const promotional = computeUsefulnessScore({
       ...ALL_FALSE,
       ceremonyDecision: true,
       promotional: true,
-    }); // 6
-    // 独立減点（-8）にしていないため、宣伝記事より上に留まる（二重計上していないことの確認）。
-    expect(preShoot).toBeGreaterThan(promotional);
+    }); // 12-4 = 8
+    expect(preShoot).toBeLessThan(promotional);
+  });
+
+  it("invariant: gate-passing always outranks gate-failing, even a promotional gate-passer against the richest possible gate-failer", () => {
+    // 強支配（strong domination）不変条件。定数から式を組み立てて検証するため、
+    // USEFULNESS_GATE_BONUS や合計値をここに直書きしない——定数を変えて
+    // この不変条件が破れたら、このテストが落ちる。
+    const worstGatePassing = computeUsefulnessScore({
+      ...ALL_FALSE,
+      ceremonyDecision: true,
+      promotional: true,
+    });
+    const bestGateFailing = computeUsefulnessScore({
+      ...ALL_FALSE,
+      firsthand: true,
+      specific: true,
+      tradeoff: true,
+    });
+
+    expect(worstGatePassing).toBeGreaterThan(bestGateFailing);
+    expect(USEFULNESS_GATE_BONUS - USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY).toBeGreaterThan(
+      USEFULNESS_WEIGHT_FIRSTHAND + USEFULNESS_WEIGHT_SPECIFIC + USEFULNESS_WEIGHT_TRADEOFF,
+    );
   });
 });

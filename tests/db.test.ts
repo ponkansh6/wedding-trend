@@ -357,7 +357,7 @@ describe("Database Repository and Queries", () => {
       });
 
       await markCurated([
-        // score = 10(gate) + 3(firsthand) + 2(specific) + 2(tradeoff) = 17
+        // score = 12(gate) + 3(firsthand) + 2(specific) + 2(tradeoff) = 19
         buildUpdate("https://example.com/a", {
           firsthand: true,
           ceremonyDecision: true,
@@ -366,7 +366,7 @@ describe("Database Repository and Queries", () => {
           promotional: false,
           preDecisionOrPhotoShoot: false,
         }),
-        // score = 10(gate) = 10
+        // score = 12(gate) = 12
         buildUpdate("https://example.com/b", {
           firsthand: false,
           ceremonyDecision: true,
@@ -375,7 +375,7 @@ describe("Database Repository and Queries", () => {
           promotional: false,
           preDecisionOrPhotoShoot: false,
         }),
-        // score = 10(gate) = 10（b と同点。publishedAt が新しい方が先）
+        // score = 12(gate) = 12（b と同点。publishedAt が新しい方が先）
         buildUpdate("https://example.com/b2", {
           firsthand: false,
           ceremonyDecision: true,
@@ -385,6 +385,7 @@ describe("Database Repository and Queries", () => {
           preDecisionOrPhotoShoot: false,
         }),
         // ceremonyDecision=false のためゲート不通過: 3+2+2 = 7 に留まる
+        // （preDecisionOrPhotoShoot=false なので独立減点も無し）
         buildUpdate("https://example.com/d", {
           firsthand: true,
           ceremonyDecision: false,
@@ -393,7 +394,9 @@ describe("Database Repository and Queries", () => {
           promotional: false,
           preDecisionOrPhotoShoot: false,
         }),
-        // preDecisionOrPhotoShoot=true のためゲート不通過: 3+2+2 = 7 に留まる（publishedAt が 01-06 で d(01-03) より新しい）
+        // preDecisionOrPhotoShoot=true のためゲート不通過かつ独立減点も乗る:
+        // 3+2+2-3(preDecisionPenalty) = 4。publishedAt は 01-06 で d(01-03) より
+        // 新しいが、独立減点により d(7) より下に沈む（今回の仕様変更の核心）。
         buildUpdate("https://example.com/p", {
           firsthand: true,
           ceremonyDecision: true,
@@ -411,8 +414,8 @@ describe("Database Repository and Queries", () => {
         "https://example.com/a",
         "https://example.com/b2",
         "https://example.com/b",
-        "https://example.com/p",
         "https://example.com/d",
+        "https://example.com/p",
         "https://example.com/c",
       ]);
     });

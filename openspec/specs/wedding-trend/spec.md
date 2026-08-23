@@ -335,24 +335,56 @@ LLM には次の 6 つのブール値のみを判定させ、点数そのもの�
 | `promotional`             | 事業者による集客・自社サービスへの誘導が主目的（減点）。判別基準は「読者が別の会場・別の業者で式を挙げる場合にも役立つか」                                                                                                                       |
 
 スコア計算式（`USEFULNESS_GATE_BONUS` 等の重み定数は `src/lib/constants.ts`
-に定義する）:
+に定義する。同じ式が純関数 `src/lib/scoring/usefulness.ts` の
+`computeUsefulnessScore()` と SQL 文字列 `src/lib/db/query.ts` の
+`USEFULNESS_SCORE_SQL` の2箇所に手書きで存在し、両者の一致は
+`tests/feed-order-parity.test.ts` が 64 通りの判定組み合わせで検証する）:
 
 ```
-gate  = (ceremonyDecision && !preDecisionOrPhotoShoot) ? USEFULNESS_GATE_BONUS(10) : 0
+gate  = (ceremonyDecision && !preDecisionOrPhotoShoot) ? USEFULNESS_GATE_BONUS(12) : 0
 score = gate
       + USEFULNESS_WEIGHT_FIRSTHAND(3)   * firsthand
       + USEFULNESS_WEIGHT_SPECIFIC(2)    * specific
       + USEFULNESS_WEIGHT_TRADEOFF(2)    * tradeoff
       - USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY(4) * promotional
+      - USEFULNESS_WEIGHT_PRE_DECISION_PENALTY(3) * preDecisionOrPhotoShoot
 ```
 
 `ceremonyDecision` と `preDecisionOrPhotoShoot` によるゲート条件（`ceremonyDecision && !preDecisionOrPhotoShoot`）は加算項の一つではなく**ゲート**である。単純な加算項に
 すると、「衣装だけの記事だが実体験・具体的・トレードオフあり」（3+2+2=7）が
-「式の中身に触れているが浅い記事」（10）を上回ってしまい、「これから式の
+「式の中身に触れているが浅い記事」（12）を上回ってしまい、「これから式の
 中身を決める読者に効く記事を優先する」という編集方針そのものが反転する。
 挙式・披露宴の中身に関する記事であり、かつフォトウェディング・前撮りや式場探し等の事前検討に偏っていないことを他の加点の前提条件にすることで、この逆転を構造的に防ぐ。
 
+**強支配（strong domination）不変条件**: 「挙式・披露宴の中身の記事は、
+ゲート不通過の記事に常に優先する」——ゲートを通過した記事は、たとえ
+`promotional` 判定を受けていても、ゲート不通過帯の中でどれだけ質が高い
+記事（`firsthand`/`specific`/`tradeoff` を総取り）にも常に勝つ。式で書くと
+`USEFULNESS_GATE_BONUS - USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY >
+USEFULNESS_WEIGHT_FIRSTHAND + USEFULNESS_WEIGHT_SPECIFIC +
+USEFULNESS_WEIGHT_TRADEOFF`（12-4=8 > 7）。`USEFULNESS_GATE_BONUS` を
+10→12 に引き上げたのは、10 だとこの不変条件が破れていた（10-4=6 < 7）ため。
+この不変条件は `tests/usefulness-score.test.ts` で定数から式を組み立てて
+固定している（数値をテストに直書きしない。定数を変更したときにテストが
+連動して壊れるようにするため）。
+
 `preDecisionOrPhotoShoot` は陽性識別極性（positive-identification polarity: 該当しない場合は false）を採用しており、抜粋から情報が得られない場合は false となる。これにより、情報不足の記事を誤って重く罰することを防いでいる。
+
+`preDecisionOrPhotoShoot` は二役を持つ。1つはゲート条件の AND 側（安全網）
+——`ceremonyDecision=true` かつ `preDecisionOrPhotoShoot=true` の記事を
+ゲート不通過にする。もう1つは `USEFULNESS_WEIGHT_PRE_DECISION_PENALTY` に
+よる**独立減点**——`ceremonyDecision` の値に関わらず、`preDecisionOrPhotoShoot=true`
+の記事を一律に押し下げる。既知の事実として、AND 側の安全網は現行の定義
+（「フォトウェディング・前撮り・式場探し等、式決定前/別撮影の話題に
+**限られる**場合」）では `ceremonyDecision=true` とほぼ両立せず、実測データ
+（本番 43 件）でもこの組み合わせは 0 件——つまり AND 側はほぼ発火しない。
+以前（本項目追加当初）はこの AND 条件だけで運用しており、その結果
+`preDecisionOrPhotoShoot=true` の記事群（本番 8 件）は `ceremonyDecision=false`
+の記事群（本番 28 件）と常に同点になり、掲載順に一切反映されていなかった。
+独立減点はこれを是正するために追加した（オーナー方針:
+「ゲートというよりは、ソートさえできればよいので」）。AND 側の安全網は
+**発火していないことを理由に将来削ってはならない**——`ceremonyDecision` の
+定義が将来広がった場合に備えた保険として意図的に残している。
 
 重みは、抜粋（記事冒頭）から LLM が判定できる確信度に比例させている。話題
 （`ceremonyDecision` / `preDecisionOrPhotoShoot`）・書き手の立場（`firsthand`）・宣伝性（`promotional`）
@@ -374,17 +406,46 @@ LLM が判定に必要な情報を十分に得られない場合（抜粋が短�
 
 LLM によるキュレーションが一時的に失敗した投稿、および原文テキストが存在せ
 ず要約を生成できない投稿（次章 §10 の要件 4. 参照）には、`src/lib/scoring/usefulness.ts`
-の `UNSCORED_USEFULNESS_SCORE`（固定値 3）を用いる。この値は**ゲート不通過
-帯の中位**に意図的に置いており、無条件で最下位に落とすことはしない。最下位
-に固定してしまうと、一時的な LLM 失敗によって新着の良記事が静かに埋もれて
-しまうためである。次回 ingest で `post_usefulness.signature` が
-`posts.curation_signature` と不一致になった投稿として再スコア対象に検出され、
-自然に正しい位置へ移動する。
+の `UNSCORED_USEFULNESS_SCORE`（固定値 3）を用いる。この値は現在の式では
+「ゲート通過帯の下限（`USEFULNESS_GATE_BONUS` のみ = 12）より下、かつ全項目
+false（0点）より上」の**楽観的な中位**に意図的に置いており、無条件で最下位
+に落とすことはしない。最下位に固定してしまうと、一時的な LLM 失敗によって
+新着の良記事が静かに埋もれてしまうためである。次回 ingest で
+`post_usefulness_criteria.signature` が `posts.curation_signature` と
+不一致になった投稿として再スコア対象に検出され、自然に正しい位置へ移動する。
 
 ### §9.6 掲載順の決定規則
 
 - **体験談レーン**（`sourceType: "blog"`）: 有用度スコア（§9.3）降順 →
-  `publishedAt` 降順。
+  `publishedAt` 降順 → `posts.id` 降順（最終タイブレーク）。SQLite の
+  `ORDER BY` は同値行の順序を保証しないため、スコアも `publishedAt`（null
+  同士を含む）も同点になった場合に備え、常に一意な `posts.id` で最終確定
+  させる。これが無いと `limit()` によるページングのたびに順序が入れ替わり、
+  重複・欠落の原因になる。
+  - この並び順キーを組み立てる SQL（`src/lib/db/query.ts` の
+    `USEFULNESS_SCORE_SQL`）は、`json_extract(criteria_json, '$.key')` の
+    結果を必ず `COALESCE(..., 0)` で包む。`criteria_json` にキーが1つでも
+    欠けていると `json_extract` は SQL の `NULL` を返し、`NULL` は加減算式
+    全体に伝播して、エラーも出さずにその行を（実質的に）最下位へ沈める。
+    `COALESCE` により「未知の判定項目は加点も減点もしない」という意味論に
+    統一し、将来判定項目を追加したときに旧バックフィル分の行が全滅する
+    事故を防ぐ。**この式を `json_extract(x,'$.k')` から `x -> '$.k'` へ
+    書き換えてはならない**——SQLite の `->` は JSON テキスト（真偽値なら
+    `'true'`/`'false'`）を返すため `= 1` の比較が常に false になり、
+    ゲート条件が静かに常時不通過になる（`->>` なら等価だが、実績のある
+    `json_extract` に統一する）。純関数 `computeUsefulnessScore()` との
+    一致は `tests/feed-order-parity.test.ts` が 64 通りの判定組み合わせで
+    検証する。
+  - 同じ SQL は `json_valid(criteria_json)` も検査し、不正 JSON の行は
+    `UNSCORED_USEFULNESS_SCORE` にフォールバックする（`post_usefulness_criteria`
+    に行が無い場合と同じ意味論）。`json_extract` は不正 JSON に対して
+    runtime error を投げ、`getFeedCards()` の fail-soft 契約（`try/catch` +
+    `[]` を返す）がそれを拾うと**体験談レーン全体**が消えてしまう——1行の
+    JSON 破損がページの1セクションを丸ごと空にするという実害の大きい故障
+    モードだったため、`json_valid` の判定を `json_extract` より手前の
+    `WHEN` 節に置き、壊れた行だけを個別にフォールバックさせている。破損した
+    行は次回 ingest で signature 不一致として再スコア対象に検出され、自然に
+    正しい位置へ復帰する。
 - **速報レーン**（`sourceType: "sns"`、手動 URL 投入）: `publishedAt` 降順を
   維持する（本セクションの採点対象外）。速報性そのものが価値であることに加え、
   SNS 投稿には体験談レーンのような本文抜粋が無く、同じルーブリックで採点

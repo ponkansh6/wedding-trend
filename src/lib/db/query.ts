@@ -4,6 +4,7 @@ import { posts, postUsefulnessCriteria } from "./schema";
 import {
   USEFULNESS_GATE_BONUS,
   USEFULNESS_WEIGHT_FIRSTHAND,
+  USEFULNESS_WEIGHT_PRE_DECISION_PENALTY,
   USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY,
   USEFULNESS_WEIGHT_SPECIFIC,
   USEFULNESS_WEIGHT_TRADEOFF,
@@ -40,19 +41,56 @@ const FEED_ROW_FIELDS = {
  * およびゲート条件 `(ceremonyDecision && !preDecisionOrPhotoShoot)` を使って
  * スコアを SQL 上で組み立てる（重みを SQL 側に数値として直書きせず、
  * `src/lib/constants.ts` の定数から式を組み立てることで、重みを変更したときに
- * ここを個別に修正し忘れる事故を防ぐ）。
+ * ここを個別に修正し忘れる事故を防ぐ）。この式と純関数の一致は
+ * `tests/feed-order-parity.test.ts` が 64 通りの判定組み合わせで検証する。
  *
  * `post_usefulness_criteria` に対応行が無い（＝未スコア。LLM キュレーション未実行、
  * または一時的な失敗）場合は `UNSCORED_USEFULNESS_SCORE`（ゲート不通過帯の
  * 中位）を使う。`leftJoin` なので未スコア行は `post_usefulness_criteria.post_id` が
  * NULL になる。
+ *
+ * `criteria_json` が不正 JSON（壊れた値が何らかの理由で書き込まれた場合）の
+ * 行も、`json_valid(...)` で検出して同じ `UNSCORED_USEFULNESS_SCORE` に
+ * フォールバックさせる。`json_extract` は不正 JSON に対して SQL レベルの
+ * runtime error を投げ、これを CASE 式の中で無防備に呼ぶと**そのクエリ全体**
+ * が失敗する。`getFeedCards()` は fail-soft（`try/catch` + `[]` を返す）なので、
+ * 1行の JSON 破損が体験談レーン全体を消してしまう——ページの1セクションが
+ * 丸ごと空になるという実害の大きい故障モードだった（実際に発生を確認済み）。
+ * `json_valid` の判定を `json_extract` より手前の WHEN 節に置くことで、SQLite
+ * の CASE は最初に一致した WHEN のみを評価し以降の節（`json_extract` を含む
+ * ELSE 節）を評価しないため、不正 JSON の行では `json_extract` 自体が
+ * 呼ばれない。これにより「その行だけ未採点扱いで中位に置かれ、他の行は
+ * 正常にスコアされる」という単一行フォールバックになる。破損した行は次回
+ * ingest で signature 不一致として再スコア対象に検出され、自然に正しい
+ * 位置へ復帰する（`post_usefulness_criteria` に行が無い場合と同じ意味論）。
+ *
+ * 各 `json_extract(...)` を必ず `COALESCE(..., 0)` で包むこと。
+ * `criteria_json` は 6 キーの JSON だが、将来判定項目を追加したときに
+ * 旧バックフィル分の行にそのキーが存在しないケースが生じうる。
+ * `json_extract` は存在しないキーに対して SQL の `NULL` を返し、
+ * `3 * NULL` は `NULL` になり、`NULL` は算術式全体に伝播する ——
+ * つまりキーが1つ欠けているだけで加算式全体が `NULL` になり、
+ * `ORDER BY ... DESC` はエラーを出さず黙ってその行を最下位に沈める
+ * （in-memory libsql で再現確認済み）。`COALESCE(x, 0)` で
+ * 「未知の判定項目は加点も減点もしない」に意味論を統一し、この静かな
+ * 全滅を防ぐ。
+ *
+ * **`json_extract(x, '$.k')` を `x -> '$.k'` に書き換えないこと。**
+ * SQLite の `->` 演算子は JSON 型の結果（真偽値なら JSON テキストの
+ * `'true'`/`'false'`）を返すため、`= 1` という比較は常に false になり、
+ * ゲート条件が黙って常に不通過になる（`->>` なら `json_extract` と等価だが、
+ * ここでは実績のある `json_extract` に統一する）。
  */
-const USEFULNESS_SCORE_SQL = sql<number>`CASE WHEN ${postUsefulnessCriteria.postId} IS NULL THEN ${UNSCORED_USEFULNESS_SCORE} ELSE
-  (CASE WHEN json_extract(${postUsefulnessCriteria.criteriaJson}, '$.ceremonyDecision') = 1 AND json_extract(${postUsefulnessCriteria.criteriaJson}, '$.preDecisionOrPhotoShoot') = 0 THEN ${USEFULNESS_GATE_BONUS} ELSE 0 END)
-  + ${USEFULNESS_WEIGHT_FIRSTHAND} * json_extract(${postUsefulnessCriteria.criteriaJson}, '$.firsthand')
-  + ${USEFULNESS_WEIGHT_SPECIFIC} * json_extract(${postUsefulnessCriteria.criteriaJson}, '$.specific')
-  + ${USEFULNESS_WEIGHT_TRADEOFF} * json_extract(${postUsefulnessCriteria.criteriaJson}, '$.tradeoff')
-  - ${USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY} * json_extract(${postUsefulnessCriteria.criteriaJson}, '$.promotional')
+const USEFULNESS_SCORE_SQL = sql<number>`CASE
+  WHEN ${postUsefulnessCriteria.postId} IS NULL THEN ${UNSCORED_USEFULNESS_SCORE}
+  WHEN NOT json_valid(${postUsefulnessCriteria.criteriaJson}) THEN ${UNSCORED_USEFULNESS_SCORE}
+  ELSE
+  (CASE WHEN COALESCE(json_extract(${postUsefulnessCriteria.criteriaJson}, '$.ceremonyDecision'), 0) = 1 AND COALESCE(json_extract(${postUsefulnessCriteria.criteriaJson}, '$.preDecisionOrPhotoShoot'), 0) = 0 THEN ${USEFULNESS_GATE_BONUS} ELSE 0 END)
+  + ${USEFULNESS_WEIGHT_FIRSTHAND} * COALESCE(json_extract(${postUsefulnessCriteria.criteriaJson}, '$.firsthand'), 0)
+  + ${USEFULNESS_WEIGHT_SPECIFIC} * COALESCE(json_extract(${postUsefulnessCriteria.criteriaJson}, '$.specific'), 0)
+  + ${USEFULNESS_WEIGHT_TRADEOFF} * COALESCE(json_extract(${postUsefulnessCriteria.criteriaJson}, '$.tradeoff'), 0)
+  - ${USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY} * COALESCE(json_extract(${postUsefulnessCriteria.criteriaJson}, '$.promotional'), 0)
+  - ${USEFULNESS_WEIGHT_PRE_DECISION_PENALTY} * COALESCE(json_extract(${postUsefulnessCriteria.criteriaJson}, '$.preDecisionOrPhotoShoot'), 0)
 END`;
 
 /**
@@ -69,10 +107,14 @@ END`;
  *
  * 掲載順（openspec/specs/wedding-trend/spec.md §9.6）:
  * - 体験談レーン（`sourceType: "blog"`）: 有用度スコア（`USEFULNESS_SCORE_SQL`）
- *   降順 → `publishedAt` 降順。`publishedAt` は元記事側の情報が欠けている場合に
- *   null になりうる。SQLite の ORDER BY ... DESC は NULL を最後に並べるため、
- *   同スコア内では公開日が判明している投稿を優先し、公開日不明の投稿は
- *   その次点に回る（意図した挙動であり、追加のハンドリングはしていない）。
+ *   降順 → `publishedAt` 降順 → `posts.id` 降順。`publishedAt` は元記事側の情報が
+ *   欠けている場合に null になりうる。SQLite の ORDER BY ... DESC は NULL を
+ *   最後に並べるため、同スコア内では公開日が判明している投稿を優先し、公開日
+ *   不明の投稿はその次点に回る（意図した挙動であり、追加のハンドリングは
+ *   していない）。最後の `posts.id` 降順は、スコアも `publishedAt`（null 同士を
+ *   含む）も同値になったときの最終タイブレーク。これが無いと SQLite の
+ *   ORDER BY は同値行の順序を保証せず、`limit()` によるページングのたびに
+ *   順序が入れ替わって重複・欠落が起こりうる。
  * - 速報レーン（`sourceType: "sns"`）: 従来通り `createdAt`（取り込み順）の
  *   新着順を維持する。速報性そのものが価値であることに加え、SNS 投稿には
  *   体験談レーンのような本文抜粋が無く同じルーブリックで採点できないため
@@ -100,7 +142,7 @@ export async function getFeedCards(params: {
             .from(posts)
             .leftJoin(postUsefulnessCriteria, eq(posts.id, postUsefulnessCriteria.postId))
             .where(whereClause)
-            .orderBy(desc(USEFULNESS_SCORE_SQL), desc(posts.publishedAt))
+            .orderBy(desc(USEFULNESS_SCORE_SQL), desc(posts.publishedAt), desc(posts.id))
             .limit(params.limit)
         : await db
             .select(FEED_ROW_FIELDS)

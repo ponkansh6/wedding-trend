@@ -29,7 +29,7 @@ const TitleSchema = z
   );
 
 /**
- * 有用度判定 5 項目。点数（重み）は一切ここに含めない —— LLM にはブール値
+ * 有用度判定 6 項目。点数（重み）は一切ここに含めない —— LLM にはブール値
  * だけを出させ、重み付けは `src/lib/scoring/usefulness.ts` の
  * `computeUsefulnessScore()` がコード側で行う（定義は
  * openspec/specs/wedding-trend/spec.md §9.3 を参照。プロンプト側の指示文は
