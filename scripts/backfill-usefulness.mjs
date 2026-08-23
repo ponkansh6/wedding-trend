@@ -1,6 +1,6 @@
 #!/usr/bin/env tsx
 /**
- * 有用度スコア（post_usefulness）の全件バックフィル用の使い捨てスクリプト。
+ * 有用度スコア（post_usefulness_criteria）の全件バックフィル用の使い捨てスクリプト。
  *
  * CURATION_PROMPT_VERSION を bump した直後は、通常の ingest（新着優先 +
  * 余った予算でのバックフィル、src/lib/pipeline/ingest.ts 参照）でも数回の
@@ -109,6 +109,7 @@ const updates = candidates
                 specific: result.specific,
                 tradeoff: result.tradeoff,
                 promotional: result.promotional,
+                preDecisionOrPhotoShoot: result.preDecisionOrPhotoShoot,
               },
             }
           : undefined,
