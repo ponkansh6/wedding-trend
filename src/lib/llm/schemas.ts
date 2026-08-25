@@ -47,6 +47,18 @@ export const CurationItemSchema = z.object({
   tradeoff: z.boolean(),
   promotional: z.boolean(),
   preDecisionOrPhotoShoot: z.boolean(),
+  /**
+   * 記事の主題となるトピックのアンカー（40字以内）。
+   * plan 07 §5-M1: 公開前に `src/lib/publish/gate.ts` の
+   * `checkAnchorGrounding()` で取得本文への語彙的接地を検証すること
+   * （このスキーマ自体は接地を検証しない —— 本文はここには無いため）。
+   */
+  topicAnchor: z.string().min(1).max(40),
+  // rationaleText と evidenceSufficient は plan 07 §6-Q1/Q5 によりここでは
+  // 受け取らない。根拠文は `renderRationaleText()`（`src/lib/publish/gate.ts`）
+  // が topicAnchor + 上記 boolean から決定的に生成し、evidenceSufficient は
+  // `computeEvidenceSufficiency()`（`src/lib/sources/article-text.ts`）が
+  // 取得 HTML から決定的に計算する。どちらも LLM の自己申告に依存しない。
 });
 
 export type CurationItem = z.infer<typeof CurationItemSchema>;

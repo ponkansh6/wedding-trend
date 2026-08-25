@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CurationBatchResponseSchema, CurationItemSchema } from "@/lib/llm/schemas";
 import { AI_TITLE_MAX_CHARS } from "@/lib/constants";
+import { buildSingleCurationPrompt } from "@/lib/llm/prompts";
 
 const validSummary =
   "結婚式の準備における費用感や演出のポイントについて、実際の体験に基づいた内容がまとめられています。会場選びやゲスト対応など具体的な工夫点が紹介されています。";
@@ -15,6 +16,10 @@ const validUsefulness = {
   preDecisionOrPhotoShoot: false,
 };
 
+const validRationaleFields = {
+  topicAnchor: "会場選びのコツ",
+};
+
 describe("CurationItemSchema", () => {
   it("accepts a valid item", () => {
     const result = CurationItemSchema.safeParse({
@@ -24,6 +29,7 @@ describe("CurationItemSchema", () => {
       category: "費用・節約",
       tag: "trend",
       ...validUsefulness,
+      ...validRationaleFields,
     });
     expect(result.success).toBe(true);
   });
@@ -37,6 +43,7 @@ describe("CurationItemSchema", () => {
       category: "その他",
       tag: "classic",
       ...validUsefulness,
+      ...validRationaleFields,
     });
     expect(result.success).toBe(true);
     if (result.success) {
@@ -53,6 +60,7 @@ describe("CurationItemSchema", () => {
       category: "存在しないカテゴリ",
       tag: "trend",
       ...validUsefulness,
+      ...validRationaleFields,
     });
     expect(result.success).toBe(false);
   });
@@ -65,6 +73,7 @@ describe("CurationItemSchema", () => {
       category: "その他",
       tag: "invalid-tag",
       ...validUsefulness,
+      ...validRationaleFields,
     });
     expect(result.success).toBe(false);
   });
@@ -77,6 +86,7 @@ describe("CurationItemSchema", () => {
       category: "その他",
       tag: "trend",
       ...validUsefulness,
+      ...validRationaleFields,
     });
     expect(result.success).toBe(false);
   });
@@ -90,6 +100,7 @@ describe("CurationItemSchema", () => {
       category: "その他",
       tag: "trend",
       ...rest,
+      ...validRationaleFields,
     });
     expect(result.success).toBe(false);
   });
@@ -102,6 +113,7 @@ describe("CurationItemSchema", () => {
       category: "その他",
       tag: "trend",
       ...validUsefulness,
+      ...validRationaleFields,
       promotional: "false",
     });
     expect(result.success).toBe(false);
@@ -115,9 +127,63 @@ describe("CurationItemSchema", () => {
       category: "その他",
       tag: "trend",
       ...validUsefulness,
+      ...validRationaleFields,
       firsthand: 1,
     });
     expect(result.success).toBe(false);
+  });
+});
+
+describe("topicAnchor validation (plan 07 §5-M1 / §6-Q1,Q5: rationaleText / evidenceSufficient removed from LLM output)", () => {
+  it("rejects topicAnchor longer than 40 characters", () => {
+    const result = CurationItemSchema.safeParse({
+      index: 1,
+      title: "テスト",
+      summary: validSummary,
+      category: "その他",
+      tag: "trend",
+      ...validUsefulness,
+      topicAnchor: "あ".repeat(45),
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects item missing topicAnchor", () => {
+    const result = CurationItemSchema.safeParse({
+      index: 1,
+      title: "テスト",
+      summary: validSummary,
+      category: "その他",
+      tag: "trend",
+      ...validUsefulness,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("does not accept a rationaleText field even when supplied (schema no longer defines it, so zod just ignores/strips it rather than rejecting)", () => {
+    const result = CurationItemSchema.safeParse({
+      index: 1,
+      title: "テスト",
+      summary: validSummary,
+      category: "その他",
+      tag: "trend",
+      ...validUsefulness,
+      ...validRationaleFields,
+      rationaleText: "LLM が生成した自由文（もはやスキーマに存在しないフィールド）",
+      evidenceSufficient: true,
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).not.toHaveProperty("rationaleText");
+      expect(result.data).not.toHaveProperty("evidenceSufficient");
+    }
+  });
+
+  it("asserts prompt no longer instructs the LLM to generate rationaleText / evidenceSufficient", () => {
+    const prompt = buildSingleCurationPrompt({ title: "テスト", excerpt: "テスト本文" });
+    expect(prompt).toContain("結論のアンカー");
+    expect(prompt).not.toContain("rationaleText");
+    expect(prompt).not.toContain("evidenceSufficient");
   });
 });
 
@@ -132,6 +198,7 @@ describe("CurationBatchResponseSchema", () => {
           category: "その他",
           tag: "trend",
           ...validUsefulness,
+          ...validRationaleFields,
         },
         {
           index: 2,
@@ -140,6 +207,7 @@ describe("CurationBatchResponseSchema", () => {
           category: "その他",
           tag: "classic",
           ...validUsefulness,
+          ...validRationaleFields,
         },
       ],
     });

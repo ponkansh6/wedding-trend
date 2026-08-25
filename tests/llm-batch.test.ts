@@ -30,6 +30,10 @@ const USEFULNESS_FIELDS = {
   preDecisionOrPhotoShoot: false,
 };
 
+const RATIONALE_FIELDS = {
+  topicAnchor: "トピックアンカー",
+};
+
 function batchJson(items: Array<{ index: number; title: string }>) {
   return JSON.stringify({
     items: items.map((it) => ({
@@ -39,6 +43,7 @@ function batchJson(items: Array<{ index: number; title: string }>) {
       category: "その他",
       tag: "trend",
       ...USEFULNESS_FIELDS,
+      ...RATIONALE_FIELDS,
     })),
   });
 }
@@ -69,6 +74,7 @@ describe("curateBatch", () => {
               category: "その他",
               tag: "trend",
               ...USEFULNESS_FIELDS,
+              ...RATIONALE_FIELDS,
             },
             {
               index: 2,
@@ -77,6 +83,7 @@ describe("curateBatch", () => {
               category: "衣装・ドレス",
               tag: "classic",
               ...USEFULNESS_FIELDS,
+              ...RATIONALE_FIELDS,
             },
           ],
         }),
@@ -93,6 +100,10 @@ describe("curateBatch", () => {
     expect(results[0]?.tag).toBe("trend");
     expect(results[0]?.firsthand).toBe(true);
     expect(results[1]?.category).toBe("衣装・ドレス");
+    // plan 07 §6-Q5: rationaleText はもはや LLM の出力ではなく、
+    // topicAnchor + 6 boolean からの決定的テンプレートで付与される。
+    expect(results[0]?.rationaleText).toContain("トピックアンカー");
+    expect(results[0]?.rationaleText).not.toMatch(/[0-9０-９]/);
   });
 
   it("falls back to single-item curation when the batch response is invalid JSON", async () => {
@@ -108,6 +119,7 @@ describe("curateBatch", () => {
             category: "その他",
             tag: "trend",
             ...USEFULNESS_FIELDS,
+            ...RATIONALE_FIELDS,
           }),
         ),
       )
@@ -119,6 +131,7 @@ describe("curateBatch", () => {
             category: "その他",
             tag: "classic",
             ...USEFULNESS_FIELDS,
+            ...RATIONALE_FIELDS,
           }),
         ),
       );
@@ -145,6 +158,7 @@ describe("curateBatch", () => {
               category: "その他",
               tag: "classic",
               ...USEFULNESS_FIELDS,
+              ...RATIONALE_FIELDS,
             },
             {
               index: 1,
@@ -153,6 +167,7 @@ describe("curateBatch", () => {
               category: "その他",
               tag: "trend",
               ...USEFULNESS_FIELDS,
+              ...RATIONALE_FIELDS,
             },
           ],
         }),
@@ -244,6 +259,7 @@ describe("curatePosts", () => {
             category: "その他",
             tag: "trend",
             ...USEFULNESS_FIELDS,
+            ...RATIONALE_FIELDS,
           }),
         ),
       )
@@ -255,6 +271,7 @@ describe("curatePosts", () => {
             category: "その他",
             tag: "classic",
             ...USEFULNESS_FIELDS,
+            ...RATIONALE_FIELDS,
           }),
         ),
       );

@@ -36,7 +36,7 @@ const READER_PERSONA = `# 想定読者
  * 最も不安定になる。
  */
 const USEFULNESS_CRITERIA_RULES = `# 有用度判定（6つのブール値。点数は絶対に出力しないこと）
-上記の想定読者にとって役に立つ投稿かどうかを、以下の6項目それぞれについて true/false で判定すること。
+上の想定読者にとって役に立つ投稿かどうかを、以下の6項目それぞれについて true/false で判定すること。
 - firsthand: 書き手自身または近しい当事者が実際に挙式・披露宴を経験した立場から書かれている。新婦本人に限らず、新郎・両家家族、およびプランナー・司会者・カメラマン・装花担当など式に立ち会う職能者が実務経験に基づいて書いたものを含む。
 - ceremonyDecision: 挙式・披露宴の中身の意思決定に効く（進行・タイムライン・演出・席次・席札・余興・スピーチ・BGM・装花・料理・引出物・ペーパーアイテム・挙式当日の写真・映像（スナップ・記録映像・エンドロール）・ゲストの過ごしやすさ・当日段取り）。
 - specific: 具体を含む（固有の選択・数字・実際にやったこと / やらなかった理由）。心構えのみは false。
@@ -47,6 +47,12 @@ const USEFULNESS_CRITERIA_RULES = `# 有用度判定（6つのブール値。点
 「卒花」「花嫁レポ」「#プレ花嫁」等の語がタイトル・本文に含まれること自体は加点材料ではない。逆にこれらの語が一切無くても、実際の挙式・披露宴の経験に基づく知見であれば同等に扱うこと。
 
 判断材料が本文抜粋に無い場合、各項目は true ではなく false とせよ。本文にあるだろうと推測して true にしてはならない。`;
+
+const RATIONALE_RULES = `# topicAnchor のルール（必ず守ること）
+- topicAnchor: 記事の主題となるトピックのアンカー（40字以内）。結論のアンカーや具体的な数字を含めないこと。
+- 記事固有の具体数値（半角/全角数字・金額・日付など）は一切禁止。
+- 記事固有のアンカーは最大1つ、かつ結論のアンカーであってはならない（例: 可「持ち込み料の交渉について書いている」/ 不可「持ち込み料3万円が交渉で免除された」）。
+- topicAnchor は本文抜粋に実際に書かれている語句のみで構成すること。本文に無い語句を創作してはならない（公開前に本文との逐語一致を機械的に検証するため、本文に無い語を含めると投稿自体が非公開になる）。`;
 
 /**
  * すべてのプロンプトに共通する制約。著作権・事実性の観点で特に重要な指示：
@@ -80,8 +86,10 @@ ${SHARED_RULES}
 
 ${USEFULNESS_CRITERIA_RULES}
 
+${RATIONALE_RULES}
+
 出力形式:
-{"title":"...","summary":"...","category":"...","tag":"trend","firsthand":false,"ceremonyDecision":false,"specific":false,"tradeoff":false,"promotional":false,"preDecisionOrPhotoShoot":false}
+{"title":"...","summary":"...","category":"...","tag":"trend","firsthand":false,"ceremonyDecision":false,"specific":false,"tradeoff":false,"promotional":false,"preDecisionOrPhotoShoot":false,"topicAnchor":"..."}
 `;
 }
 
@@ -102,7 +110,9 @@ ${SHARED_RULES}
 
 ${USEFULNESS_CRITERIA_RULES}
 
+${RATIONALE_RULES}
+
 出力形式:
-{"items":[{"index":1,"title":"...","summary":"...","category":"...","tag":"trend","firsthand":false,"ceremonyDecision":false,"specific":false,"tradeoff":false,"promotional":false,"preDecisionOrPhotoShoot":false}, ...]}
+{"items":[{"index":1,"title":"...","summary":"...","category":"...","tag":"trend","firsthand":false,"ceremonyDecision":false,"specific":false,"tradeoff":false,"promotional":false,"preDecisionOrPhotoShoot":false,"topicAnchor":"..."}, ...]}
 `;
 }
