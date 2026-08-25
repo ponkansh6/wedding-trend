@@ -58,6 +58,10 @@ export const LLM_SINGLE_MAX_TOKENS = 800;
  * bump により全投稿の curationSignature が不一致になり再キュレーションされる）。
  */
 export const CURATION_PROMPT_VERSION = 4;
+export const RATIONALE_PROMPT_VERSION = "rationale-v1";
+/** フィード表示条件のフェーズ。phase1: 移行期（レガシー対 OR 根拠存在）/ phase2: 根拠のみ。 */
+export const RATIONALE_DISPLAY_PHASE = "phase1" as const;
+export type RationaleDisplayPhase = typeof RATIONALE_DISPLAY_PHASE | "phase2";
 
 // ── キュレーション予算・締切 ──────────────────────────────────
 /** 1 回の ingest 実行で LLM に投げる投稿数の上限。 */
@@ -77,13 +81,129 @@ export const AI_SUMMARY_TARGET_MAX_CHARS = 150;
 export const AI_SUMMARY_VALIDATE_MIN_CHARS = 60;
 export const AI_SUMMARY_VALIDATE_MAX_CHARS = 200;
 
-// ── RSS / ソース取得 ──────────────────────────────────────────
+/** 最低限の証拠テキスト長（これ未満は证据不十分として弾く）。 */
+export const MIN_EVIDENCE_INPUT_CHARS = 80;
+
+// ── 再試行キュー（plan 07 §7: pending 廃止）────────────────────
+/** 再試行キューの最大試行回数。超過は `retry_exhausted` で終端棄却する。 */
+export const RETRY_MAX_ATTEMPTS = 3;
+/** 再試行キューエントリの絶対 TTL（時間）。超過は `expireRetries` で削除・終端棄却する。 */
+export const RETRY_TTL_HOURS = 72;
+/** 指数バックオフの各試行での待機時間（時間）。`attempts`（0始まり）に対応する。 */
+export const RETRY_BACKOFF_HOURS: readonly number[] = [1, 6, 24];
+/**
+ * 非終端状態（"pending" 等、既知の終端状態 published/rejected/retracted 以外）
+ * のまま留まってよい最大時間。`reapStaleNonTerminal` がこれを超えた行を
+ * status="rejected" + post_removals(kind="dropped", reason="stale_pending") に
+ * 収束させる（plan 07 §7）。
+ */
+export const STALE_NON_TERMINAL_HOURS = 72;
+
+// ── 公開レート上限（plan 07 §6-Q4）──────────────────────────
+/**
+ * 1 日あたりの公開上限件数。
+ * plan 07 §9 Stage 2（監督付き自動運転）の被害半径限定のため 10 に制限する。
+ * Stage 3（完全自動運転）移行時に見直す。
+ */
+export const DAILY_PUBLISH_CAP = 10;
+/** 1 日の公開のうち単一ホストが占めてよい最大割合。 */
+export const HOST_DAILY_SHARE_MAX = 0.5;
+
+// ── ホスト allowlist（plan 07 §6-Q3）────────────────────────
+/**
+ * discovery レーンで取得を許可するホストの allowlist。新規ホストの自動追加は
+ * 禁止し、追加は明示的なコミットでのみ行う（アフィリエイトサイト等の混入を
+ * 構造的に防ぐ）。既存の稼働ホスト（`src/lib/sources/sitemap-discovery.ts` /
+ * `shared_plan/06-rationale-and-scraping.md` で検証済み）を列挙する。
+ *
+ * `tosUrl` は M3-K2（規約変更検知）が監視する規約ページの URL。自動発見は
+ * しない（誤ったページを規約と誤認すると K2 が無意味なノイズを出し続ける
+ * ため）。確証が持てないホストは `tosUrl: null` とし、確認でき次第埋める。
+ */
+export type AllowlistedHost = {
+  readonly host: string;
+  readonly tosUrl: string | null;
+  /**
+   * このホストで収集を許可する記事パス（pathname）のパターン。
+   * いずれのパターンにも一致しない URL は取得しない（ホスト単位だけでなく
+   * パス単位でもホワイトリスト方式を採る——ブラックリストはサイト側が
+   * 新しい URL 構造を追加したときに静かに破れるため）。
+   *
+   * ホスト同様、**新規パターンの追加は明示的なコミットでのみ**行う。sitemap
+   * の指定を変えるだけで未知のセクション（例: 口コミ投稿ページ）が収集対象に
+   * 混入することを構造的に防ぐのが目的（shared_plan/06 §10「サイト単位での
+   * 対象指定は採用しない——セクション＋パス接頭辞で定義する」）。
+   */
+  readonly articlePathPatterns: readonly RegExp[];
+};
+export const HOST_ALLOWLIST: readonly AllowlistedHost[] = [
+  // www.mwed.jp: 規約 URL は実地調査で確認済み（HTTP 200、ページタイトル
+  // 「みんなのウェディング サイト利用規約」、robots.txt 上 /kiyaku は
+  // Disallow されていない）。
+  //
+  // articlePathPatterns: sitemap_stories.xml から実測で確認できた記事パスは
+  // 次の2パターンのみ（`/story/cases/{id}/` と式場レビュー配下の
+  // `/hall/{hallId}/rev/story/{id}/`）。同ホストには一般ユーザーの口コミ投稿
+  // ページ `/hall/{hallId}/rev/{commentId}/`（`rev` の直後が `story` ではなく
+  // 数値のコメント ID）も存在し、robots.txt では Disallow されていないため、
+  // パスのホワイトリストが無いと sitemap の指定変更だけで UGC の口コミが
+  // 混入する。両パターンは `rev` の直後のセグメントが固定リテラル `story`
+  // かどうかで区別する（`hallId` / 末尾 ID 自体は数値が実測値だが、桁数や
+  // 将来の英数字混在に対しても脆くならないよう `[^/]+` で受ける——区別に
+  // 効いているのは ID の形ではなく `story` セグメントの有無）。
+  {
+    host: "www.mwed.jp",
+    tosUrl: "https://www.mwed.jp/kiyaku",
+    articlePathPatterns: [/^\/story\/cases\/[^/]+\/?$/, /^\/hall\/[^/]+\/rev\/story\/[^/]+\/?$/],
+  },
+];
+/** allowlist のホスト名のみを取り出した配列（ホスト判定用）。 */
+export const HOST_ALLOWLIST_HOSTS: readonly string[] = HOST_ALLOWLIST.map((h) => h.host);
+/** allowlist からホストの登録済み ToS URL を引く。未登録ホストや未設定は null。 */
+export function getAllowlistedTosUrl(host: string): string | null {
+  return HOST_ALLOWLIST.find((h) => h.host === host)?.tosUrl ?? null;
+}
+
+/**
+ * URL がホスト allowlist かつ記事パスのホワイトリストの両方を満たすかを判定する。
+ * ホストが allowlist に無い場合、またはパスがどのパターンにも一致しない場合は
+ * false。URL のパースに失敗した場合も安全側で false。
+ */
+export function isAllowedArticleUrl(url: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  const entry = HOST_ALLOWLIST.find((h) => h.host === parsed.hostname);
+  if (!entry) return false;
+  return entry.articlePathPatterns.some((pattern) => pattern.test(parsed.pathname));
+}
+
+// ── 抽出品質の決定的ゲート（plan 07 §6-Q1）──────────────────
+/** リンクテキスト長 / 全テキスト長。これを超えたら本文抽出破損（ナビ誤認等）とみなす。 */
+export const MAX_LINK_DENSITY = 0.35;
+/** 本文と判定するために必要な最小段落数。 */
+export const MIN_PARAGRAPH_COUNT = 3;
+/** 定型行（ナビ・フッター等の反復行）が全行に占める割合の上限。 */
+export const MAX_BOILERPLATE_LINE_RATIO = 0.5;
+
+// ── yield 崩壊検知（plan 07 §6-Q2 / K8）─────────────────────
+/** ホストのベースライン算出に必要な最小日数。これ未満は小標本ノイズとして扱わない。 */
+export const YIELD_BASELINE_MIN_DAYS = 7;
+/** ベースラインからの乖離係数。実測値がベースラインのこの倍率を下回ったら発火する。 */
+export const YIELD_DEVIATION_FACTOR = 0.5;
+
+// ── 本文ハッシュドリフト（plan 07 §5-M4）────────────────────
+/** 本文の類似度がこれを下回ったら「大幅変化」とみなし自動撤回する。 */
+export const BODY_DRIFT_SIMILARITY_MIN = 0.7;
 /** RSS フィード取得のタイムアウト。 */
 export const RSS_FETCH_TIMEOUT_MS = 10_000;
 /** 1 ソースあたり取得する記事数の上限。 */
 export const SOURCE_ITEM_LIMIT = 20;
 /** RSS 取得時に付与する User-Agent。 */
-export const RSS_USER_AGENT = "wedding-trend-bot/1.0 (+https://github.com/menonaki2/wedding-trend)";
+export const RSS_USER_AGENT = "wedding-trend-bot/1.0 (+https://github.com/ponkansh6/wedding-trend)";
 /** originalExcerpt に保存する本文抜粋の最大文字数（LLM プロンプトの肥大化を防ぐ）。 */
 export const EXCERPT_MAX_CHARS = 600;
 
@@ -96,6 +216,29 @@ export const OEMBED_CACHE_TTL_DAYS = 30;
 // ── フィード表示 ──────────────────────────────────────────────
 /** フィード 1 ページあたりのカード数。 */
 export const FEED_PAGE_SIZE = 24;
+
+// ── Sitemap Discovery ──────────────────────────────────────────
+/** Sitemap 差分検出時の lastmod 逸脱検知閾値（これを超えたら lastmod を不信任とする）。 */
+export const LASTMOD_DIFF_ALERT_THRESHOLD = 100;
+
+// ── アクセス規律（クロール）──────────────────────────────────
+/**
+ * クロール時に付与する User-Agent。連絡先を必ず含める（plan 06 §5.4）。
+ * 本番ドメインの /about はオーナー判断待ち（§13-4）のため、当面は GitHub リポジトリを連絡先とする。
+ */
+export const CRAWLER_USER_AGENT =
+  "WeddingTrendBot/1.0 (+https://github.com/ponkansh6/wedding-trend)";
+/** 同一ホストへの最小リクエスト間隔（ms）。robots.txt の Crawl-delay が大きい場合はそちらを下限として尊重する。 */
+export const MIN_HOST_INTERVAL_MS = 5_000;
+/** ホストあたり日次リクエストのハードキャップ（kill gate K7）。間隔だけでなく総量を見る。 */
+export const DAILY_REQUEST_CAP_PER_HOST = 50;
+/** 記事取得の本文サイズ上限（plan 06 §5.2）。超過は打ち切る（kill gate ではない）。 */
+export const MAX_BODY_BYTES = 512 * 1024;
+/**
+ * 発見ランナー 1 回あたりの処理時間予算（plan 06 §5.5: ジョブは 15〜20 分を上限）。
+ * Actions ジョブ全体の timeout より短くし、残り pending は次回ランに委ねる。
+ */
+export const DISCOVERY_INGEST_TIME_BUDGET_MS = 15 * 60 * 1000;
 
 // ── 収集トリガー（cooldown / lease）────────────────────────────
 /** 非RSS エバーグリーン摂取経路（手動キュレーションキュー）で投入する投稿の sourceId。 */
