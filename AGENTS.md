@@ -16,7 +16,8 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 技術スタック・データモデル・収集パイプライン・テスト戦略・**法務制約**などの詳細は、
 仕様書 `openspec/specs/wedding-trend/spec.md` を唯一の参照先とする。
-AGENTS.md には重複記載しない（乖離防止）。変更時は spec.md を必ず更新すること。
+AGENTS.md には重複記載しない（乖離防止）。変更時は spec.md を必ず更新すること
+（pre-commit フック `scripts/check-spec-update.sh` が未更新を警告する）。
 
 ### 法務制約は仕様であって努力目標ではない
 
@@ -38,7 +39,7 @@ warning はブロックしないが、シグナルとして必ず対処するこ
 
 **フックの bypass は禁止**: `git --no-verify` / `git commit -n` / `HUSKY=0` /
 `git -c core.hooksPath=...` / `GIT_CONFIG_PARAMETERS`・`GIT_CONFIG_KEY_N` 経由の
-hooksPath 注入はすべて禁止。「緊急時なら可」という例外も設けない。
+hooksPath 注入はすべて禁止。**技術的にも `~/.local/bin/git` ラッパーによりブロックされている**。「緊急時なら可」という例外も設けない。
 バイパスしたくなった時点で、直すべきものが壊れている。
 詳細な対処手順は `docs/git-hooks.md` を参照。
 
@@ -55,6 +56,7 @@ merge / revert / fixup! / squash! は素通しする。件名 72 文字超は wa
 2. `oxlint --nextjs-plugin --react-plugin --react-perf-plugin`
 3. `pnpm run type-check`（= `next typegen && tsc --noEmit`）
 4. `src/` の未ステージ変更、`package.json` と `pnpm-lock.yaml` の片側のみ staged を warning
+5. `bash scripts/check-spec-update.sh` — spec-sensitive な `src/` 変更があり `spec.md` が staged されていない場合に warning（ブロックしない）
 
 ### pre-push のブロックチェック
 
@@ -98,6 +100,8 @@ PR の CI では走らせず `.github/workflows/weekly-monitor.yml` で週次実
   - **UI/UX デザイン・見た目の実装** → `@designer` に委譲
   - **明確な実装作業（複数ファイル跨ぎ含む）** → `@fixer` に委譲
 - 単一ファイルの軽微な編集以外は、まず「この作業を委譲できる agent がいるか？」を検討してから実行に移ること
+- **依頼単位は小さく保つ**: 1 回の委譲は「1 つの明確な成果物」を単位とし、単位を大きくし過ぎないこと。関心事が混在する場合は分割して別 agent に委譲する。
+- **コンテキスト過剰蓄積を防ぐため積極的に新設する**: 既存 agent の context が膨張し続ける場合は同じ役割を抱え込まず、目的特化した新しいサブエージェントを新設して責務を分離する。長大な履歴の再利用より、単位を絞った新規セッションへの再委譲を優先する。
 - `@fixer` への委譲時は、自分が既に持っているコンテキスト（ファイル内容など）を prompt に含めて再読込コストを削減すること
 - **書き込み範囲の非重複**: 複数の write 可能 agent を並列実行する場合、担当ファイル範囲を明示的に分割し、重複させないこと。共有する型の契約は事前に確定させ、双方の prompt に含める。
 - **テスト実装とテスト実行は分離する**: テストの実装は `@fixer` に委譲し、テストの実行・検証は Orchestrator 自身が行う。サブエージェントが自分の実装したテストを自ら実行して検証結果を報告する運用は禁止し、Orchestrator が検証ゲート（lint, type-check, test, coverage, spec-refs, smoke-test）を走らせて結果を確認する。

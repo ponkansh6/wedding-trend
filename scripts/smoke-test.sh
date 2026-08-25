@@ -98,4 +98,20 @@ if ! grep -q "速報はまだありません" "$BODY_FILE"; then
   exit 1
 fi
 
+# plan 07 M6: 判定が自動であることの開示。カバレッジは Tier 7（RSC/UI）を
+# 除外しており、この開示を守るゲートはここにしか無い。UI から開示を削る変更が
+# 素通りしないよう、実レンダリング結果に対して検証する。
+if ! grep -q "AIによる自動処理" "$BODY_FILE"; then
+  echo "❌ [smoke] plan07 M6: automated-judgment disclosure missing (expected 'AIによる自動処理')"
+  echo "   開示は spec.md §10 / plan 07 §4 の要件。削る場合は plan 07 と照合すること。"
+  exit 1
+fi
+
+# plan 07 M5: 連絡先と撤回手段の導線。削除要請の受け口が消えると、
+# 掲載元が撤回を求める手段を失う。
+if ! grep -q "github.com/ponkansh6/wedding-trend/issues" "$BODY_FILE"; then
+  echo "❌ [smoke] plan07 M5: contact / takedown link missing (expected GitHub Issues link)"
+  exit 1
+fi
+
 echo "✅ [smoke] passed"

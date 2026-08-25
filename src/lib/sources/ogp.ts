@@ -19,6 +19,19 @@ function decodeHtmlEntities(str: string): string {
     .replace(/&#x2F;/g, "/");
 }
 
+/**
+ * 構造化メタデータ由来の author 文字列を正規化する（M2: 推定・ヒューリスティック禁止）。
+ * - 空文字列・"undefined"・"null" は null に丸める
+ * - 120 文字超は null（メタデータではなく本文が混入している可能性が高いため）
+ */
+function normalizeAuthorValue(raw: string | null): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (trimmed === "" || trimmed === "undefined" || trimmed === "null") return null;
+  if (trimmed.length > 120) return null;
+  return trimmed;
+}
+
 /** JSON-LD 内から author や datePublished を再帰的に探索する */
 function extractFromJsonLd(obj: unknown): { author: string | null; datePublished: string | null } {
   let author: string | null = null;
@@ -86,6 +99,11 @@ export function parseOgpMetadata(html: string): OgpMetadata {
   let articlePublishedTime: string | null = null;
   let htmlTitle: string | null = null;
   let metaDesc: string | null = null;
+  // M2: author は構造化メタデータ（JSON-LD / meta タグ）からのみ取得する。
+  // 優先順位: JSON-LD > article:author > meta[name=author] > dc.creator / DC.creator
+  let metaArticleAuthor: string | null = null;
+  let metaNameAuthor: string | null = null;
+  let metaDcCreator: string | null = null;
 
   // <title> タグの抽出
   const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
@@ -113,6 +131,9 @@ export function parseOgpMetadata(html: string): OgpMetadata {
       else if (prop === "og:site_name") ogSiteName = content;
       else if (prop === "article:published_time") articlePublishedTime = content;
       else if (prop === "description") metaDesc = content;
+      else if (prop === "article:author") metaArticleAuthor = content;
+      else if (prop === "author") metaNameAuthor = content;
+      else if (prop === "dc.creator") metaDcCreator = content;
     }
   }
 
@@ -134,12 +155,20 @@ export function parseOgpMetadata(html: string): OgpMetadata {
     }
   }
 
+  // article:author はプロフィール URL が入っていることがあり、著者名ではないため棄却する。
+  const articleAuthor =
+    metaArticleAuthor && /^https?:\/\//i.test(metaArticleAuthor.trim()) ? null : metaArticleAuthor;
+
+  const author = normalizeAuthorValue(
+    jsonLdAuthor ?? articleAuthor ?? metaNameAuthor ?? metaDcCreator,
+  );
+
   return {
     title: ogTitle || htmlTitle,
     description: ogDesc || metaDesc,
     image: ogImage,
     siteName: ogSiteName,
-    author: jsonLdAuthor,
+    author,
     datePublished: jsonLdDate || articlePublishedTime,
   };
 }

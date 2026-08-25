@@ -32,6 +32,12 @@ vi.mock("@/lib/sources/registry", () => ({
 }));
 
 vi.mock("@/lib/llm/batch", () => ({
+  // CurationItemSchema（src/lib/llm/schemas.ts）と一致する完全な形にする。
+  // topicAnchor は plan 07 §6-Q1/Q5 で導入された必須フィールド（1〜40字）で、
+  // ingest.ts の markCurated 呼び出しが post_rationales.topic_anchor（NOT NULL）
+  // に渡す。ここが欠けると実 DB を使うテスト（api-ingest.test.ts）でのみ
+  // 制約違反が露見する（tests/pipeline-ingest.test.ts は repository をモックする
+  // ため気づけない）。
   curatePosts: vi.fn().mockResolvedValue({
     results: [
       {
@@ -39,6 +45,16 @@ vi.mock("@/lib/llm/batch", () => ({
         summary: "AI Summary",
         category: "その他",
         tag: "trend",
+        firsthand: true,
+        ceremonyDecision: true,
+        specific: true,
+        tradeoff: true,
+        promotional: false,
+        preDecisionOrPhotoShoot: false,
+        // M1-2 の語彙的接地（plan 07 D4）を通すため、LLM への実入力
+        // （originalTitle = "Blog Post 1"）に逐語で含まれる語にする。
+        topicAnchor: "Blog Post 1",
+        rationaleText: "テスト用の根拠文です。",
       },
     ],
     geminiCalls: 1,

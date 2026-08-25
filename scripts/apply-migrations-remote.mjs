@@ -17,8 +17,12 @@
  *   node scripts/apply-migrations-remote.mjs --apply  # 実際に適用
  */
 import { createClient } from "@libsql/client";
-import { readFileSync, readdirSync, existsSync } from "node:fs";
-import path from "node:path";
+import { readFileSync, existsSync } from "node:fs";
+import {
+  loadMigrationStatements,
+  findNonAdditiveStatements,
+  extractCreatedName,
+} from "./migrations-additive.mjs";
 
 const APPLY = process.argv.includes("--apply");
 
@@ -46,43 +50,68 @@ if (!url) {
   process.exit(1);
 }
 
-/** 追加専用として許可する文の形。これ以外は一切実行しない。 */
-const ALLOWED = /^CREATE\s+(TABLE|UNIQUE\s+INDEX|INDEX)\b/i;
-
-const dir = "src/lib/db/migrations";
-const files = readdirSync(dir)
-  .filter((f) => f.endsWith(".sql"))
-  .sort();
-
-const plan = [];
-for (const file of files) {
-  const sql = readFileSync(path.join(dir, file), "utf-8");
-  const statements = sql
-    .split("--> statement-breakpoint")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  for (const statement of statements) {
-    if (!ALLOWED.test(statement)) {
-      console.error(
-        `\n❌ 追加専用ではない文を検出しました。中止します。\n   ファイル: ${file}\n   文: ${statement.slice(0, 200)}`,
-      );
-      process.exit(1);
-    }
-    const label = statement.split("\n")[0].slice(0, 90);
-    plan.push({ file, statement, label });
-  }
+const entries = loadMigrationStatements();
+const violations = findNonAdditiveStatements(entries);
+if (violations.length > 0) {
+  const { file, statement } = violations[0];
+  console.error(
+    `\n❌ 追加専用ではない文を検出しました。中止します。\n   ファイル: ${file}\n   文: ${statement.slice(0, 200)}`,
+  );
+  process.exit(1);
 }
+const plan = entries;
 
 console.log(`接続先スキーム: ${url.split(":")[0]}`);
 console.log(`実行計画（${plan.length} 文、すべて追加専用）:`);
 for (const { file, label } of plan) console.log(`  [${file}] ${label}`);
 
+const client = createClient({ url, authToken: process.env.TURSO_AUTH_TOKEN });
+
+// --- 名前衝突の事前検査 ---
+// 本番 DB は他プロジェクト（news-watch）と単一のスキーマ名前空間（テーブル名・
+// インデックス名）を共有している。applier は既存オブジェクトを "already exists"
+// として黙って読み飛ばすため、同名オブジェクトが既に存在する場合、それが
+// 「このプロジェクトが過去に作ったもの」なのか「他プロジェクトのもの」なのかを
+// 見分けずに読み飛ばしてしまうと、意図せず他プロジェクトのテーブル/インデックスを
+// 読み書きし始める危険がある。
+//
+// 限界: 名前だけでは「自分が過去に作ったもの」と「他プロジェクトのもの」を
+// 判別できない（両者は sqlite_master 上で区別不能）。したがって、ここでは
+// 自動判定して中止する、という強い制御はしない。衝突候補を列挙して人間の目視
+// 確認を促すに留める。誤って自動 skip 実装に倒すと、確認なしに他プロジェクトの
+// テーブルへ書き込む事故を防げなくなる。
+const existing = await client.execute(
+  "SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'",
+);
+const existingNames = new Set(
+  existing.rows.filter((r) => r.type === "table" || r.type === "index").map((r) => String(r.name)),
+);
+
+const collisions = [];
+for (const { file, statement } of plan) {
+  const created = extractCreatedName(statement);
+  if (created && existingNames.has(created.name)) {
+    collisions.push({ file, ...created });
+  }
+}
+
+if (collisions.length > 0) {
+  console.log(
+    `\n⚠️  本番 DB に同名の ${collisions[0].type === "table" ? "テーブル/インデックス" : "オブジェクト"}が既に存在します（衝突候補、${collisions.length} 件）:`,
+  );
+  for (const { file, type, name } of collisions) {
+    console.log(`  [${file}] ${type}: ${name}`);
+  }
+  console.log(
+    "   → このプロジェクトが過去に作成したものか、news-watch など他プロジェクトのものかを名前だけでは判別できません。\n" +
+      "     適用前に必ず目視で確認してください（このスクリプトは自動判定しません）。",
+  );
+}
+
 if (!APPLY) {
   console.log("\ndry-run です。適用するには --apply を付けて再実行してください。");
   process.exit(0);
 }
-
-const client = createClient({ url, authToken: process.env.TURSO_AUTH_TOKEN });
 
 const before = await client.execute(
   "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name",

@@ -9,8 +9,31 @@ const MIGRATIONS_DIR = path.resolve(__dirname, "../../src/lib/db/migrations");
  * `setupTestDb()` が DROP する対象テーブル。新しいテーブルを追加した場合は
  * ここにも追記すること（マイグレーション SQL のファイル名は決め打ちしない
  * ため、テーブル一覧だけは手動で保守する）。
+ *
+ * **`posts` を参照する外部キー（`post_publications` / `post_removals` の
+ * `post_id REFERENCES posts(id)`）を持つテーブルは、必ず `posts` より前に
+ * 列挙すること。** libsql はデフォルトで `PRAGMA foreign_keys=ON`相当の
+ * 制約を効かせるため、参照先が実データを持つ子行を残したまま先に
+ * `DROP TABLE posts` を試みると FK 違反で失敗する（失敗は握りつぶされ、
+ * 続く `CREATE TABLE posts` が「既に存在する」で例外を投げ、
+ * `setupTestDb()` 全体が中断する）。
  */
-const KNOWN_TABLES = ["posts", "config", "post_usefulness", "post_usefulness_criteria"];
+const KNOWN_TABLES = [
+  "post_publication_kind",
+  "post_publications",
+  "post_removals",
+  "posts",
+  "config",
+  "post_usefulness",
+  "post_usefulness_criteria",
+  "post_rationales",
+  "discovery_seen",
+  "discovery_run",
+  "source_policy",
+  "host_gate_state",
+  "post_retry_queue",
+  "discovery_host_metrics",
+];
 
 /**
  * `src/lib/db/migrations/*.sql` を採番順（ファイル名の辞書順 = drizzle-kit の

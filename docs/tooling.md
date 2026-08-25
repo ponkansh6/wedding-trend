@@ -26,6 +26,11 @@ We use blazing fast, Rust-based tools (`oxlint` and `oxfmt`) alongside ESLint.
 ## Testing & Coverage
 
 - **Unit & Integration Tests**: Run `pnpm test` (executes `vitest run`).
+- **Memory & Concurrency Constraints**: デフォルトでテストは直列実行（`fileParallelism: false`, `maxWorkers: 1`）されるように設定されている。これは RAM 7.4GiB というマシン制約下で `happy-dom` 環境のテストファイルを多数並列実行した際に OOM killer が発動し、エディタやエージェントプロセスごと kill される事故を防ぐためである。
+- **ワーカーヒープ上限**: 各テストワーカーには `execArgv: ["--max-old-space-size=1536"]`（Vitest 4 ではトップレベルの `test.execArgv`）により 1.5GiB の V8 ヒープ上限が設定されている。テストの暴走時はシステム OOM killer ではなく V8 のヒープ不足エラーとして検知できる。
+- **並列実行のエスケープハッチ**: 一時的に並列化したい場合のみ `VITEST_MAX_WORKERS=2 pnpm test` のように環境変数を指定する。
+- **安全な部分実行**: 特定のファイルだけを検証したい場合は `pnpm exec vitest run tests/url.test.ts` のように個別実行する。
+- **lint-staged 連携**: コミット時の `lint-staged` で走る `vitest related` もこのメモリ制限・直列実行設定の恩恵を受け、安全に動作する。
 - **Coverage Reports**: Run `pnpm exec vitest run --coverage` to output reports to `coverage/`.
 - **Coverage Tiers**: Enforced automatically by `node scripts/check-coverage-tiers.mjs` (refer to `openspec/specs/wedding-trend/spec.md` §7.1).
 
@@ -36,6 +41,39 @@ We use blazing fast, Rust-based tools (`oxlint` and `oxfmt`) alongside ESLint.
   1. The page renders successfully **without** an RSC error digest.
   2. The expected empty-state text appears.
 - It is designed to catch regressions where the app builds successfully but renders broken at runtime.
+
+## Migrations (Shared Production DB)
+
+The production Turso DB is shared with another project (news-watch, 9 tables,
+hundreds of rows). Because of this, migrations must be **additive-only**:
+only `CREATE TABLE`, `CREATE INDEX`, and `CREATE UNIQUE INDEX` statements are
+allowed in `src/lib/db/migrations/*.sql`. `drizzle-kit push` is never used
+against production for the same reason — it treats anything absent from the
+current schema as deletable, which would delete the other project's tables.
+
+- **Static gate (creation-time)**: `node scripts/check-migrations-additive.mjs`
+  scans all migration files and fails if any statement is not additive-only.
+  It does not touch the network or a DB, so it runs in the `pre-push` hook and
+  can run in CI. This is what catches a non-additive migration (e.g. one
+  containing `ALTER TABLE`) before it merges — previously this was only
+  discovered when someone tried to deploy, by which point
+  `apply-migrations-remote.mjs` had already permanently blocked applying any
+  migration after the offending one.
+- **Runtime safety net (apply-time)**: `scripts/apply-migrations-remote.mjs`
+  re-checks the same rule immediately before applying to Turso, and also
+  queries `sqlite_master` beforehand to list any table/index names that
+  already exist in production and would collide with names the migration
+  plan is about to create. Because table and index names share a single
+  namespace across both projects in the same DB, a same-named table already
+  belonging to news-watch would otherwise be silently read/written by
+  wedding-trend. This collision list is informational only (name collisions
+  cannot be resolved automatically — the script cannot tell "ours from a past
+  run" apart from "the other project's"), so a human must review it before
+  passing `--apply`.
+- Both scripts import the actual additive-only rule (the `ALLOWED` regex and
+  the `--> statement-breakpoint` splitting logic) from the shared module
+  `scripts/migrations-additive.mjs`, so the rule cannot drift between the two
+  call sites.
 
 ## Security & Dependency Checks
 

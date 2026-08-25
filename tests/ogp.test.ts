@@ -124,4 +124,131 @@ describe("parseOgpMetadata (src/lib/sources/ogp.ts)", () => {
     expect(meta.description).toBeNull();
     expect(JSON.stringify(meta)).not.toContain("UNIQUE_BODY_MARKER_b7e41d");
   });
+
+  // M2: author は構造化メタデータ（JSON-LD / meta タグ）からのみ取得する
+  describe("M2: author from structured metadata only", () => {
+    it('extracts author from <meta property="article:author">', () => {
+      const html = `
+        <html><head>
+          <meta property="article:author" content="山田 太郎" />
+        </head><body></body></html>
+      `;
+      expect(parseOgpMetadata(html).author).toBe("山田 太郎");
+    });
+
+    it('extracts author from <meta name="author">', () => {
+      const html = `
+        <html><head>
+          <meta name="author" content="鈴木 花子" />
+        </head><body></body></html>
+      `;
+      expect(parseOgpMetadata(html).author).toBe("鈴木 花子");
+    });
+
+    it('extracts author from <meta name="dc.creator"> (case-insensitive)', () => {
+      const html = `
+        <html><head>
+          <meta name="DC.creator" content="佐藤 次郎" />
+        </head><body></body></html>
+      `;
+      expect(parseOgpMetadata(html).author).toBe("佐藤 次郎");
+    });
+
+    it("priority: JSON-LD > article:author > meta[name=author] > dc.creator", () => {
+      const html = `
+        <html><head>
+          <meta property="article:author" content="Article Author" />
+          <meta name="author" content="Meta Author" />
+          <meta name="dc.creator" content="DC Creator" />
+          <script type="application/ld+json">
+            { "@type": "Article", "author": { "name": "JSON-LD Author" } }
+          </script>
+        </head><body></body></html>
+      `;
+      expect(parseOgpMetadata(html).author).toBe("JSON-LD Author");
+    });
+
+    it("priority without JSON-LD: article:author wins over meta[name=author] and dc.creator", () => {
+      const html = `
+        <html><head>
+          <meta property="article:author" content="Article Author" />
+          <meta name="author" content="Meta Author" />
+          <meta name="dc.creator" content="DC Creator" />
+        </head><body></body></html>
+      `;
+      expect(parseOgpMetadata(html).author).toBe("Article Author");
+    });
+
+    it("priority: meta[name=author] wins over dc.creator when article:author is absent", () => {
+      const html = `
+        <html><head>
+          <meta name="author" content="Meta Author" />
+          <meta name="dc.creator" content="DC Creator" />
+        </head><body></body></html>
+      `;
+      expect(parseOgpMetadata(html).author).toBe("Meta Author");
+    });
+
+    it("rejects article:author when the value is a URL (profile link, not a name)", () => {
+      const html = `
+        <html><head>
+          <meta property="article:author" content="https://example.com/author/taro" />
+        </head><body></body></html>
+      `;
+      expect(parseOgpMetadata(html).author).toBeNull();
+    });
+
+    it("falls through to meta[name=author] when article:author is a URL", () => {
+      const html = `
+        <html><head>
+          <meta property="article:author" content="https://example.com/author/taro" />
+          <meta name="author" content="Fallback Author" />
+        </head><body></body></html>
+      `;
+      expect(parseOgpMetadata(html).author).toBe("Fallback Author");
+    });
+
+    it('normalizes empty / "undefined" / "null" string values to null', () => {
+      expect(
+        parseOgpMetadata(`<html><head><meta name="author" content="" /></head><body></body></html>`)
+          .author,
+      ).toBeNull();
+      expect(
+        parseOgpMetadata(
+          `<html><head><meta name="author" content="undefined" /></head><body></body></html>`,
+        ).author,
+      ).toBeNull();
+      expect(
+        parseOgpMetadata(
+          `<html><head><meta name="author" content="null" /></head><body></body></html>`,
+        ).author,
+      ).toBeNull();
+    });
+
+    it("rejects author values longer than 120 chars (likely body text leakage, not metadata)", () => {
+      const longValue = "あ".repeat(121);
+      const html = `<html><head><meta name="author" content="${longValue}" /></head><body></body></html>`;
+      expect(parseOgpMetadata(html).author).toBeNull();
+    });
+
+    it("accepts author values at exactly the 120 char limit", () => {
+      const value = "あ".repeat(120);
+      const html = `<html><head><meta name="author" content="${value}" /></head><body></body></html>`;
+      expect(parseOgpMetadata(html).author).toBe(value);
+    });
+
+    it('never infers author from body text patterns like "文・山田太郎" or "ライター：鈴木花子" (no heuristics, no <address>/.author scraping)', () => {
+      const html = `
+        <html>
+          <head><title>No metadata here</title></head>
+          <body>
+            <address class="author">文・山田太郎</address>
+            <p>ライター：鈴木花子</p>
+            <div class="author">佐藤次郎</div>
+          </body>
+        </html>
+      `;
+      expect(parseOgpMetadata(html).author).toBeNull();
+    });
+  });
 });

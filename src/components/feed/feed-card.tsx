@@ -80,18 +80,82 @@ function Title({ card, variant }: { card: FeedCardData; variant: FeedCardVariant
         "line-clamp-2",
       )}
     >
-      {card.aiTitle}
+      {card.originalTitle}
     </h3>
   );
 }
 
 function Summary({ card, variant }: { card: FeedCardData; variant: FeedCardVariant }) {
+  const hasRationale = card.topicAnchor !== null || card.usefulness !== null;
+
+  if (hasRationale) {
+    return (
+      <div className="flex flex-col gap-2">
+        <Badge
+          variant="ai"
+          className="w-fit font-medium"
+          title="この判定はAIが自動で行っており、誤りを含むことがあります"
+        >
+          <Sparkles className="size-3" aria-hidden />
+          自動判定
+        </Badge>
+        {card.topicAnchor && (
+          <p className="text-[13px] font-medium text-[var(--color-foreground)]/80">
+            {card.topicAnchor}
+          </p>
+        )}
+        {card.rationaleText && (
+          <p className="text-[13.5px] leading-relaxed text-[var(--color-foreground)]/85">
+            {card.rationaleText}
+          </p>
+        )}
+        {card.usefulness && (
+          <div className="flex flex-wrap gap-1.5">
+            {card.usefulness.firsthand && (
+              <Badge variant="category" className="bg-[var(--color-background)]/50">
+                当事者本人
+              </Badge>
+            )}
+            {card.usefulness.ceremonyDecision && (
+              <Badge variant="category" className="bg-[var(--color-background)]/50">
+                意思決定に効く
+              </Badge>
+            )}
+            {card.usefulness.specific && (
+              <Badge variant="category" className="bg-[var(--color-background)]/50">
+                具体的
+              </Badge>
+            )}
+            {card.usefulness.tradeoff && (
+              <Badge variant="category" className="bg-[var(--color-background)]/50">
+                トレードオフ
+              </Badge>
+            )}
+            {card.usefulness.promotional && (
+              <Badge
+                variant="category"
+                className="border-[var(--color-warning)]/30 bg-[var(--color-warning)]/10 text-[var(--color-warning)]"
+              >
+                PR要素あり
+              </Badge>
+            )}
+            {card.usefulness.preDecisionOrPhotoShoot && (
+              <Badge variant="category" className="bg-[var(--color-muted)]/10">
+                式前・撮影段階
+              </Badge>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-1.5">
       <Badge
         variant="ai"
         className="w-fit font-medium"
-        title="この要約は元投稿の内容をもとに AI が自動生成しています"
+        title="この要約はAIが自動で生成しており、誤りを含むことがあります"
       >
         <Sparkles className="size-3" aria-hidden />
         AI要約

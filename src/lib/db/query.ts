@@ -1,16 +1,19 @@
-import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, or, sql } from "drizzle-orm";
 import { db } from "./index";
-import { posts, postUsefulnessCriteria } from "./schema";
+import { posts, postUsefulnessCriteria, postRationales } from "./schema";
 import {
+  RATIONALE_DISPLAY_PHASE,
   USEFULNESS_GATE_BONUS,
   USEFULNESS_WEIGHT_FIRSTHAND,
   USEFULNESS_WEIGHT_PRE_DECISION_PENALTY,
   USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY,
   USEFULNESS_WEIGHT_SPECIFIC,
   USEFULNESS_WEIGHT_TRADEOFF,
+  type RationaleDisplayPhase,
 } from "@/lib/constants";
 import { UNSCORED_USEFULNESS_SCORE } from "@/lib/scoring/usefulness";
 import type { Category, FeedCard, SourceType, TrendTag } from "@/lib/types";
+import type { UsefulnessCriteria } from "@/lib/scoring/usefulness";
 
 /**
  * `getFeedCards` が両レーンで共通して取得するカラム。`leftJoin` の有無に
@@ -23,6 +26,7 @@ const FEED_ROW_FIELDS = {
   sourceId: posts.sourceId,
   sourceName: posts.sourceName,
   url: posts.url,
+  originalTitle: posts.originalTitle,
   author: posts.author,
   publishedAt: posts.publishedAt,
   thumbnailUrl: posts.thumbnailUrl,
@@ -32,6 +36,9 @@ const FEED_ROW_FIELDS = {
   tag: posts.tag,
   embedProvider: posts.embedProvider,
   embedHtml: posts.embedHtml,
+  topicAnchor: postRationales.topicAnchor,
+  rationaleText: postRationales.rationaleText,
+  criteriaJson: postUsefulnessCriteria.criteriaJson,
 } as const;
 
 /**
@@ -126,13 +133,22 @@ END`;
 export async function getFeedCards(params: {
   sourceType: SourceType;
   limit: number;
+  phase?: RationaleDisplayPhase;
 }): Promise<FeedCard[]> {
   try {
+    const phase = params.phase ?? RATIONALE_DISPLAY_PHASE;
+    const visibilityCondition =
+      phase === "phase2"
+        ? isNotNull(postRationales.postId)
+        : or(
+            and(isNotNull(posts.aiTitle), isNotNull(posts.aiSummary)),
+            isNotNull(postRationales.postId),
+          );
+
     const whereClause = and(
       eq(posts.sourceType, params.sourceType),
       eq(posts.status, "published"),
-      isNotNull(posts.aiTitle),
-      isNotNull(posts.aiSummary),
+      visibilityCondition,
     );
 
     const rows =
@@ -140,6 +156,7 @@ export async function getFeedCards(params: {
         ? await db
             .select(FEED_ROW_FIELDS)
             .from(posts)
+            .leftJoin(postRationales, eq(posts.id, postRationales.postId))
             .leftJoin(postUsefulnessCriteria, eq(posts.id, postUsefulnessCriteria.postId))
             .where(whereClause)
             .orderBy(desc(USEFULNESS_SCORE_SQL), desc(posts.publishedAt), desc(posts.id))
@@ -147,6 +164,8 @@ export async function getFeedCards(params: {
         : await db
             .select(FEED_ROW_FIELDS)
             .from(posts)
+            .leftJoin(postRationales, eq(posts.id, postRationales.postId))
+            .leftJoin(postUsefulnessCriteria, eq(posts.id, postUsefulnessCriteria.postId))
             .where(whereClause)
             // createdAt（取り込み順）を新着基準にする。publishedAt は元記事側の
             // 情報が欠けている場合に null になりうるため、並び順の基準には使わない。
@@ -156,7 +175,31 @@ export async function getFeedCards(params: {
     // category / tag / aiTitle / aiSummary は SQL 条件で non-null のはずだが、
     // 型安全のため念のため防御的にフィルタする。
     return rows.flatMap((row): FeedCard[] => {
-      if (!row.aiTitle || !row.aiSummary || !row.category || !row.tag) return [];
+      if (!row.category || !row.tag) return [];
+      // category / tag があっても、表示フェーズの条件を満たさない行は除外
+      if (!row.rationaleText && (!row.aiTitle || !row.aiSummary)) return [];
+
+      let parsedUsefulness: UsefulnessCriteria | null = null;
+      if (row.criteriaJson) {
+        try {
+          const parsed = JSON.parse(row.criteriaJson);
+          if (
+            parsed &&
+            typeof parsed === "object" &&
+            typeof parsed.firsthand === "boolean" &&
+            typeof parsed.ceremonyDecision === "boolean" &&
+            typeof parsed.specific === "boolean" &&
+            typeof parsed.tradeoff === "boolean" &&
+            typeof parsed.promotional === "boolean" &&
+            typeof parsed.preDecisionOrPhotoShoot === "boolean"
+          ) {
+            parsedUsefulness = parsed as UsefulnessCriteria;
+          }
+        } catch {
+          parsedUsefulness = null;
+        }
+      }
+
       return [
         {
           id: row.id,
@@ -164,15 +207,19 @@ export async function getFeedCards(params: {
           sourceId: row.sourceId,
           sourceName: row.sourceName,
           url: row.url,
+          originalTitle: row.originalTitle,
           author: row.author,
           publishedAt: row.publishedAt,
           thumbnailUrl: row.thumbnailUrl,
-          aiTitle: row.aiTitle,
+          aiTitle: row.aiTitle ?? undefined,
           aiSummary: row.aiSummary,
           category: row.category as Category,
           tag: row.tag as TrendTag,
           embedProvider: row.embedProvider,
           embedHtml: row.embedHtml,
+          topicAnchor: row.topicAnchor ?? null,
+          rationaleText: row.rationaleText ?? null,
+          usefulness: parsedUsefulness,
         },
       ];
     });

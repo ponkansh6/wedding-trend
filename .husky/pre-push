@@ -2,7 +2,7 @@
 # ============================================================================
 # pre-push — 分単位 / push 差分スコープ / 「壊れたものを push させない」
 #   Phase 0: 未コミット変更ガード（blocking）
-#   Phase 1: lockfile-sync / eslint / spec-refs / format-check / security
+#   Phase 1: lockfile-sync / eslint / spec-refs / format-check / security / migrations-additive
 #   Phase 2: 本番スキーマ drift (advisory)
 #   変更が src/ tests/ に及ぶ場合のみ smoke + unit/coverage を実行
 #   （news-watch の 2 レーン並列は見送り：本プロジェクトは規模が小さく十分速い）
@@ -58,6 +58,7 @@ eslint src/
 bash scripts/check-spec-refs.sh
 oxfmt --check .
 bash scripts/check-security.sh
+node scripts/check-migrations-additive.mjs
 
 if [ "$NEED_SMOKE" = "1" ]; then
   bash scripts/smoke-test.sh

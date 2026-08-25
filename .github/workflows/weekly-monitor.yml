@@ -37,13 +37,20 @@ jobs:
         id: check_oembed
         run: node scripts/check-oembed-contract.mjs
 
+      - name: Check discovery_run freshness
+        id: check_discovery_freshness
+        run: pnpm exec tsx scripts/check-discovery-freshness.mjs
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+
       - name: Open GitHub Issue on Failure
         if: failure()
         uses: actions/github-script@v7
         with:
           script: |
-            const title = "🚨 Weekly Monitor Alert: Feed or oEmbed Contract Broken";
-            const body = `Automated weekly monitoring detected a failure in feed sources or oEmbed contracts.\n\n- Workflow run: https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}\n- Please inspect the logs and update adapters or endpoints accordingly.`;
+            const title = "🚨 Weekly Monitor Alert: Feed, oEmbed Contract, or Discovery Freshness Broken";
+            const body = `Automated weekly monitoring detected a failure in feed sources, oEmbed contracts, or discovery_run freshness (schedule may have auto-disabled after 60 days of inactivity).\n\n- Workflow run: https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}\n- Please inspect the logs and update adapters, endpoints, or the discovery.yml schedule accordingly.`;
 
             // Check if an open issue with this title already exists to avoid spamming
             const issues = await github.rest.issues.listForRepo({

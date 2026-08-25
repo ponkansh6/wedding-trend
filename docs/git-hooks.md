@@ -36,8 +36,41 @@ Guards pushes to remote repositories:
 
 1. **Uncommitted/Untracked Guard**: Fails if there are uncommitted or untracked changes in `src/` or `tests/`. Commit your changes first.
 2. **Lockfile Sync**: Ensures `pnpm-lock.yaml` is in sync.
-3. **Quality Gates**: Runs `pnpm run lint`, `pnpm run spec-refs`, `pnpm run format:check`, and `pnpm run security-check`.
+3. **Quality Gates**: Runs `pnpm run lint`, `pnpm run spec-refs`, `pnpm run format:check`, `pnpm run security-check`, and `node scripts/check-migrations-additive.mjs`.
 4. **Targeted Tests & Smoke**: If `src/` or `tests/` files have changed relative to the target branch, runs vitest coverage tiers and `bash scripts/smoke-test.sh`.
+
+### Migrations additive-only gate (`scripts/check-migrations-additive.mjs`)
+
+**Why this exists**: the production Turso DB is shared with another project
+(news-watch, 9 tables, hundreds of rows). `scripts/apply-migrations-remote.mjs`
+only ever executes `CREATE TABLE` / `CREATE INDEX` / `CREATE UNIQUE INDEX`
+statements against it — anything else (`ALTER`, `DROP`, `DELETE`, `UPDATE`, ...)
+makes it abort the **entire** apply plan on the spot, and because it aborts as
+soon as it hits the first non-additive statement, every migration file after
+the offending one becomes permanently inapplicable to production until the
+offending file is fixed or removed.
+
+This constraint was violated in practice once: a migration containing
+`ALTER TABLE` was created and merged, and nobody noticed until someone tried to
+deploy it — by which point the fix required an out-of-band edit to migration
+history. That is the failure mode this gate closes: it makes the check run at
+migration-creation time (pre-push), not at deploy time, so a non-additive
+statement can never reach `main` in the first place.
+
+The additive-only rule lives in one place, `scripts/migrations-additive.mjs`,
+imported by both `check-migrations-additive.mjs` (this gate) and
+`apply-migrations-remote.mjs` (the runtime safety net) — duplicating the
+regex in two files would eventually let them drift apart, which is exactly
+the kind of silent failure this gate exists to prevent. The check is a pure
+static read of `src/lib/db/migrations/*.sql` — no network or DB access — so
+it is safe to run on every push and in CI.
+
+If this check fails: rewrite the offending migration file so it only adds
+new tables/indexes (a new table + a backfill script, rather than `ALTER
+TABLE ... ADD COLUMN`, for example), or drop it if it was created in error.
+Do not bypass this hook to get a non-additive migration through — see
+"Emergency Bypass" above; the whole point of this check is that this specific
+class of mistake must not reach `main`.
 
 ### How to Resolve Pre-Push Failures
 

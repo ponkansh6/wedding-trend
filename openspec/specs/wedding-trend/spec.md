@@ -5,7 +5,7 @@
 結婚式準備の「今」のトレンドと「リアル」な体験談を、1 分で俯瞰できるキュレーションフィードアプリケーションです。
 Next.js 16 (App Router), React 19, TypeScript strict, Tailwind CSS v4, Drizzle ORM + Turso (libSQL), Google Gemini, Zod, Vitest を採用しています。
 
-本プロジェクトの最大の特長は、**記事本文を一切書かず、公開されている外部の SNS 投稿やブログ記事に対して AI が見出しと短い要約を生成し、元記事・投稿への導線とセットでカード表示する点**にあります。これにより、著作権やハルシネーションのリスクを最小限に抑えつつ、ユーザーに価値あるキュレーションを提供します。
+本プロジェクトの最大の特長は、**記事本文を一切書かず、公開されている外部の SNS 投稿やブログ記事に対して、元記事・投稿への導線とセットでカード表示する点**にあります。体験談レーンのタイトルは AI 生成ではなく**元記事タイトルの逐語表示**であり、AI が出力するのはトピックアンカーと短い判定根拠文（記事の性質についての言明であり、内容の配達ではない）です（詳細は §10 を参照）。これにより、著作権やハルシネーションのリスクを最小限に抑えつつ、ユーザーに価値あるキュレーションを提供します。
 
 ---
 
@@ -18,6 +18,8 @@ Next.js 16 (App Router), React 19, TypeScript strict, Tailwind CSS v4, Drizzle O
   - 下段: 満足度の高い王道・定番 (`sourceType: "blog"`) — 体験談・費用感・アドバイス
 - **自動巡回コレクター**:
   - RSS フィードに基づくブログ・体験談の収集 (`src/lib/sources/hatena-bookmark.ts`, `src/lib/sources/google-news.ts`, `src/lib/sources/note.ts`, `src/lib/sources/ameblo.ts`, `src/lib/sources/base/rss-fetcher.ts`, `src/lib/sources/base/feed-parser.ts`, `src/lib/sources/registry.ts`)
+- **sitemap 差分による発見・本文取得（discovery 経路）**:
+  - RSS フィードが存在しないセクション（第1対象: `mwed.jp` 体験談）を sitemap の差分から発見し、アクセス規律レイヤー経由で本文を取得して判定する。本文は判定後に破棄し永続化しない (`src/lib/sources/sitemap-discovery.ts`, `src/lib/sources/access-discipline.ts`, `src/lib/sources/article-text.ts`, `src/lib/pipeline/discovery-ingest.ts`, `scripts/run-discovery.mjs`)。詳細は §6.3 を参照。
 - **管理者による URL 投入 API**:
   - SNS 投稿等の URL を受け取り、oEmbed を取得してカード化 (`src/app/api/submit-url/route.ts`, `src/lib/pipeline/submit-url.ts`, `src/lib/embed/oembed.ts`, `src/lib/embed/providers.ts`)
 - **AI による見出し・要約生成**:
@@ -54,6 +56,8 @@ Next.js 16 (App Router), React 19, TypeScript strict, Tailwind CSS v4, Drizzle O
   - `src/app/actions.ts` の Server Action（`triggerIngest` / `submitSnsUrl`）により、`/admin`（`src/middleware.ts` の Basic 認証配下・オーナー限定）上のボタン操作から `src/lib/pipeline/ingest.ts` / `src/lib/pipeline/submit-url.ts` を直接呼び出す。加えて `vercel.json` の Vercel Cron 設定により `GET /api/ingest` を定期実行する。両トリガー経路の詳細・認可モデルは §6 を参照。
 - **FR-007: 収集トリガーの排他ロックとクールダウン**
   - 収集パイプラインを起動する両経路（`/admin` の手動トリガー・Cron）は、`src/lib/pipeline/cooldown.ts` の `acquireIngestLease()` により実行排他ロック（lease）を必ず取得する。取得できなければ「実行中」として `runIngest()` を呼ばずに返す（`/admin` 経路では `IngestResult.busy: true`）。加えて `/admin` 経路のみ、`claimIngestSlot()` により 15 分のクールダウンを DB 側で原子的に確保し、`runIngest()` が実際に Gemini を呼んでいれば `extendIngestCooldownAfterRun()` が 4 時間へ延長する。クールダウン中は lease を解放し `runIngest()` を呼ばずに待機状態を返す。詳細は §6.4 を参照。
+- **FR-008: sitemap 差分発見と本文取得による判定（discovery 経路）**
+  - RSS フィードが存在しないセクションを対象に、`src/lib/sources/sitemap-discovery.ts` の `discoverNewUrls()` が sitemap の差分から新規 URL を発見して `discovery_seen` に記録し、`src/lib/pipeline/discovery-ingest.ts` の `ingestDiscoveredUrls()` が `pending` 状態の URL を `src/lib/sources/access-discipline.ts` の `disciplinedFetch()` 経由で取得し本文を判定に用いる。実行は GitHub Actions（`.github/workflows/discovery.yml`、日次）であり、`/admin`・Vercel Cron の収集トリガー（FR-006/FR-007）とは独立した第3の摂取経路である。取得した本文は判定にのみ用い、`posts.original_excerpt` を含むいかなるカラムにも永続化しない（§10-5）。アクセス規律（robots.txt 遵守・レート制限・kill gate）の詳細は §10-6、保存先テーブルは §5 を参照。
 
 ---
 
@@ -145,15 +149,116 @@ Next.js 16 (App Router), React 19, TypeScript strict, Tailwind CSS v4, Drizzle O
 計算する。旧 `post_usefulness` テーブルは過去のマイグレーション履歴に残るが実運用では
 使用されず孤立している（削除しない）。
 
+### 判定根拠・discovery 系の 5 テーブル（`src/lib/db/schema.ts`）
+
+いずれも `post_usefulness_criteria` と同じ制約下（本番 Turso が news-watch と
+DB を共有しており、`scripts/apply-migrations-remote.mjs` が `ALTER TABLE` を
+一切許可せず `CREATE TABLE` / `CREATE INDEX` のみ許可）で追加された。
+`posts` テーブル自体には一切カラムを追加しておらず、すべてサイドテーブルで
+拡張している（`src/lib/db/migrations/0004_post_rationales.sql` 〜
+`0008_host_gate_state.sql`。5本とも `CREATE TABLE`（一部 `CREATE INDEX` 併記）
+のみで構成され、`ALTER TABLE` 文を含まない）。
+
+#### `post_rationales` テーブル（判定根拠。§10-3）
+
+`ceremonyDecision`/`preDecisionOrPhotoShoot` 等の 6 boolean（`post_usefulness_criteria`
+側）とは別に、公開カードに表示するトピックアンカーと判定根拠文を保持する。
+
+- `post_id`: `posts.id` と同じ型の主キー。
+- `topic_anchor`: トピックのアンカー（40字以内、`src/lib/llm/schemas.ts` の
+  `CurationItemSchema` が検証）。結論のアンカーであってはならない（§10-3）。
+- `rationale_text`: 判定根拠文（60〜90字、記事固有の具体数値禁止。
+  半角・全角数字を含む場合は zod の `refine` で機械的に拒否される）。
+- `evidence_sufficient`: LLM が判定に足る原文テキストを得られたか
+  （boolean。`false` の投稿には rationale 行自体を作らない運用のため、
+  実質的にこのテーブルに存在する行は常に `true`）。
+- `model_id`: 判定した Gemini モデル ID。
+- `prompt_version`: プロンプト版（`RATIONALE_PROMPT_VERSION`、
+  `src/lib/constants.ts`）。将来プロンプト文言を変更した際の
+  バックフィル判定に使う。
+- `created_at`: ISO8601 文字列。
+
+#### `discovery_seen` テーブル（既知 URL 集合の正本。§6.3）
+
+sitemap 差分発見における「正しさの根拠」そのもの。`lastmod` は
+child sitemap の絞り込みに使う最適化に過ぎず、正本はこのテーブルが持つ
+既知 URL 集合である。
+
+- `host`: 対象ホスト名。
+- `url_hash`: URL のハッシュ（主キー）。
+- `url`: 元 URL。
+- `first_seen_at`: 初めて sitemap 上で観測した ISO8601 時刻。
+- `sitemap_lastmod`: sitemap 上の `lastmod`（無ければ null。最適化専用で
+  正しさの判定には使わない）。
+- `status`: `"pending"`（未取得）/ `"fetched"`（取得試行済み）/
+  `"skipped"`（robots 拒否・404/410・取得サイズ超過等で今後も取得しない）。
+- インデックス: `(host, status)`（`ingestDiscoveredUrls()` が
+  `pending` 行をホスト単位で取得する際に使う）。
+
+#### `discovery_run` テーブル（発見ランの観測記録）
+
+`discoverNewUrls()` の1回の実行ごとに1行。ゲート判定（`lastmod` を
+不信任にしたか等）と観測の根拠を残す。
+
+- `id`: 主キー（自動採番）。
+- `host`: 対象ホスト名。
+- `started_at` / `finished_at`: ISO8601 文字列（`finished_at` は実行中は null）。
+- `sitemaps_fetched`: 取得した sitemap（ルート＋子）の数。
+- `urls_new`: このランで新規発見した URL 数。
+- `urls_fetched`: 予約フィールド（discovery ラン自体は本文取得を行わず
+  `discovery_seen` への seed のみを行うため、現状は常に 0）。
+- `status_counts`: `discovery_seen` のステータス別件数を JSON 文字列化したもの。
+- `outcome`: `"seeded"`（初回。取得はせず既知集合の記録のみ）/
+  `"completed"` / `"completed_lastmod_distrusted"`（1回の差分件数が
+  `LASTMOD_DIFF_ALERT_THRESHOLD` を超え、`lastmod` を信用せず全件再取得した）/
+  `"failed"`。
+- インデックス: `(host, started_at)`。
+
+#### `source_policy` テーブル（robots/ToS のスナップショット）
+
+kill gate K1（robots.txt 変化検知）の入力。取得のたびに内容ハッシュを
+既存の保存値と比較し、変化していれば K1 を発火させる（§10-6）。
+
+- `host`: 主キー。
+- `robots_hash` / `robots_body`: 直近取得した robots.txt の SHA-256 ハッシュと本文。
+- `tos_url` / `tos_hash`: 利用規約のスナップショット用フィールド（列は
+  存在するが、変化を自動検知する処理は未実装。K2 は今後の課題）。
+- `checked_at`: ISO8601 文字列。
+
+#### `host_gate_state` テーブル（kill gate の永続状態。§10-6）
+
+`config` KV は単一スカラーの ISO8601 カーソル専用（`discovery:cursor:<host>`
+のみ）であり、gate 識別子やストライク数のような非 ISO の状態値は保持できない
+（`writeConfigValue` が値を ISO8601 文字列に強制するため）ため、専用テーブルで
+永続化する。
+
+- `host`: 主キー。
+- `gate_id`: 直近発火した gate（`K1`/`K3`/`K4`/`K5`/`K6`/`K7`。未発火なら null）。
+- `state_kind`: `null`（稼働中）/ `"cooloff"`（`until_at` まで一時停止）/
+  `"stopped"`（K1 由来の人手復帰待ち）/ `"permanent"`（恒久停止）。
+- `until_at`: `cooloff` の期限（ISO8601。他の state では null）。
+- `k4_strikes`: K4（記事取得 403）の連続回数。2 回で `permanent` に遷移する。
+- `last_429_at`: 直近の 429 応答時刻（K6 の 24 時間窓判定に使う）。
+- `count_day` / `count_value`: K7（日次リクエスト上限）用のカウンタ
+  （UTC 日付キー、`post_usefulness_criteria` 同様この日を跨いだらリセット）。
+- `updated_at`: ISO8601 文字列。
+
 ---
 
 ## 6. Architecture
+
+投稿の摂取経路は 3 本ある: (1) RSS フィードの自動巡回（`src/lib/pipeline/ingest.ts`）、
+(2) `/admin` からの手動 URL 投入（`src/lib/pipeline/submit-url.ts`）、
+(3) sitemap 差分による発見・本文取得（`src/lib/pipeline/discovery-ingest.ts`、GitHub Actions
+の日次実行）。(1)(2) は §6.1 の収集トリガー（Vercel Cron・Server Action）を経由するが、
+(3) は Vercel Cron を増やさず GitHub Actions で独立して動く（§6.3 を参照）。
 
 - **2-lane design**:
   - SNS トレンド速報レーン: `src/components/feed/feed-lane-trend.tsx`, `src/components/feed/sns-embed.tsx`
   - ブログ定番レーン: `src/components/feed/feed-lane-classic.tsx`, `src/components/feed/feed-card.tsx`
 - **Collection pipeline**:
   - `src/lib/sources/registry.ts` -> 各アダプタ (`src/lib/sources/hatena-bookmark.ts`, `src/lib/sources/google-news.ts`, `src/lib/sources/note.ts`, `src/lib/sources/ameblo.ts`) -> RSS フェッチャー (`src/lib/sources/base/rss-fetcher.ts`, `src/lib/sources/base/feed-parser.ts`)
+  - discovery 経路（RSS が無いセクション向け）: `src/lib/sources/sitemap-discovery.ts` -> `src/lib/sources/access-discipline.ts` -> `src/lib/sources/article-text.ts` -> `src/lib/pipeline/discovery-ingest.ts`（§6.3）
 - **oEmbed fallback**:
   - `src/lib/embed/oembed.ts` 及び `src/lib/embed/providers.ts` による堅牢な埋め込み取得と障害時フォールバック。
 - **Pipeline modules（実処理の単一実装）**:
@@ -197,6 +302,58 @@ Next.js 16 (App Router), React 19, TypeScript strict, Tailwind CSS v4, Drizzle O
 LLM キュレーションまたは pending 保存を行う。原文テキスト不在時の挙動と出典クレジットの
 解決規則は §10-4 に定義する。対象トピックの選定基準（商用排除・当事者の体験談限定）は
 §9 の編集方針に従う。
+
+#### sitemap 差分発見・本文取得経路（discovery、§6.1 のトリガー外・GitHub Actions）
+
+RSS フィードが構造的に存在しないセクション（第1対象: `mwed.jp` の体験談セクション、
+`sitemap_stories.xml`）を対象に、sitemap の差分から新規記事を発見し本文を取得して
+判定する。エバーグリーン経路（`og:description` のみを読む）と異なり、この経路は
+「判定に足るだけの本文」を実際に取得する（§10-4・§10-5）。
+
+- **発見（`src/lib/sources/sitemap-discovery.ts` の `discoverNewUrls()`）**:
+  sitemap（`fast-xml-parser` で新規依存なしにパース）を読み、`discovery_seen`
+  （§5）にある既知 URL 集合に無い URL を「新規」として `discovery_seen` に
+  `pending` で記録する。**正しさの根拠は既知 URL 集合であり、`lastmod` では
+  ない。** `lastmod` は「どの子 sitemap を読むか」を絞る最適化としてのみ使い、
+  取りこぼしても次回の全件走査で回収される。1回の差分件数が
+  `LASTMOD_DIFF_ALERT_THRESHOLD`（`src/lib/constants.ts`）を超えたら、その
+  ランは `lastmod` を信用せず全件を再走査する（`discovery_run.outcome` が
+  `"completed_lastmod_distrusted"` になる）。初回実行はその媒体の URL 全件を
+  `pending` として記録するのみで本文取得は行わない（seeding。
+  `discovery_run.outcome` が `"seeded"`）。
+- **本文取得と判定（`src/lib/pipeline/discovery-ingest.ts` の
+  `ingestDiscoveredUrls()`）**: `discovery_seen` の `pending` URL を、
+  `src/lib/sources/access-discipline.ts` の `disciplinedFetch()`（§10-6）
+  経由で 1 件ずつ取得する。取得した HTML から `src/lib/sources/article-text.ts`
+  の `extractHtmlTitle()` で元タイトルを、`extractVisibleText()` +
+  `selectJudgmentSlice()`（先頭 1,200 字をスキップした後続 1,500 字）で
+  判定スライスを得る。判定スライスが `hasSufficientEvidence()`（文字数閾値
+  `MIN_EVIDENCE_INPUT_CHARS`）未満、または `<title>` が取得できない場合は
+  LLM を呼ばずに `pending` 保存（または `skipped`）とする。閾値を満たせば
+  `curateSingle()` に判定スライスを渡し、`evidenceSufficient: true` で
+  返った場合のみ `published` として `post_rationales`（§5）を含めて保存する。
+  **`posts.original_excerpt` には常に `null` を保存し、抽出した本文は
+  いかなるカラムにも永続化しない**（§10-5。DB への書き込みは
+  `upsertPosts()` に渡す直前のオブジェクトで `originalExcerpt: null` を
+  明示している）。`sourceId` は既存のエバーグリーン経路と同じ
+  `EVERGREEN_SOURCE_ID`（`"evergreen"`）を共有する。
+  ランは 1 回の実行時間予算（`DISCOVERY_INGEST_TIME_BUDGET_MS`、既定 15分）を
+  超えたら残りを次回ランに委ねる。kill gate 発火（§10-6）または
+  `Retry-After` 指定を受けたホストは、そのランの残り URL の処理を即座に
+  中断する（継続は無意味かつ無礼であるため）。
+- **実行基盤**: GitHub Actions（`.github/workflows/discovery.yml`）が
+  UTC 18:00（JST 3:00）に日次実行する。`timeout-minutes: 20` と
+  `concurrency: { group: discovery, cancel-in-progress: false }` により、
+  1ジョブの上限時間と二重実行の防止を両立する。薄い CLI ラッパーは
+  `scripts/run-discovery.mjs`（対象ホストごとの起点 sitemap は同スクリプト内の
+  `SITEMAPS_BY_HOST` に定義する）。**Vercel Cron は増やさず**、`/api/ingest`
+  への相乗りもしない（§6.1 の認可付き単一エントリに条件分岐を生やさない）。
+  cron の遅延・欠落・重複は前提とし（Vercel も GitHub Actions も
+  best-effort）、既知 URL 集合ベースの設計により取りこぼしても壊れない。
+  GitHub Actions の scheduled workflow は 60 日 inactivity で自動停止する
+  ため、`scripts/check-discovery-freshness.mjs`（`.github/workflows/weekly-monitor.yml`
+  経由で週次実行）が `discovery_run` の最終実行時刻を監視する。
+- **アクセス規律・kill gate**: §10-6 を参照。
 
 ### §6.2 管理操作の認可モデル（Basic 認証・多層防御）
 
@@ -477,19 +634,122 @@ false（0点）より上」の**楽観的な中位**に意図的に置いてお�
 それと異なる法的リスクを負う。順序として使うことは編集行為だが、点数その
 ものの公表は評価行為であり、本プロジェクトのスコープ外とする。
 
+### §9.9 表示可否条件（`RATIONALE_DISPLAY_PHASE` による2段階移行）
+
+`src/lib/db/query.ts` の `getFeedCards()` は、投稿を公開面に出す条件を
+`RATIONALE_DISPLAY_PHASE`（`src/lib/constants.ts`、既定 `"phase1"`）で
+2段階に切り替える。これは要約前提（`aiTitle`/`aiSummary`）から判定根拠
+前提（`post_rationales`）への移行期のためのサーバ側1本のスイッチである。
+
+- **phase1（既定）**: `(posts.ai_title IS NOT NULL AND posts.ai_summary IS NOT NULL) OR post_rationales.post_id IS NOT NULL`。
+  旧方式（`aiTitle`/`aiSummary` が揃っている投稿）と新方式（`post_rationales`
+  行が存在する投稿）のいずれかを満たせば表示する。**§10-3 の転換より前に
+  作られた既存記事を暗転させないための移行的条件**であり、`aiTitle` の
+  生成自体は §10-3 の転換により全経路で停止済みのため、phase1 下で新規に
+  この OR の左辺（`aiTitle IS NOT NULL`）を満たす投稿が今後生まれることはない。
+- **phase2**: `post_rationales.post_id IS NOT NULL` のみ。バックフィル完了後に
+  切り替える、判定根拠のみを表示条件とする最終形。
+- 描画は判定根拠（`topicAnchor`/`rationaleText`）を優先し、無ければ
+  `aiSummary` にフォールバックする（`src/components/feed/feed-card.tsx`）。
+- 両フェーズとも `posts.status = "published"` が前提条件であり、
+  `evidenceSufficient=false`（LLM の棄権）の投稿は `post_rationales` 行を
+  持たない・`status` が `"pending"` のまま留まるため、いずれのフェーズでも
+  表示されない（§10-4 の不変条件と整合する）。
+
 ---
 
 ## 10. 法務制約 (Legal Constraints)
 
+本章は本プロジェクトの唯一の法務仕様である。改訂履歴: 当初 AI 要約を出力する
+設計だったため §10-3/§10-4 は「要約の表現制限」を前提に書かれていた。判定根拠
+（トピックアンカー＋根拠文）への転換（`shared_plan/06-rationale-and-scraping.md`）
+に伴い、§10-3 を「出力は記事の性質についての言明であり内容の配達ではない」に、
+§10-4 を摂取経路に依存しない一般形に、それぞれ書き換えた。§10-5・§10-6 は
+本文取得による discovery 経路（§6.3）の追加に伴う新設項目である。
+
 1. **元ソースへの導線が最優先 CTA**: すべてのカードにおいて、元投稿・記事へのリンク（または公式埋め込み）を明確なメインアクションとして配置する。
-2. **著作者名の必須クレジット**: 引用（著作権法第32条）の要件を満たすため、カード上に著者名・情報源名を必ず表示する。
-3. **要約の表現制限**: AI による要約は原文のクリエイティブな表現（言い回し）をそのまま再現せず、客観的な事実や要点の抽出に留める（翻案権・複製権への配慮）。これらは `src/lib/llm/prompts.ts` 内のプロンプトおよび UI 表示において厳格に担保される。
-4. **原文テキストが存在しない場合は AI 要約を生成しない（経路独立の不変条件）**: すべての摂取経路において、LLM キュレーション（`curateSingle`）を呼び出す前に「要約対象となる原文テキストが存在するか」を判定する。「原文テキスト」の定義は経路ごとに異なり、新たな摂取経路を追加する際は必ず本項に定義を追記する。
+2. **著作者名の必須クレジット**: 引用（著作権法第32条）の要件を満たすため、カード上に著者名・情報源名を必ず表示する。`sourceName` は常時表示し、`author` は非 null の場合に表示する。
+3. **出力は記事の性質についての言明であり、内容の配達ではない**（ゼロクリック化の回避）:
+   - **タイトルは `originalTitle`（元記事タイトル）の逐語表示**。AI によるタイトルの生成・書き換えは行わない（`src/components/feed/feed-card.tsx` は `card.originalTitle` をそのまま表示する）。他人の記事タイトルを AI が書き換えて表示する行為は同一性保持権（著作権法第20条、非営利免除の無い人格権）への配慮上、本システムで最も改変に近い操作になるため。`aiTitle` カラムは `posts` に残っているが、`ALTER TABLE` 不可の制約上休眠カラムとして残しているだけで、いずれの摂取経路（RSS 自動巡回・`/admin` 手動投入・discovery）も `markCurated()` 呼び出し時に `aiTitle` を渡さず、値は常に null のままである。
+   - **判定根拠文（`rationaleText`、`post_rationales.rationale_text`）は 60〜90字**とし、記事固有の具体数値（半角・全角数字）を含めてはならない。`src/lib/llm/schemas.ts` の `CurationItemSchema` が zod の `refine` で `/[0-9０-９]/` を機械的に拒否する（プロンプト指示だけに依拠しない）。
+   - **トピックアンカー（`topicAnchor`、`post_rationales.topic_anchor`）は 40字以内**とし、**トピックのアンカーであって結論のアンカーであってはならない**（可: 「持ち込み料の交渉について書いている」／不可: 「持ち込み料〇万円が交渉で免除された」のような結論の開示）。この制約はプロンプト（`src/lib/llm/prompts.ts` の `RATIONALE_RULES`）で指示するのみで、文字数以外は機械的な検証を持たない。
+   - **判定テスト**: 読者がクリックせずに情報要求を満たせる出力は、原文の代替物になっている。カードあたり事実は最大1つ、否定的評価（`promotional=true` 等）は公開画面に一切出さない（§9.8 のスコア非公開と一貫させる）。
+4. **判定に足る原文テキストが存在しない場合は LLM 判定結果を公開しない（経路非依存の不変条件）**: すべての摂取経路において、LLM キュレーション（`curateSingle`）を呼び出す前に「判定対象となる原文テキストが存在するか」を判定する。「原文テキスト」の定義は経路ごとに異なり、新たな摂取経路を追加する際は必ず本項に定義を追記する。
    - **SNS 手動投入経路**（`src/lib/pipeline/submit-url.ts` の `runSubmitUrl`）: oEmbed が返すキャプション（`embed.title`）と、運営が投稿時に添える補足メモ（`note`、空白のみは「補足なし」として扱う）の 2 つのみを指す。
-   - **エバーグリーン経路**（`src/lib/pipeline/evergreen.ts` の `curateEvergreenUrl`）: OGP メタデータの `og:description` / `<meta name="description">`（`meta.description`）のみを指す。`<title>` / `og:title` は表示ラベルであり要約の材料にしない。本文 DOM は一切読まない（`src/lib/sources/ogp.ts` は meta タグと JSON-LD のみを走査する。`tests/ogp.test.ts` がこの不変条件を固定する）。
+   - **エバーグリーン経路**（`src/lib/pipeline/evergreen.ts` の `curateEvergreenUrl`）: OGP メタデータの `og:description` / `<meta name="description">`（`meta.description`）のみを指す。`<title>` / `og:title` は表示ラベルであり判定の材料にしない。本文 DOM は一切読まない（`src/lib/sources/ogp.ts` は meta タグと JSON-LD のみを走査する。`tests/ogp.test.ts` がこの不変条件を固定する）。
+   - **discovery 経路**（`src/lib/pipeline/discovery-ingest.ts` の `ingestDiscoveredUrls`）: 取得した記事 HTML から `src/lib/sources/article-text.ts` の `extractVisibleText()` + `selectJudgmentSlice()` で抽出した**判定スライス**（先頭 1,200 字をスキップした後続 1,500 字）のみを指す。§10-5 の禁止事項と対になる規律であり、この判定スライスは LLM 入力としてのみ使い DB には一切保存しない。
    - Instagram のキーなし oEmbed エンドポイント（`graph.facebook.com/.../instagram_oembed`）はキャプション本文を一切返さない（`version` / `provider_name` / `provider_url` / `type` / `width` / `html` のみで `title` が欠落する。2026-08-22 の実リクエストで確認済み）。これに対し YouTube の oEmbed は `title` を返す。
-   - SNS 経路で原文テキストが両方とも存在しない場合、`runSubmitUrl` は `curateSingle` を一切呼ばず、`status: "pending"` のまま投稿を保存する（`aiTitle` / `aiSummary` は null のまま）。取得済みの embed（`embedProvider` / `embedHtml` / `embedFetchedAt`）と `url` は保存し、再取得コストを避ける。呼び出し元には安定コード `"needs_source_text"` を返す。
+   - SNS 経路で原文テキストが両方とも存在しない場合、`runSubmitUrl` は `curateSingle` を一切呼ばず、`status: "pending"` のまま投稿を保存する（`aiSummary` は null のまま）。取得済みの embed（`embedProvider` / `embedHtml` / `embedFetchedAt`）と `url` は保存し、再取得コストを避ける。呼び出し元には安定コード `"needs_source_text"` を返す。
    - エバーグリーン経路で原文テキストが存在しない場合も同様に、`curateEvergreenUrl` は `curateSingle` を一切呼ばず、取得済みのメタデータ（タイトル・著者・サムネイル・公開日）と `url` を `status: "pending"` で保存する。呼び出し元には安定コード `"needs_source_text"` を返す。LLM 失敗時のフォールバック要約も原文テキスト（excerpt）のみから生成し、title へのフォールバックは行わない。
-   - `aiTitle` / `aiSummary` が null の投稿は `src/lib/db/query.ts` の `getFeedCards` が除外するため、運営が補足を添えて再投入するまでフィードには表示されない（意図した挙動。経路共通）。
-   - 原文テキストが存在する場合は、従来通り `curateSingle` によるキュレーションを行う。
-   - **出典クレジット（第 2 項）の解決規則（エバーグリーン経路）**: 出典名は「運営の明示指定（CLI の `--source-name`、前後空白は trim）→ `og:site_name` → URL ホスト名（`www.` を除去した実在ドメイン）」の順で解決する。いずれも解決できない場合、架空のソース名を捏造せずに保存を拒否する（安定コード `"no_source_name"`）。サイト名を示さない固定文字列へのフォールバック生成は禁止。
+   - discovery 経路で判定スライスが `hasSufficientEvidence()`（`MIN_EVIDENCE_INPUT_CHARS` 文字未満）を満たさない場合、または `<title>` が取得できない場合は、`curateSingle` を呼ばず `pending` 保存（`<title>` 不在時は保存すらせず `skipped`）とする。
+   - **LLM 自身による棄権（`evidenceSufficient: false`）でも公開しない。** 判定対象の原文テキストが存在していても、LLM が判定に足る情報が無いと判断した場合は `evidenceSufficient: false` を返し、呼び出し元は `status: "pending"` で保存する（`post_rationales` 行は作らない）。「原文テキストの有無」というゲート単独ではなく、LLM の判定不能宣言も等しく非公開理由になる（`src/lib/llm/schemas.ts` の `CurationItemSchema.evidenceSufficient`）。
+   - 公開の可否は最終的に §9.9 の表示条件（`RATIONALE_DISPLAY_PHASE`）に従う。`status: "pending"` の投稿と `post_rationales` 行が無い投稿はいずれのフェーズでも表示されない。
+   - 原文テキストが存在し、かつ LLM が `evidenceSufficient: true` を返した場合は、従来通り `curateSingle` によるキュレーション結果を `published` として保存する。
+   - **出典クレジット（第 2 項）の解決規則（エバーグリーン経路）**: 出典名は「運営の明示指定（CLI の `--source-name`、前後空白は trim）→ `og:site_name` → URL ホスト名（`www.` を除去した実在ドメイン）」の順で解決する。いずれも解決できない場合、架空のソース名を捏造せずに保存を拒否する（安定コード `"no_source_name"`）。サイト名を示さない固定文字列へのフォールバック生成は禁止。discovery 経路の `sourceName` は `registrableDomain(url)`（解決できなければ対象ホスト名）で決定する（`src/lib/pipeline/discovery-ingest.ts`）。
+5. **抽出本文の永続化禁止**: discovery 経路で取得した本文（`extractVisibleText()` / `selectJudgmentSlice()` の出力）は LLM 判定の入力としてのみ使用し、**`posts` を含むいかなるカラムにも永続化しない**。`src/lib/pipeline/discovery-ingest.ts` の `upsertPostRow()` は `originalExcerpt: null` を常に渡し、discovery 経路由来の投稿の `originalExcerpt` は常に `null` になる。理由は3つ: (a) §10-3/§10-4 の「取得・判定は情報解析、公開は表現を含まない言明」という二層構造を維持できる、(b) 「他人の著作物のデータベース」を新たに作らない、(c) 本文が DB に存在すると将来誰かがそれを要約の材料に使う drift を構造的に防ぐ（無ければ使えない）。エバーグリーン経路・SNS 経路の `originalExcerpt`（`og:description` やキャプション等、配信者自身が公開用に提供したメタデータ）とは性質が異なるため区別すること——discovery 経路の抽出本文は配信者が要約用に提供したものではなく、記事本文からの機械的な抽出（複製）である。
+6. **アクセス規律（discovery 経路の本文取得のみに適用。実装 `src/lib/sources/access-discipline.ts`）**:
+   - **robots.txt の遵守**: 取得前に必ず確認し、`isAllowed()` が false を返す URL は取得しない（`blocked_robots` として `discovery_seen` を `skipped` にする）。取得結果は 24 時間以内でキャッシュする（RFC 9309 の推奨）。
+   - **`Crawl-delay` を下限として尊重**: robots.txt に `Crawl-delay` の指定があれば、ホストあたり最小間隔（既定 `MIN_HOST_INTERVAL_MS` = 5秒）とその値（秒）×1000msの大きい方を実際の間隔とする。
+   - **ホスト内は逐次・ホスト間は並列**: 同一ホストへの直前リクエストからの経過時間を記録し、間隔未満なら待機する。
+   - **日次ハードキャップ**: ホストあたり `DAILY_REQUEST_CAP_PER_HOST`（既定50件）。間隔の遵守だけでは総量が青天井になりうるため、独立した上限として持つ。
+   - **条件付き GET**: `If-Modified-Since` / `If-None-Match` を送り、304 を `not_modified` として扱う。
+   - **連絡先入り User-Agent**: `CRAWLER_USER_AGENT`（`src/lib/constants.ts`。既定 `WeddingTrendBot/1.0 (+https://github.com/menonaki2/wedding-trend)`）を常に送信する。**UA 偽装は行わない**（実装上、他の UA 文字列に差し替える経路が存在しない）。
+   - **取得サイズ上限**: `MAX_BODY_BYTES`（既定 512KB）。`Content-Length` またはボディの実バイト長で判定し、超過時は取得を打ち切る（`too_large`。kill gate ではなく、そのホストではなく個別 URL の事情として扱う）。
+   - **kill gate**: 1つでも観測されたら該当ホストの discovery を即座に停止する。回復には人間の再判断（`host_gate_state` 行の手動解除）を要する。実装済みのゲートのみを示す:
+
+     | #   | 観測事象                                                           | 実装上の扱い                                                                                                         |
+     | --- | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
+     | K1  | robots.txt の内容ハッシュが直近取得値から変化                      | `host_gate_state.stateKind = "stopped"`。人間の再確認を待つ（恒久停止ではない）                                      |
+     | K3  | 401 / 451 応答                                                     | `stateKind = "permanent"`。即恒久停止、自動復帰なし                                                                  |
+     | K4  | 記事取得（`purpose: "article"`）で 403                             | 初回は `stateKind = "cooloff"`（24時間）。連続2回目（`k4Strikes >= 2`）で `permanent`                                |
+     | K5  | robots.txt / sitemap 取得（`purpose` が `robots`/`sitemap`）で 403 | `stateKind = "permanent"`。1回で即恒久停止（配信の意思そのものへの拒否と評価するため）                               |
+     | K6  | 429 応答                                                           | `Retry-After` を厳密に守って1回だけ再開（`retry_after` verdict）。24時間以内に2回目の429で `stateKind = "permanent"` |
+     | K7  | ホストあたり日次リクエスト数が `DAILY_REQUEST_CAP_PER_HOST` 超過   | `stateKind` は変更せず、その日の残り時間は `kill_gate` verdict で拒否し続ける（UTC日次でリセット）                   |
+     | K9  | 根拠文が §10-3 の数値禁止制約に違反                                | `src/lib/llm/schemas.ts` の zod `refine` により LLM 応答のバリデーション自体が失敗する（保存前に機械的に拒否）       |
+     | K2  | 利用規約テキストが変化                                             | `checkTermsOfServiceChange()`（`src/lib/sources/access-discipline.ts`）。詳細は §10-7 K2                             |
+
+     **403 を「1回で恒久停止」にしない理由（K4 のみ）**: GitHub Actions の
+     Azure IP では WAF 起因の 403 が定常的に起きうるため、1回で恒久停止する
+     ゲートは早期に「毎回止まる」状態になり形骸化する。K5（robots/sitemap
+     への 403）はこの理由が当てはまらない——媒体側が明示的にアクセス制御用
+     エンドポイントへのアクセスを拒否している以上、配信意思そのものへの
+     拒否とみなし1回で恒久停止する。
+     **未実装のゲート**: K8（採用率低下によるフィルタ/抽出破損の検知）・
+     K10（判定根拠と元記事の内容不一致の自動検知）は、本仕様時点でコードと
+     して実装されていない。
+
+7. **著作者クレジット要件の実効性の限界（2026-08-25 実地調査に基づく記録）**: 第2項は「著作者クレジットを必ず表示する（`author` が非 null の場合）」を要件とする。実装（§10-4 の「クレジットは構造化メタデータのみから取得し、解決できなければ捏造せず非表示にする」方針）は仕様どおり正しく動作している。**しかし現在の唯一の allowlist 対象ホスト `www.mwed.jp` では、JSON-LD / meta のいずれにも `author` が構造上一度も存在しない**（`/story/cases/{id}/` 系4サンプルすべてで実地確認済み）。結果として、このホスト由来の投稿では著作者クレジットが一度も表示されない。**要件が達成しようとしていた目的（著作者への出所明示）はこのホストに関しては達成されていない。** ラベルの表示や代替表現で本項を「満たした」ことにはしない——誰が書いたかを示していない以上、それは著作者クレジットではない。この限界は §13-1 のとおりオーナーが認識したうえで allowlist 継続を判断した事実として記録する。
+8. **対象コーパスが UGC であることに由来する留意事項**: `www.mwed.jp` の discovery 対象パス（`/story/cases/{id}/`・`/hall/{hallId}/rev/story/{id}/`）は、運営会社による編集記事ではなく**一般利用者（結婚式を挙げた本人）の投稿**である（第一人称のカップル直筆メッセージ、「口コミを投稿する」導線、投稿日表示を実地確認済み）。著作権者は運営会社ではなく個々の投稿者本人であり、これに伴い次の点に留意する。
+   - **個人情報保護法の観点が生じる。** discovery 経路は本文を保存しない（§10-5）が、`originalTitle` と `meta.description` 由来の `originalExcerpt` は保存対象であり、これらに個人を特定しうる記述（実名・ニックネーム・SNS ハンドル等）が含まれる可能性を排除できない。**「本文を保存していない」ことは「個人情報を保有していない」ことを意味しない。**
+   - **掲載停止依頼の導線は投稿者本人には構造的に届かない。** §5-M5 の連絡先（`CRAWLER_USER_AGENT` に含む GitHub リポジトリ URL）は運営会社および技術的な監視主体に向けたものであり、投稿者本人が「自分の投稿が本サイトに転載されていること」を知る経路は存在しない。
+9. **非営利であることの設計上の意味（§13-1 のオーナー判断を前提とする）**: 対象ホストの利用規約第5条第10項・第12項は営利利用を要件とするため、**非営利である限りこれらの条項は発動しない**。一方、**第5条第11項（無断転載・無断利用の一般禁止）は営利を要件としない**。したがって「非営利だから触れない」という命題は成立しない。非営利という前提は**違反の成否そのものには効かず、違反が顕在化した場合の実害（財産的請求権の薄さ）にのみ効く**、という区別を維持する。
+   - **収益化（広告・アフィリエイト・有料化を含む一切のマネタイズ）は、本項を含む法務前提の全面再評価を必須とする。** 将来の実装者が本項の存在を知らないまま広告枠を追加する事態を避けるため、収益化に関わる変更を検討する前に必ず本節（§10-7〜§10-11）と §13-1 を読むこと。
+10. **discovery 中止トリガー（`www.mwed.jp` 固有）**: 以下のいずれかを満たした場合、当該ホストの discovery を停止する。
+    - robots.txt に記事パス（`articlePathPatterns`）の Disallow が追加された → **即時・自動停止**（K1 が既に機械的に検知する。§10-6）
+    - 運営から停止要求を受領した → **即時停止**。再開は運営からの明示的な許諾がある場合のみ
+    - 利用規約に、非会員・利用者一般（「本サービスの利用者」等、会員に限定しない主体）を名宛人とする新たな禁止条項が追加された → **停止して再評価**（K2 が変化を検知するが、判断は人間が行う。§10-7）
+    - ブロック（403/429 の継続）を検知した → **停止する**（K4/K5/K6 が既に機械的に検知する。§10-6）
+
+    **禁止事項**: ブロックされた場合に、User-Agent の変更・IP ローテーション等による回避を行ってはならない。回避行為は、蓋然性の低いリスク（不法行為・刑事）を現実化させる最短経路である。
+
+11. **新規ホストを `HOST_ALLOWLIST` に追加する際の入場基準**: 新規ホストの追加は以下を満たすことを原則とする。
+    1. 構造化メタデータ（JSON-LD / meta / `dc:creator`）から `author` が取得できること（§10 第2項を自動検証可能にするため）
+    2. 記事が運営または署名ライターによる編集記事であること（UGC 主体のホストではないこと）
+    3. robots.txt が対象記事パスを許可していること
+    4. 利用規約の適用範囲・定義条項・非会員（利用者一般）への言及の有無を、追加前に取得し記録すること
+    5. UGC セクションが同一ホスト内に併存する場合、対象記事パスの**ホワイトリスト**（ブラックリストではなく）で編集記事セクションのみを分離できること
+    6. RSS/Atom フィードが提供されていれば加点（必須ではない）
+
+    **`www.mwed.jp` は基準 1・2 を満たさない例外である。** これは§10-7・§10-8 に記録した限界を引き受けたうえでの継続であり、後続のホスト追加審査において基準1・2を緩める前例として扱ってはならない。
+
+---
+
+## 11. discovery アクセス規律の追加統制（2026-08-25 実装分）
+
+以下は §10-6 のアクセス規律に対する追加実装であり、plan 07 の Stage 0（M3・M4・M5）に対応する。
+
+1. **K2（規約変更検知）と allowlist の関係**: `source_policy.tosUrl` は `HOST_ALLOWLIST`（`src/lib/constants.ts` の各エントリの `tosUrl`）から解決する。**allowlist 側が真実の源（source of truth）であり、DB（`source_policy` テーブル）に格納された古い値は allowlist の値で上書きして解決する**（`src/lib/sources/access-discipline.ts`）。allowlist に未登録、または `tosUrl` が未設定のホストは `tosUrl: null` のまま維持され、K2 の対象にならない。
+   - **既知の許容トレードオフ（遅延）**: K2 の実行間隔は「1ホストあたり1日1回」であり、`source_policy.checkedAt` 列を robots.txt チェック側と共有している。そのため **robots.txt の変化を検知した直後は、規約チェックが最大1日遅延しうる**。追加専用（append-only）のマイグレーション制約下では列を新設するだけで解決できず、テーブルを分離すると `tosHash` が再び休眠カラム化するリスクを招くため、この遅延は仕様上許容する。
+2. **記事パスのホワイトリスト（`HOST_ALLOWLIST.articlePathPatterns`）**: discovery 対象の URL パスは `src/lib/constants.ts` の `AllowlistedHost.articlePathPatterns` で定義し、**取得前に**2段階で強制する——sitemap からの URL 収集（seed）段階と、本文取得直前の段階。口コミ投稿ページ（`/hall/{hallId}/rev/{commentId}/` 等、記事とはパス構造が異なる投稿単位のページ）はこのパターンに一致しないため、構造的に discovery 対象から除外される。
+3. **日次公開上限とホスト別シェア上限**: `DAILY_PUBLISH_CAP = 10`・`HOST_DAILY_SHARE_MAX = 0.5`（`src/lib/constants.ts`。plan 07 §9 Stage 2 の日次上限 ≤10 に対応）。当日の公開総数が `DAILY_PUBLISH_CAP` に達している、またはあるホストの当日公開数が `Math.max(1, Math.floor(DAILY_PUBLISH_CAP × HOST_DAILY_SHARE_MAX))` に達している場合、以後そのホストの新規公開を打ち切る。SNS 手動投入・エバーグリーン・discovery の全経路（`src/lib/pipeline/submit-url.ts`・`src/lib/pipeline/evergreen.ts`・`src/lib/pipeline/ingest.ts`・`src/lib/pipeline/discovery-ingest.ts`）で共通の判定関数を用いる。
+4. **`RetractionReason` と撤回 CLI**: `RetractionReason`（`src/lib/types.ts`）に `takedown_request` を追加した。4つの客観的トリガ（`source_gone` / `robots_disallowed` / `tos_changed` / `body_changed`）と異なり、**`takedown_request` のみが人間の判断による撤回**であり、自動検知パイプラインからは設定されない。撤回は `pnpm retract`（`scripts/retract.mjs`）で行う——既定は dry-run（対象一覧の表示のみ、DB 変更なし）、接続先を明示し、`--reason` は必須（既定値なし）で人間に毎回明示させる。実際に撤回するには `--yes`（または `--execute`）を要する。
