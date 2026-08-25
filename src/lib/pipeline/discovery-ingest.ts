@@ -86,6 +86,15 @@ export interface DiscoveryIngestStats {
   published: number;
   /** Q1 決定的ゲート不合格（LLM を呼ばず終端棄却）。 */
   extractionInsufficientDropped: number;
+  /**
+   * Q1 の条件別棄却内訳。`extractionInsufficientDropped` は複数条件が同時に
+   * 不合格になった1件を1件として数えるため、これらの合計は
+   * `extractionInsufficientDropped` 以上になりうる。
+   */
+  extractionFailedByTextLength: number;
+  extractionFailedByLinkDensity: number;
+  extractionFailedByParagraphCount: number;
+  extractionFailedByBoilerplate: number;
   /** M1 タイトルフィルタで終端棄却。 */
   titleFilterDropped: number;
   /** M1 topicAnchor 接地失敗で終端棄却。 */
@@ -136,6 +145,10 @@ function emptyStats(): DiscoveryIngestStats {
     processed: 0,
     published: 0,
     extractionInsufficientDropped: 0,
+    extractionFailedByTextLength: 0,
+    extractionFailedByLinkDensity: 0,
+    extractionFailedByParagraphCount: 0,
+    extractionFailedByBoilerplate: 0,
     titleFilterDropped: 0,
     anchorUngroundedDropped: 0,
     rateCapped: 0,
@@ -566,6 +579,29 @@ async function processUrl(
   const signals = computeEvidenceSignals(html);
   const evidenceGate = computeEvidenceSufficiency(signals);
   if (!evidenceGate.ok) {
+    console.warn(
+      `[discovery-ingest] extraction_insufficient for ${url}: failedConditions=${JSON.stringify(
+        evidenceGate.failedConditions,
+      )} textLength=${signals.textLength} linkDensity=${signals.linkDensity.toFixed(
+        3,
+      )} paragraphCount=${signals.paragraphCount} boilerplateLineRatio=${signals.boilerplateLineRatio.toFixed(3)}`,
+    );
+    for (const condition of evidenceGate.failedConditions) {
+      switch (condition) {
+        case "text_length":
+          stats.extractionFailedByTextLength++;
+          break;
+        case "link_density":
+          stats.extractionFailedByLinkDensity++;
+          break;
+        case "paragraph_count":
+          stats.extractionFailedByParagraphCount++;
+          break;
+        case "boilerplate_line_ratio":
+          stats.extractionFailedByBoilerplate++;
+          break;
+      }
+    }
     if (retryCtx) await completeRetry(retryCtx.urlHash);
     await dropPost(host, url, title, "extraction_insufficient", now);
     await setDiscoverySeenStatus(host, url, "fetched");
@@ -687,55 +723,82 @@ export async function ingestDiscoveredUrls(
   const startedAtMs = Date.now();
   const now = new Date().toISOString();
 
-  // §7: 非終端のまま滞留した post を定常収束させる。
-  stats.staleReaped = await reapStaleNonTerminal(now, STALE_NON_TERMINAL_HOURS);
+  // plan 07 §6-Q2: kill gate 中断・予期しない例外を含むどの経路でも
+  // 「そこまでに処理した分」の日次テレメトリが正確に1回だけ記録されるよう、
+  // per-host 処理の本体全体を try/finally で包む。early return（kill gate /
+  // Retry-After 中断）で関数を抜ける場合も finally は必ず実行される。
+  // recordHostMetrics() は内部で例外を捕捉するため finally 内で新たな例外を
+  // 誘発しない。kill gate 以外の例外はここでは捕捉せず、テレメトリ記録後に
+  // そのまま呼び出し元へ再送出する。
+  try {
+    // §7: 非終端のまま滞留した post を定常収束させる。
+    stats.staleReaped = await reapStaleNonTerminal(now, STALE_NON_TERMINAL_HOURS);
 
-  // §7: discovery レーンの TTL 超過分のキュー削除。
-  // plan 07 D2 是正: `expireRetries` は完全な `RetryQueueEntry[]` を返す契約に
-  // なったため、discovery レーンのエントリはここで直接
-  // `retry_exhausted` として終端棄却する（旧実装は urlHash しか受け取れず、
-  // 行がここで削除された時点で対応する post を二度と解決できなかった —
-  // 結果として `stats.retryExhausted` が常に 0 になっていた）。
-  // plan 07 D5: rss/evergreen/submit レーンには一切触れない（`lanes` 指定）。
-  // それらは `ingest.ts` 側の消費者が独立したトリガ（RSS cron）で処理する。
-  // `lanes: ["discovery"]` を渡し、rss/evergreen/submit レーンの期限切れ行には
-  // 触れない（`ingest.ts` 側の消費者がそれらを担当する。plan 07 D5）。
-  const expired = await expireRetries(now, ["discovery"]);
-  stats.retryExpiredRaw = expired.length;
-  for (const entry of expired) {
-    stats.processed++;
-    await dropPost(entry.host, entry.url, null, "retry_exhausted", now);
-    await setDiscoverySeenStatus(entry.host, entry.url, "skipped");
-    stats.retryExhausted++;
-  }
+    // §7: discovery レーンの TTL 超過分のキュー削除。
+    // plan 07 D2 是正: `expireRetries` は完全な `RetryQueueEntry[]` を返す契約に
+    // なったため、discovery レーンのエントリはここで直接
+    // `retry_exhausted` として終端棄却する（旧実装は urlHash しか受け取れず、
+    // 行がここで削除された時点で対応する post を二度と解決できなかった —
+    // 結果として `stats.retryExhausted` が常に 0 になっていた）。
+    // plan 07 D5: rss/evergreen/submit レーンには一切触れない（`lanes` 指定）。
+    // それらは `ingest.ts` 側の消費者が独立したトリガ（RSS cron）で処理する。
+    // `lanes: ["discovery"]` を渡し、rss/evergreen/submit レーンの期限切れ行には
+    // 触れない（`ingest.ts` 側の消費者がそれらを担当する。plan 07 D5）。
+    const expired = await expireRetries(now, ["discovery"]);
+    stats.retryExpiredRaw = expired.length;
+    for (const entry of expired) {
+      stats.processed++;
+      await dropPost(entry.host, entry.url, null, "retry_exhausted", now);
+      await setDiscoverySeenStatus(entry.host, entry.url, "skipped");
+      stats.retryExhausted++;
+    }
 
-  if (Date.now() - startedAtMs < budgetMs) {
-    const due = await dueRetries(now, RETRY_PROCESS_LIMIT);
-    for (const entry of due) {
-      if (entry.lane !== "discovery" || entry.host !== host) continue;
+    if (Date.now() - startedAtMs < budgetMs) {
+      const due = await dueRetries(now, RETRY_PROCESS_LIMIT);
+      for (const entry of due) {
+        if (entry.lane !== "discovery" || entry.host !== host) continue;
+        if (Date.now() - startedAtMs >= budgetMs) {
+          stats.budgetExhausted = true;
+          break;
+        }
+
+        // TTL 超過分は上の `expireRetries` ループで既に終端化・削除済みのため、
+        // ここに来る時点で `entry.expiresAt <= now` は基本的に起こらない
+        // （安全側の防御として条件には残す）。ここでの主目的は最大試行数超過の判定。
+        if (entry.expiresAt <= now || entry.attempts >= RETRY_MAX_ATTEMPTS) {
+          // TTL 超過または最大試行超過 → 終端棄却（§7・contract: DropReason "retry_exhausted"）。
+          stats.processed++;
+          await dropPost(host, entry.url, null, "retry_exhausted", now);
+          await setDiscoverySeenStatus(host, entry.url, "skipped");
+          await completeRetry(entry.urlHash);
+          stats.retryExhausted++;
+          continue;
+        }
+
+        const outcome = await processUrl(host, entry.url, stats, now, {
+          urlHash: entry.urlHash,
+          attempts: entry.attempts,
+          firstQueuedAt: entry.firstQueuedAt,
+        });
+        if (outcome.abortedByKillGate) {
+          stats.abortedByKillGate = true;
+          return stats;
+        }
+        if (outcome.abortedByRetryAfter) {
+          stats.abortedByRetryAfter = true;
+          return stats;
+        }
+      }
+    }
+
+    const pendingUrls = await getDiscoveryUrlsByStatus(host, "pending");
+    for (const url of pendingUrls) {
       if (Date.now() - startedAtMs >= budgetMs) {
         stats.budgetExhausted = true;
         break;
       }
 
-      // TTL 超過分は上の `expireRetries` ループで既に終端化・削除済みのため、
-      // ここに来る時点で `entry.expiresAt <= now` は基本的に起こらない
-      // （安全側の防御として条件には残す）。ここでの主目的は最大試行数超過の判定。
-      if (entry.expiresAt <= now || entry.attempts >= RETRY_MAX_ATTEMPTS) {
-        // TTL 超過または最大試行超過 → 終端棄却（§7・contract: DropReason "retry_exhausted"）。
-        stats.processed++;
-        await dropPost(host, entry.url, null, "retry_exhausted", now);
-        await setDiscoverySeenStatus(host, entry.url, "skipped");
-        await completeRetry(entry.urlHash);
-        stats.retryExhausted++;
-        continue;
-      }
-
-      const outcome = await processUrl(host, entry.url, stats, now, {
-        urlHash: entry.urlHash,
-        attempts: entry.attempts,
-        firstQueuedAt: entry.firstQueuedAt,
-      });
+      const outcome = await processUrl(host, url, stats, now, null);
       if (outcome.abortedByKillGate) {
         stats.abortedByKillGate = true;
         return stats;
@@ -745,41 +808,21 @@ export async function ingestDiscoveredUrls(
         return stats;
       }
     }
+  } finally {
+    const day = jstDayKey(now);
+    const droppedTotal =
+      stats.extractionInsufficientDropped +
+      stats.titleFilterDropped +
+      stats.anchorUngroundedDropped +
+      stats.retryExhausted;
+    await recordHostMetrics(host, day, {
+      processed: stats.processed,
+      published: stats.published,
+      dropped: droppedTotal,
+      promotional: stats.titleFilterDropped,
+      authorPresent: 0,
+    });
   }
-
-  const pendingUrls = await getDiscoveryUrlsByStatus(host, "pending");
-  for (const url of pendingUrls) {
-    if (Date.now() - startedAtMs >= budgetMs) {
-      stats.budgetExhausted = true;
-      break;
-    }
-
-    const outcome = await processUrl(host, url, stats, now, null);
-    if (outcome.abortedByKillGate) {
-      stats.abortedByKillGate = true;
-      return stats;
-    }
-    if (outcome.abortedByRetryAfter) {
-      stats.abortedByRetryAfter = true;
-      return stats;
-    }
-  }
-
-  // Q2: yield 崩壊検知。当日分のテレメトリを記録してから、十分な日数の
-  // ベースラインがあれば乖離を判定する（小標本ノイズによる誤発火を避ける）。
-  const day = jstDayKey(now);
-  const droppedTotal =
-    stats.extractionInsufficientDropped +
-    stats.titleFilterDropped +
-    stats.anchorUngroundedDropped +
-    stats.retryExhausted;
-  await recordHostMetrics(host, day, {
-    processed: stats.processed,
-    published: stats.published,
-    dropped: droppedTotal,
-    promotional: stats.titleFilterDropped,
-    authorPresent: 0,
-  });
 
   const baseline = await getHostMetricsBaseline(host, YIELD_BASELINE_MIN_DAYS);
   if (baseline && baseline.days >= YIELD_BASELINE_MIN_DAYS && stats.processed > 0) {

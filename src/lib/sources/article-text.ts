@@ -16,8 +16,6 @@ import {
   MIN_PARAGRAPH_COUNT,
   MAX_BOILERPLATE_LINE_RATIO,
 } from "@/lib/constants";
-import type { GateResult } from "@/lib/publish/gate";
-
 // 閾値は定数の一元管理のため constants.ts にのみ定義し、ここで再公開する。
 export { MIN_EVIDENCE_INPUT_CHARS };
 
@@ -151,18 +149,45 @@ export function computeEvidenceSignals(html: string): EvidenceSignals {
 }
 
 /**
+ * Q1 の4条件のうち、不合格になった条件を指す識別子。棄却理由の事後観測
+ * （どの条件で・どの実測値で落ちたか）のために `computeEvidenceSufficiency()`
+ * の戻り値に含める。
+ */
+export type EvidenceFailedCondition =
+  | "text_length"
+  | "link_density"
+  | "paragraph_count"
+  | "boilerplate_line_ratio";
+
+/**
+ * `computeEvidenceSufficiency()` の戻り値。`GateResult`（`{ok:true}` /
+ * `{ok:false; reason}` の流儀）に合わせつつ、不合格時にどの条件が落ちたかを
+ * `failedConditions` にすべて含める（1つ目で打ち切らない）。
+ */
+export type EvidenceGateResult =
+  | { ok: true }
+  | { ok: false; reason: "extraction_insufficient"; failedConditions: EvidenceFailedCondition[] };
+
+/**
  * Q1: `evidenceSufficient` の決定的計算（plan 07 §6-Q1）。LLM の自己申告に
  * 依存せず、抽出シグナルのみから合否を判定する。`hasSufficientEvidence()` の
  * 実質的な後継。
+ *
+ * 不合格の場合、同時に不合格となったすべての条件を `failedConditions` に
+ * 含める（原因分析には全条件の状態が要るため、最初の不合格で打ち切らない）。
  */
-export function computeEvidenceSufficiency(signals: EvidenceSignals): GateResult {
-  const fail: GateResult = { ok: false, reason: "extraction_insufficient" };
+export function computeEvidenceSufficiency(signals: EvidenceSignals): EvidenceGateResult {
+  const failedConditions: EvidenceFailedCondition[] = [];
 
-  if (signals.textLength < MIN_EVIDENCE_INPUT_CHARS) return fail;
-  if (signals.linkDensity > MAX_LINK_DENSITY) return fail;
-  if (signals.paragraphCount < MIN_PARAGRAPH_COUNT) return fail;
-  if (signals.boilerplateLineRatio > MAX_BOILERPLATE_LINE_RATIO) return fail;
+  if (signals.textLength < MIN_EVIDENCE_INPUT_CHARS) failedConditions.push("text_length");
+  if (signals.linkDensity > MAX_LINK_DENSITY) failedConditions.push("link_density");
+  if (signals.paragraphCount < MIN_PARAGRAPH_COUNT) failedConditions.push("paragraph_count");
+  if (signals.boilerplateLineRatio > MAX_BOILERPLATE_LINE_RATIO)
+    failedConditions.push("boilerplate_line_ratio");
 
+  if (failedConditions.length > 0) {
+    return { ok: false, reason: "extraction_insufficient", failedConditions };
+  }
   return { ok: true };
 }
 

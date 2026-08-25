@@ -1,8 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { setupTestDb } from "./helpers/test-db";
 import { db } from "@/lib/db";
-import { postPublications, postRemovals, postRetryQueue } from "@/lib/db/schema";
+import {
+  discoveryHostMetrics,
+  postPublications,
+  postRemovals,
+  postRetryQueue,
+} from "@/lib/db/schema";
 import {
   countDiscoverySeenByStatus,
   countPublishedSince,
@@ -26,7 +31,11 @@ import {
 import { curateSingle } from "@/lib/llm/batch";
 import type { CurationResult } from "@/lib/llm/batch";
 import { __resetStateForTests, __setSleepForTests } from "@/lib/sources/access-discipline";
-import { DAILY_PUBLISH_CAP, HOST_DAILY_SHARE_MAX } from "@/lib/constants";
+import {
+  DAILY_PUBLISH_CAP,
+  DAILY_REQUEST_CAP_PER_HOST,
+  HOST_DAILY_SHARE_MAX,
+} from "@/lib/constants";
 
 vi.mock("@/lib/llm/batch", () => ({
   curateSingle: vi.fn(),
@@ -268,6 +277,12 @@ describe("ingestDiscoveredUrls", () => {
     expect(stats.published).toBe(0);
     // Q1: 決定的ゲート不合格時は LLM を一切呼ばない（自己申告の廃止）。
     expect(mockedCurate).not.toHaveBeenCalled();
+    // 条件別カウンタ: 本文が短いだけで段落数・リンク密度・定型行率は満たすため
+    // text_length のみが計上され、他の内訳は増えない。
+    expect(stats.extractionFailedByTextLength).toBe(1);
+    expect(stats.extractionFailedByLinkDensity).toBe(0);
+    expect(stats.extractionFailedByParagraphCount).toBe(0);
+    expect(stats.extractionFailedByBoilerplate).toBe(0);
 
     const post = (await getPostsByUrls([url])).get(url);
     expect(post?.status).toBe("rejected");
@@ -279,6 +294,34 @@ describe("ingestDiscoveredUrls", () => {
 
     const counts = await countDiscoverySeenByStatus(HOST);
     expect(counts.fetched).toBe(1);
+  });
+
+  it("Q1: div ベース（<p> タグなし）の実サイト構造は paragraph_count 条件で棄却され内訳カウンタに計上される", async () => {
+    // 本番（www.mwed.jp 初回 discovery）で processed=50/published=0 となった
+    // 事象の再現フィクスチャ。div ベースのページは既存の articleHtml() が
+    // 常に <p> を3つ含んでいたため、この失敗モードがテストで検知できなかった。
+    const url = `https://${HOST}/story/cases/div-based`;
+    await seedPending(HOST, url);
+    const divBody = "実際に結婚式を挙げた新婦が会場選びについて詳しく振り返った体験談です。".repeat(
+      20,
+    );
+    const divHtml = `<html><head><title>体験談タイトル</title></head><body><div class="content">${divBody}</div></body></html>`;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL) => {
+        const u = String(input);
+        if (u.endsWith("/robots.txt")) return resp({ status: 200, body: ALLOW_ALL_ROBOTS });
+        if (u === url) return resp({ status: 200, body: divHtml });
+        throw new Error(`unexpected fetch: ${u}`);
+      }),
+    );
+
+    const stats = await ingestDiscoveredUrls(HOST);
+
+    expect(stats.extractionInsufficientDropped).toBe(1);
+    expect(mockedCurate).not.toHaveBeenCalled();
+    expect(stats.extractionFailedByParagraphCount).toBe(1);
+    expect(stats.extractionFailedByTextLength).toBe(0);
   });
 
   it("M1: タイトルフィルタ不合格は title_filter で終端棄却する", async () => {
@@ -739,6 +782,160 @@ describe("ingestDiscoveredUrls", () => {
     const counts = await countDiscoverySeenByStatus(HOST);
     expect(counts.skipped).toBe(1);
     expect(counts.fetched).toBe(1);
+  });
+
+  describe("Q2: recordHostMetrics のテレメトリはどの終了経路でも正確に1回記録される", () => {
+    async function readHostMetricsRow(host: string, day: string) {
+      const rows = await db
+        .select()
+        .from(discoveryHostMetrics)
+        .where(and(eq(discoveryHostMetrics.host, host), eq(discoveryHostMetrics.day, day)));
+      return rows[0];
+    }
+
+    it("K7（日次リクエスト上限）で中断したとき、中断前に処理した件数が discovery_host_metrics に記録される（0でも満数でもない）", async () => {
+      const today = new Date().toISOString().slice(0, 10);
+      // K7 の閾値ちょうど手前まで既に消費させておく。robots.txt の取得自体も
+      // 日次カウントを1消費する（disciplinedFetch は robots 取得後にも
+      // capRecheck を行う）ため、1件目の URL 処理だけで robots+article の
+      // 2リクエスト分を消費する。よって「1件目は通り、2件目の直前で K7 に
+      // 到達する」状態を作るには CAP - 2 から開始する必要がある
+      // （本番の processed=50/50 中断の再現）。
+      await saveHostGateState({
+        host: HOST,
+        gateId: null,
+        stateKind: "none",
+        untilAt: null,
+        k4Strikes: 0,
+        last429At: null,
+        countDay: today,
+        countValue: DAILY_REQUEST_CAP_PER_HOST - 2,
+      });
+
+      const okUrl = `https://${HOST}/story/cases/before-k7`;
+      const blockedUrl = `https://${HOST}/story/cases/after-k7`;
+      await seedDiscoverySeen(HOST, [{ url: okUrl }, { url: blockedUrl }]);
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: string | URL) => {
+          const u = String(input);
+          if (u.endsWith("/robots.txt")) return resp({ status: 200, body: ALLOW_ALL_ROBOTS });
+          if (u === okUrl) return resp({ status: 200, body: articleHtml("上限直前の記事") });
+          throw new Error(`unexpected fetch: ${u} (K7 must block network I/O for this URL)`);
+        }),
+      );
+      mockedCurate.mockResolvedValue(sufficientCuration());
+
+      const stats = await ingestDiscoveredUrls(HOST);
+
+      expect(stats.abortedByKillGate).toBe(true);
+      // `processUrl()` は `stats.processed++` を関数の先頭・kill_gate 判定より
+      // 前で行う（disciplinedFetch の戻り値を見る前）ため、K7 でネットワーク
+      // I/O ゼロのまま中断された2件目もカウントされる。これは
+      // `DiscoveryIngestStats.processed` 自身のドキュメントコメント
+      // 「処理を試みた URL 数」（＝attempted、succeeded ではない）と整合する
+      // 挙動であり、コードを直接確認して固定した値。
+      // 本テストの本体は「0（テレメトリ行が作られない旧実装）でも
+      // 全件処理完了時の満数でもない、中断前の実測 stats がそのまま
+      // 記録されること」であり、その意図はこの値でも保たれている。
+      expect(stats.processed).toBe(2);
+      expect(stats.published).toBe(1);
+
+      const row = await readHostMetricsRow(HOST, today);
+      expect(row).toBeDefined();
+      expect(row?.processed).toBe(stats.processed);
+      expect(row?.published).toBe(stats.published);
+    });
+
+    it("1回の呼び出しにつき discovery_host_metrics への加算はちょうど1回である（ループ側との二重記録が無い）", async () => {
+      const today = new Date().toISOString().slice(0, 10);
+      const urlA = `https://${HOST}/story/cases/dup-a`;
+      const urlB = `https://${HOST}/story/cases/dup-b`;
+      await seedDiscoverySeen(HOST, [{ url: urlA }, { url: urlB }]);
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: string | URL) => {
+          const u = String(input);
+          if (u.endsWith("/robots.txt")) return resp({ status: 200, body: ALLOW_ALL_ROBOTS });
+          return resp({ status: 200, body: articleHtml("正常完了記事") });
+        }),
+      );
+      mockedCurate.mockResolvedValue(sufficientCuration());
+
+      const stats = await ingestDiscoveredUrls(HOST);
+
+      expect(stats.abortedByKillGate).toBe(false);
+      const row = await readHostMetricsRow(HOST, today);
+      expect(row).toBeDefined();
+      // 二重記録（ループ内 + finally の両方で加算）なら processed は
+      // stats.processed の2倍になってしまう。ちょうど1回なら一致する。
+      expect(row?.processed).toBe(stats.processed);
+      expect(row?.published).toBe(stats.published);
+    });
+
+    it("正常完了時の挙動は従来と変わらない（回帰防止）", async () => {
+      const today = new Date().toISOString().slice(0, 10);
+      const url = `https://${HOST}/story/cases/normal-complete`;
+      await seedPending(HOST, url);
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: string | URL) => {
+          const u = String(input);
+          if (u.endsWith("/robots.txt")) return resp({ status: 200, body: ALLOW_ALL_ROBOTS });
+          if (u === url) return resp({ status: 200, body: articleHtml("通常完了の記事") });
+          throw new Error(`unexpected fetch: ${u}`);
+        }),
+      );
+      mockedCurate.mockResolvedValue(sufficientCuration());
+
+      const stats = await ingestDiscoveredUrls(HOST);
+
+      expect(stats.abortedByKillGate).toBe(false);
+      expect(stats.published).toBe(1);
+      const row = await readHostMetricsRow(HOST, today);
+      expect(row?.processed).toBe(1);
+      expect(row?.published).toBe(1);
+    });
+
+    it("kill gate 以外の予期しない例外がループ中に飛んだ場合、部分的なテレメトリは記録され、かつ例外は呼び出し元へ伝播する", async () => {
+      // ⚠️ fetch 自体が投げる例外は `performFetch()`（access-discipline.ts）が
+      // 意図的に catch し `http_error(status:0)` → 再試行キューへ、という
+      // 正常系のフェイルセーフ経路になる（実測: enqueuedRetries が増えるだけで
+      // 例外は伝播しない）。これは仕様であり、本テストが検証したい「本当に
+      // 未捕捉のまま上がってくる例外」の再現には使えない。discovery-ingest.ts
+      // 内で try/catch されずに直接 await されている `curateSingle()`
+      // （抽出ゲート通過後、Q1 の後段で呼ばれる LLM 呼び出し）が投げるケースを
+      // 使うことで、実際に未捕捉のまま呼び出し元へ抜ける例外を再現する。
+      const today = new Date().toISOString().slice(0, 10);
+      const okUrl = `https://${HOST}/story/cases/before-crash`;
+      const crashUrl = `https://${HOST}/story/cases/crash`;
+      await seedDiscoverySeen(HOST, [{ url: okUrl }, { url: crashUrl }]);
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: string | URL) => {
+          const u = String(input);
+          if (u.endsWith("/robots.txt")) return resp({ status: 200, body: ALLOW_ALL_ROBOTS });
+          if (u === okUrl) return resp({ status: 200, body: articleHtml("クラッシュ前の記事") });
+          if (u === crashUrl)
+            return resp({ status: 200, body: articleHtml("クラッシュ対象の記事") });
+          throw new Error(`unexpected fetch: ${u}`);
+        }),
+      );
+      mockedCurate
+        .mockResolvedValueOnce(sufficientCuration())
+        .mockRejectedValueOnce(new Error("simulated unexpected llm client failure"));
+
+      await expect(ingestDiscoveredUrls(HOST)).rejects.toThrow(
+        "simulated unexpected llm client failure",
+      );
+
+      const row = await readHostMetricsRow(HOST, today);
+      expect(row).toBeDefined();
+      // 1件目（正常処理）分のテレメトリは記録されている。例外そのものは
+      // 呼び出し元へ伝播済みなので、ここでは finally が記録した値のみ検証する。
+      expect(row?.processed).toBeGreaterThanOrEqual(1);
+      expect(row?.published).toBe(1);
+    });
   });
 });
 

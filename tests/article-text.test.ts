@@ -6,6 +6,7 @@ import {
   computeEvidenceSufficiency,
   MIN_EVIDENCE_INPUT_CHARS,
 } from "@/lib/sources/article-text";
+import type { EvidenceFailedCondition } from "@/lib/sources/article-text";
 import {
   MAX_BODY_BYTES,
   CRAWLER_USER_AGENT,
@@ -101,36 +102,70 @@ describe("computeEvidenceSufficiency boundary behavior (plan 07 §6-Q1)", () => 
     expect(result).toEqual({ ok: true });
   });
 
-  it("fails when textLength is one below the minimum", () => {
+  it("fails when textLength is one below the minimum, identifying text_length", () => {
     const result = computeEvidenceSufficiency({
       ...baseSignals,
       textLength: MIN_EVIDENCE_INPUT_CHARS - 1,
     });
-    expect(result).toEqual({ ok: false, reason: "extraction_insufficient" });
+    expect(result).toEqual({
+      ok: false,
+      reason: "extraction_insufficient",
+      failedConditions: ["text_length"],
+    });
   });
 
-  it("fails when linkDensity exceeds the maximum", () => {
+  it("fails when linkDensity exceeds the maximum, identifying link_density", () => {
     const result = computeEvidenceSufficiency({
       ...baseSignals,
       linkDensity: MAX_LINK_DENSITY + 0.01,
     });
-    expect(result).toEqual({ ok: false, reason: "extraction_insufficient" });
+    expect(result).toEqual({
+      ok: false,
+      reason: "extraction_insufficient",
+      failedConditions: ["link_density"],
+    });
   });
 
-  it("fails when paragraphCount is below the minimum", () => {
+  it("fails when paragraphCount is below the minimum, identifying paragraph_count", () => {
     const result = computeEvidenceSufficiency({
       ...baseSignals,
       paragraphCount: MIN_PARAGRAPH_COUNT - 1,
     });
-    expect(result).toEqual({ ok: false, reason: "extraction_insufficient" });
+    expect(result).toEqual({
+      ok: false,
+      reason: "extraction_insufficient",
+      failedConditions: ["paragraph_count"],
+    });
   });
 
-  it("fails when boilerplateLineRatio exceeds the maximum", () => {
+  it("fails when boilerplateLineRatio exceeds the maximum, identifying boilerplate_line_ratio", () => {
     const result = computeEvidenceSufficiency({
       ...baseSignals,
       boilerplateLineRatio: MAX_BOILERPLATE_LINE_RATIO + 0.01,
     });
-    expect(result).toEqual({ ok: false, reason: "extraction_insufficient" });
+    expect(result).toEqual({
+      ok: false,
+      reason: "extraction_insufficient",
+      failedConditions: ["boilerplate_line_ratio"],
+    });
+  });
+
+  it("fails with all four conditions reported when everything is simultaneously insufficient", () => {
+    const result = computeEvidenceSufficiency({
+      textLength: MIN_EVIDENCE_INPUT_CHARS - 1,
+      linkDensity: MAX_LINK_DENSITY + 0.01,
+      paragraphCount: MIN_PARAGRAPH_COUNT - 1,
+      boilerplateLineRatio: MAX_BOILERPLATE_LINE_RATIO + 0.01,
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    const expected: EvidenceFailedCondition[] = [
+      "text_length",
+      "link_density",
+      "paragraph_count",
+      "boilerplate_line_ratio",
+    ];
+    expect(result.failedConditions.sort()).toEqual(expected.sort());
   });
 });
 
@@ -160,19 +195,51 @@ describe("computeEvidenceSignals (plan 07 §6-Q1)", () => {
 
     const signals = computeEvidenceSignals(linkHeavyHtml);
     expect(signals.linkDensity).toBeGreaterThan(MAX_LINK_DENSITY);
-    expect(computeEvidenceSufficiency(signals)).toEqual({
-      ok: false,
-      reason: "extraction_insufficient",
-    });
+    const result = computeEvidenceSufficiency(signals);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(result.reason).toBe("extraction_insufficient");
+    expect(result.failedConditions).toContain("link_density");
   });
 
-  it("computes textLength as 0 (and thus linkDensity 1) for empty HTML, fail-closed", () => {
+  it("computes textLength as 0 (and thus linkDensity 1) for empty HTML, fail-closed on all four conditions", () => {
     const signals = computeEvidenceSignals("<html><body></body></html>");
     expect(signals.textLength).toBe(0);
     expect(signals.linkDensity).toBe(1);
-    expect(computeEvidenceSufficiency(signals)).toEqual({
-      ok: false,
-      reason: "extraction_insufficient",
-    });
+    const result = computeEvidenceSufficiency(signals);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(result.reason).toBe("extraction_insufficient");
+    // fail-closed の意味: 空 HTML は4条件すべてで不合格になる。
+    // `computeBoilerplateLineRatio()` は行が0本のとき `1`（= 100%定型行）を
+    // 返す仕様のため、`boilerplate_line_ratio` も MAX_BOILERPLATE_LINE_RATIO
+    // (0.5) を超えて不合格側に含まれる（曖昧なときは合格側に倒さない）。
+    expect(result.failedConditions.sort()).toEqual(
+      ["text_length", "link_density", "paragraph_count", "boilerplate_line_ratio"].sort(),
+    );
+  });
+
+  it("real-world div-based article (no <p> tags) is rejected by the current gate — plan 07 §5-M1 regression fixture", () => {
+    // 実サイト（例: www.mwed.jp）は div ベースの構造で段落タグを使わないことが
+    // 多く、テストフィクスチャが常に <p> を含んでいたため本番の98%棄却との
+    // 乖離を検知できなかった（2026-08 の discovery 初回実行で判明）。
+    // これは現在のゲート実装の挙動を固定するテストであり、閾値や
+    // countParagraphTags() の実装は変更しない。paragraphCount が 0 のまま
+    // 棄却されるのが「現時点で正しい」挙動として記録する。
+    const divBasedHtml = `<html><body>
+      <div class="header">ナビゲーション ホーム 会員登録</div>
+      <div class="content">
+        <div class="title">結婚式の準備で気をつけたいポイント</div>
+        <div class="body-text">実際に結婚式を挙げた新婦が会場選びについて詳しく振り返り、持ち込み料の交渉や式場探しの体験を丁寧に説明しています。披露宴の演出やスピーチ依頼についても具体的な工夫を紹介しており読者にとって参考になる内容が多く含まれています。装花や引出物の選び方についても触れられており当日の段取りをどう組み立てたかが具体的に書かれています。</div>
+      </div>
+      <div class="footer">運営会社 利用規約 お問い合わせ</div>
+    </body></html>`;
+
+    const signals = computeEvidenceSignals(divBasedHtml);
+    expect(signals.paragraphCount).toBe(0);
+    const result = computeEvidenceSufficiency(signals);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(result.failedConditions).toContain("paragraph_count");
   });
 });

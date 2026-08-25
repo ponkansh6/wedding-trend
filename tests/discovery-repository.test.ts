@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { setupTestDb } from "./helpers/test-db";
 import {
-  hashUrl,
   seedDiscoverySeen,
   getKnownDiscoveryUrls,
   setDiscoverySeenStatus,
@@ -175,5 +174,51 @@ describe("Discovery and Source Policy Repository", () => {
     expect(baseline?.promotionalRate).toBeCloseTo(6 / 35, 5);
     // authorPresent: (3+1) + 8 = 12, published = 15
     expect(baseline?.authorCoverageRate).toBeCloseTo(12 / 15, 5);
+  });
+
+  it("8. recordHostMetrics with a partial delta leaves other fields untouched (does not corrupt row)", async () => {
+    const host = "partial.example.com";
+    // 最初は processed/published のみ
+    await recordHostMetrics(host, "2026-02-01", { processed: 10, published: 5 });
+    // 2回目は promotional のみ（processed/published を含まない delta）
+    await recordHostMetrics(host, "2026-02-01", { promotional: 3 });
+    // 3回目は authorPresent のみ
+    await recordHostMetrics(host, "2026-02-01", { authorPresent: 2 });
+
+    const baseline = await getHostMetricsBaseline(host, 1);
+    expect(baseline).not.toBeNull();
+    // processed/published は最初の呼び出しの値のまま保持されている（後続の部分 delta で破壊されない）
+    expect(baseline?.publishRate).toBeCloseTo(5 / 10, 5);
+    expect(baseline?.promotionalRate).toBeCloseTo(3 / 10, 5);
+    expect(baseline?.authorCoverageRate).toBeCloseTo(2 / 5, 5);
+  });
+
+  it("9. kill gate による中断を模擬: 途中経過の記録後にさらに記録しても一貫した値になる", async () => {
+    const host = "interrupted.example.com";
+    // kill gate 到達前に処理した分（例: 30件処理し、うち10件 published）を記録
+    await recordHostMetrics(host, "2026-03-01", {
+      processed: 30,
+      published: 10,
+      dropped: 20,
+      promotional: 4,
+      authorPresent: 8,
+    });
+    // ここで kill gate によりランが中断したと仮定（早期リターン）。
+    // 翌日以降の別ランが続きを処理し、さらに記録する。
+    await recordHostMetrics(host, "2026-03-01", {
+      processed: 5,
+      published: 2,
+      dropped: 3,
+      promotional: 1,
+      authorPresent: 1,
+    });
+
+    const baseline = await getHostMetricsBaseline(host, 1);
+    expect(baseline).not.toBeNull();
+    expect(baseline?.days).toBe(1);
+    // processed: 30+5=35, published: 10+2=12
+    expect(baseline?.publishRate).toBeCloseTo(12 / 35, 5);
+    expect(baseline?.promotionalRate).toBeCloseTo(5 / 35, 5);
+    expect(baseline?.authorCoverageRate).toBeCloseTo(9 / 12, 5);
   });
 });
