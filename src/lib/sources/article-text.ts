@@ -31,15 +31,29 @@ function decodeHtmlEntities(str: string): string {
 }
 
 /**
- * HTML から <script>, <style>, <noscript> 要素を中身ごと削除し、
+ * HTML から可視レンダリング対象外の領域（<script>, <style>, <noscript> 要素と
+ * その中身、および HTML コメント）を除去する。タグ自体は除去しない
+ * （呼び出し元がタグ除去前提のものと、タグ構造を保ったまま使うもの —
+ * `computeLinkTextLength()` の `<a>` 抽出など — の双方から共有するため）。
+ *
+ * `extractVisibleText()` と `computeEvidenceSignals()`（分母・分子）が
+ * この前処理を共有することで、除去対象の不一致による指標のずれを防ぐ。
+ */
+function stripNonRenderedRegions(html: string): string {
+  return html
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
+    .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, "")
+    .replace(/<noscript\b[^<]*(?:(?!<\/noscript>)<[^<]*)*<\/noscript>/gi, "")
+    .replace(/<!--[\s\S]*?-->/g, "");
+}
+
+/**
+ * HTML から <script>, <style>, <noscript> 要素・HTML コメントを中身ごと削除し、
  * タグを除去して可視テキストを抽出・整形する。
  */
 export function extractVisibleText(html: string): string {
-  // script, style, noscript 要素の削除
-  const cleanedHtml = html
-    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
-    .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, "")
-    .replace(/<noscript\b[^<]*(?:(?!<\/noscript>)<[^<]*)*<\/noscript>/gi, "");
+  // script, style, noscript 要素・コメントの削除
+  const cleanedHtml = stripNonRenderedRegions(html);
 
   // タグの除去
   const withoutTags = cleanedHtml.replace(/<[^>]+>/g, " ");
@@ -106,6 +120,20 @@ const BOILERPLATE_LINE_MAX_CHARS = 8;
  *
  * ⚠️ `extractVisibleText()` はタグを除去してしまうため、除去後のテキストから
  * リンク長を復元することはできない。必ず生 HTML に対して行うこと。
+ * ただし「生 HTML」とは `extractVisibleText()` が除去する領域
+ * （`<script>` / `<style>` / `<noscript>` とその中身、HTML コメント）を
+ * 呼び出し元で事前に取り除いた HTML を指す。そうしないと script 内や
+ * コメント内の `<a>` まで数えてしまい、分子（リンク長）と分母（可視テキスト長）
+ * の対象が食い違う（実際に本番でこの不一致により linkDensity が常に 1.000 に
+ * 丸められる不具合が発生した）。
+ *
+ * 既知の限界: `<a>` の入れ子はネストを認識しない。非貪欲マッチのため
+ * 「最初の `<a>` から最初に出現する `</a>`（＝内側の閉じタグ）まで」しか
+ * 1つの一致として消費せず、外側の閉じタグ以降のテキストが一致から漏れて
+ * 数えられない（二重計上ではなく under-count）。HTML 仕様上は不正だが
+ * 実在しうる形。稀なケースであり、正しい対処（スタックベースのパーサー）
+ * は本モジュールの正規表現ベースの軽量実装の範囲を超えるため、
+ * 既知の限界として許容し、挙動をテストで固定する。
  */
 function computeLinkTextLength(html: string): number {
   const anchorRe = /<a\b[^>]*>([\s\S]*?)<\/a>/gi;
@@ -140,8 +168,22 @@ function computeBoilerplateLineRatio(visibleText: string): number {
 export function computeEvidenceSignals(html: string): EvidenceSignals {
   const visibleText = extractVisibleText(html);
   const textLength = visibleText.replace(/\s+/g, "").length;
-  const linkTextLength = computeLinkTextLength(html);
-  const linkDensity = textLength > 0 ? Math.min(linkTextLength / textLength, 1) : 1;
+  // 分子（リンク長）と分母（可視テキスト長）の除去対象を一致させるため、
+  // extractVisibleText() と同じ前処理（script/style/noscript・コメント除去）を
+  // 適用した HTML から算出する。タグ構造は `<a>` 抽出のために保持する。
+  const strippedHtml = stripNonRenderedRegions(html);
+  const linkTextLength = computeLinkTextLength(strippedHtml);
+  const rawLinkDensity = textLength > 0 ? linkTextLength / textLength : 1;
+  if (rawLinkDensity > 1) {
+    // 分子と分母の対象を揃えてもなお比率が1を超える場合、入れ子アンカー等に
+    // よる二重計上が疑われる。Math.min() で静かに丸めると異常が観測不能に
+    // なるため、警告として残す（丸め自体は下流ゲートの契約を維持するため行う）。
+    console.warn(
+      `[article-text] linkDensity raw value exceeded 1 (${rawLinkDensity.toFixed(3)}); ` +
+        "clamped to 1. Likely nested <a> double-counting.",
+    );
+  }
+  const linkDensity = Math.min(rawLinkDensity, 1);
   const paragraphCount = countParagraphTags(html);
   const boilerplateLineRatio = computeBoilerplateLineRatio(visibleText);
 

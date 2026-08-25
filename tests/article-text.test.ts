@@ -243,3 +243,129 @@ describe("computeEvidenceSignals (plan 07 §6-Q1)", () => {
     expect(result.failedConditions).toContain("paragraph_count");
   });
 });
+
+describe("computeEvidenceSignals linkDensity numerator/denominator regression (www.mwed.jp incident)", () => {
+  it("does not count <a> tags inside <script> as link text — linkDensity stays low (regression, most important)", () => {
+    // 本番実測: www.mwed.jp の14件全件で linkDensity=1.000 となり棄却された。
+    // 原因は分母（除去後テキスト）と分子（生 HTML）の対象不一致で、
+    // script 内の <a> まで分子に数えられていたこと。
+    const article =
+      "実際に結婚式を挙げた新婦が会場選びについて詳しく振り返り、持ち込み料の交渉や式場探しの体験を丁寧に説明しています。".repeat(
+        5,
+      );
+    const scriptLinks = Array.from(
+      { length: 30 },
+      (_, i) => `<a href="/track/${i}">クリック計測用ダミーリンク${i}</a>`,
+    ).join("");
+    const html = `<html><body>
+      <script>
+        var trackingHtml = "${scriptLinks}";
+        document.write(trackingHtml);
+      </script>
+      <article>
+        <p>${article}</p>
+        <p>${article}</p>
+        <p>${article}</p>
+      </article>
+    </body></html>`;
+
+    const signals = computeEvidenceSignals(html);
+    expect(signals.linkDensity).toBeLessThan(MAX_LINK_DENSITY);
+    expect(signals.linkDensity).not.toBe(1);
+  });
+
+  it("does not count <a> tags inside HTML comments as link text", () => {
+    const article =
+      "実際に結婚式を挙げた新婦が会場選びについて詳しく振り返り、持ち込み料の交渉や式場探しの体験を丁寧に説明しています。".repeat(
+        5,
+      );
+    const commentLinks = Array.from(
+      { length: 30 },
+      (_, i) => `<a href="/old/${i}">昔のリンク${i}をコメントアウトしたもの</a>`,
+    ).join("");
+    const html = `<html><body>
+      <!-- ${commentLinks} -->
+      <article>
+        <p>${article}</p>
+        <p>${article}</p>
+        <p>${article}</p>
+      </article>
+    </body></html>`;
+
+    const signals = computeEvidenceSignals(html);
+    expect(signals.linkDensity).toBeLessThan(MAX_LINK_DENSITY);
+    expect(signals.linkDensity).not.toBe(1);
+  });
+
+  it("plain article with a couple of real links has low link density (baseline regression guard)", () => {
+    const html = `<html><body>
+      <article>
+        <p>実際に結婚式を挙げた新婦が会場選びについて詳しく振り返り、持ち込み料の交渉や式場探しの体験を丁寧に説明しています。</p>
+        <p>披露宴の演出やスピーチ依頼についても具体的な工夫を紹介しており読者にとって参考になる内容が多く含まれています。</p>
+        <p>装花や引出物の選び方についても触れられており当日の段取りをどう組み立てたかが具体的に書かれています。<a href="/related">関連記事はこちら</a></p>
+      </article>
+    </body></html>`;
+
+    const signals = computeEvidenceSignals(html);
+    expect(signals.linkDensity).toBeLessThan(0.05);
+    expect(signals.linkDensity).toBeGreaterThan(0);
+  });
+
+  it("documents current nested-<a> handling as a known limitation (not fixed in this change)", () => {
+    // HTML 仕様上は不正だが実在しうる形。現状の非貪欲正規表現は最初の
+    // <a ...> から「最初に出現する </a>」（＝内側の閉じタグ）までしか
+    // 一つの一致として消費しないため、①外側の閉じタグ以降のテキスト
+    // （下記の「続き」）が一致から漏れて数えられず、②lastIndex が内側の
+    // 閉じタグ直後に進むため外側の閉じタグ自体も別マッチとして拾われない。
+    // 結果として、この構造では二重計上ではなく「外側テキスト＋内側テキスト」
+    // のみが1回ずつ数えられ、「続き」の分だけ under-count になる。
+    // 修正（スタックベースのパーサー）は本モジュールの正規表現ベースの
+    // 軽量実装の範囲を超えるため、既知の限界として許容し、現状の挙動を
+    // テストで固定する。
+    const html = `<html><body><article>
+      <p><a href="/outer">外側リンクテキスト<a href="/inner">内側リンクテキスト</a>続き</a></p>
+      <p>それ以外の本文部分はここに十分な長さで存在しており段落として数えられる内容になっています。</p>
+      <p>さらにもう一段落分の本文を追加して段落数の要件を満たすようにしておきます。</p>
+    </article></body></html>`;
+
+    const signals = computeEvidenceSignals(html);
+    const outerText = "外側リンクテキスト".length;
+    const innerText = "内側リンクテキスト".length;
+    // 「続き」は一致から漏れるため、リンク長には含まれない。
+    expect(Math.round(signals.linkDensity * signals.textLength)).toBe(outerText + innerText);
+  });
+
+  it("production-shaped fixture: 3000+ chars, 20+ <p> tags, JSON-LD script block — passes the gate (www.mwed.jp incident prevention)", () => {
+    const paragraphText =
+      "実際に結婚式を挙げたカップルが会場選びから当日の演出まで詳しく振り返り、持ち込み料の交渉や式場探しの体験談、招待状の手配、引出物選びの工夫について具体的なエピソードを交えながら丁寧に説明している記事です。";
+    const paragraphs = Array.from(
+      { length: 25 },
+      (_, i) => `<p>${paragraphText}${paragraphText}（第${i + 1}段落）</p>`,
+    ).join("\n");
+    const jsonLd = JSON.stringify({
+      "@context": "https://schema.org",
+      "@type": "Article",
+      headline: "結婚式の準備で気をつけたいポイント",
+      author: { "@type": "Person", name: "編集部" },
+      // JSON-LD 自体は <a> を含まないが、実サイトでは同じ <script> ブロック内に
+      // 送信計測・リコメンドリンク用の <a> が併存することが多いため再現する。
+      relatedLinks:
+        '<a href="/r/1">関連1</a><a href="/r/2">関連2</a><a href="/r/3">関連3</a>'.repeat(10),
+    });
+    const html = `<html><head>
+      <script type="application/ld+json">${jsonLd}</script>
+    </head><body>
+      <nav><a href="/">ホーム</a><a href="/about">サイトについて</a></nav>
+      <article>
+        ${paragraphs}
+      </article>
+      <footer><a href="/terms">利用規約</a></footer>
+    </body></html>`;
+
+    const signals = computeEvidenceSignals(html);
+    expect(signals.textLength).toBeGreaterThanOrEqual(3000);
+    expect(signals.paragraphCount).toBeGreaterThanOrEqual(20);
+    expect(signals.linkDensity).toBeLessThan(MAX_LINK_DENSITY);
+    expect(computeEvidenceSufficiency(signals)).toEqual({ ok: true });
+  });
+});
