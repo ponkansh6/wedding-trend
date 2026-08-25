@@ -133,6 +133,62 @@ describe("checkAnchorGrounding (plan 07 §5-M1: topicAnchor の語彙的接地)"
   });
 });
 
+describe("checkAnchorGrounding: 個人識別情報パターンの検知", () => {
+  it("rejects an anchor containing a name with 「さん」honorific", () => {
+    // 本文はアンカーの特徴語（マイさん・会場選び）を逐語で含むため、接地は
+    // 成立する。それでも棄却される場合は PII 検知（missingTerms: []）による
+    // ものだと判別できる。
+    const body = "新婦マイさんが会場選びについて振り返っています。";
+    const result = checkAnchorGrounding("マイさんの会場選び", body);
+    expect(result).toEqual({ ok: false, reason: "anchor_ungrounded", missingTerms: [] });
+  });
+
+  it("rejects an anchor containing a nickname with 「さん」honorific", () => {
+    // 本文が特徴語（ゆうほさん・持ち込み料交渉）を逐語で含み、接地は成立する
+    // ため、棄却は PII 検知によるもの（missingTerms: []）と判別できる。
+    const body = "ゆうほさんが持ち込み料の交渉について語っています。";
+    const result = checkAnchorGrounding("ゆうほさんの持ち込み料交渉", body);
+    expect(result).toEqual({ ok: false, reason: "anchor_ungrounded", missingTerms: [] });
+  });
+
+  it("rejects an anchor containing a nickname with 「様」honorific", () => {
+    // 本文が特徴語を逐語で含み接地は成立するため、棄却は PII 検知による
+    // もの（missingTerms: []）と判別できる。
+    const body = "くろくま様の結婚式レポートです。";
+    const result = checkAnchorGrounding("くろくま様の結婚式レポート", body);
+    expect(result).toEqual({ ok: false, reason: "anchor_ungrounded", missingTerms: [] });
+  });
+
+  it("rejects an anchor containing an SNS handle", () => {
+    // 本文が特徴語（@nozomizono0706・装花アイデア）を逐語で含み接地は成立
+    // するため、棄却は PII 検知によるもの（missingTerms: []）と判別できる。
+    const body = "@nozomizono0706 さんのインスタグラムで紹介された装花です。";
+    const result = checkAnchorGrounding("@nozomizono0706の装花アイデア", body);
+    expect(result).toEqual({ ok: false, reason: "anchor_ungrounded", missingTerms: [] });
+  });
+
+  it("does NOT reject ordinary wedding-prep anchor terms grounded in the body", () => {
+    const body =
+      "結婚式準備として、ご祝儀の相場や席次表の作り方、前撮りの段取りについてまとめています。";
+    expect(checkAnchorGrounding("ご祝儀の相場", body)).toEqual({ ok: true });
+    expect(checkAnchorGrounding("席次表の作り方", body)).toEqual({ ok: true });
+    expect(checkAnchorGrounding("前撮りの段取り", body)).toEqual({ ok: true });
+  });
+
+  it("does NOT reject 「みなさん」as a false positive of the honorific pattern", () => {
+    const body = "みなさんに向けて結婚式準備の持ち込み料について解説しています。";
+    expect(checkAnchorGrounding("みなさんへ持ち込み料の解説", body)).toEqual({ ok: true });
+  });
+
+  it("does NOT reject 「おふたりさん」/「新郎新婦さん」/「ゲストさん」as false positives", () => {
+    const body =
+      "おふたりさんと新郎新婦さんとゲストさんが一緒に持ち込み料相談をしたと話し合いました。";
+    expect(checkAnchorGrounding("おふたりさんの持ち込み料相談", body)).toEqual({ ok: true });
+    expect(checkAnchorGrounding("新郎新婦さんの持ち込み料相談", body)).toEqual({ ok: true });
+    expect(checkAnchorGrounding("ゲストさんとの持ち込み料相談", body)).toEqual({ ok: true });
+  });
+});
+
 describe("renderRationaleText (plan 07 §6-Q5: rationaleText のテンプレート化)", () => {
   const baseInput: RationaleTemplateInput = {
     topicAnchor: "会場選びのコツ",

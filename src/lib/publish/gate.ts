@@ -123,16 +123,93 @@ function normalizeForGrounding(s: string): string {
   return s.normalize("NFKC").replace(/\s+/g, "").toLowerCase();
 }
 
+// ─────────────────────────────────────────────────────────────
+// checkAnchorPersonalInfo（個人識別情報の検知）
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * 敬称の直前に付く一般名詞（人物を指さない用法）。「〜さん」等の敬称
+ * パターンにマッチしても、この直前語を伴う場合は個人名ではないとみなし
+ * 過剰棄却を避ける。例:「みなさん」「おふたりさん」「新郎新婦さん」
+ * 「花嫁さん」「ゲストさん」「お客さん」。
+ *
+ * このリストは決定的な除外の要（過剰棄却対策の採用方式）。パターン自体を
+ * 絞り込むアプローチではなく、「敬称パターンはやや広めに取り、既知の
+ * 一般語のみ明示的に除外する」方式を採用した——一般語のバリエーションは
+ * 有限で列挙可能な一方、日本語の人名は事実上無限にバリエーションがあり
+ * パターン側を絞る方向では個人名を取りこぼすため。
+ */
+const HONORIFIC_SAFE_PREFIXES = [
+  "みな",
+  "皆",
+  "おふたり",
+  "お二人",
+  "ふたり",
+  "二人",
+  "新郎新婦",
+  "新郎",
+  "新婦",
+  "花嫁",
+  "花婿",
+  "ゲスト",
+  "お客",
+  "参列者",
+  "スタッフ",
+  "プランナー",
+];
+
+/**
+ * 敬称を伴う表記（「〜さん」「〜様」「〜氏」「〜くん」「〜ちゃん」）を検知する。
+ * 敬称の直前 1〜10 文字を氏名候補として取り出し、`HONORIFIC_SAFE_PREFIXES`
+ * のいずれとも完全一致しない場合のみ個人名候補と判定する。
+ */
+const HONORIFIC_RE = /([\p{L}\p{N}ー]{1,10})(さん|様|氏|くん|君|ちゃん)/gu;
+
+/** SNS ハンドルの形（`@` + 英数字・アンダースコア・ピリオドの連続）。 */
+const SNS_HANDLE_RE = /@[A-Za-z0-9_.]{2,}/;
+
+/**
+ * 個人識別情報らしきパターンを検知する（プロンプト制約だけに頼らない
+ * 決定的な二重防御）。`topicAnchor` に対して用いる想定。
+ * 完全な日本語人名判定は不可能なため、再現性のある保守的なパターンのみ
+ * 扱う。誤検知（過剰棄却）を避けるため、敬称直前語が既知の一般語と
+ * 完全一致する場合は個人名候補から除外する。
+ */
+function containsPersonalInfoPattern(text: string): boolean {
+  const normalized = text.normalize("NFKC");
+
+  if (SNS_HANDLE_RE.test(normalized)) return true;
+
+  const honorificMatches = normalized.matchAll(HONORIFIC_RE);
+  for (const match of honorificMatches) {
+    const candidate = match[1];
+    if (!HONORIFIC_SAFE_PREFIXES.includes(candidate)) return true;
+  }
+
+  return false;
+}
+
 /**
  * topicAnchor の語彙的接地（plan 07 §5-M1）。アンカーから抽出した
  * 2文字以上の特徴語すべてが、取得本文（`bodyText`）に逐語で存在することを
  * 要求する。1つでも欠ければ棄却。特徴語が1つも抽出できないアンカーも
  * 棄却する（接地を検証できないため fail-closed）。
  *
+ * 個人識別情報らしきパターン（敬称付き氏名・SNS ハンドル）を含む場合も
+ * 同じく棄却する。専用の `DropReason` は追加せず、既存の
+ * `anchor_ungrounded` を流用している——どちらも「このアンカーは公開できる
+ * 形で接地していない」という同じ意味の終端棄却であり、区別が必要になった
+ * 場合は `src/lib/types.ts` の担当レーンで新値を検討すること。
+ *
  * 誤棄却率を計測できるよう、棄却時は `missingTerms` に本文中に無かった語を
- * 詰めて返す（`missingTerms.length === 0` は「特徴語ゼロ」による棄却を表す）。
+ * 詰めて返す（`missingTerms.length === 0` は「特徴語ゼロ」または個人識別
+ * 情報パターンの検知による棄却を表す）。
  */
 export function checkAnchorGrounding(topicAnchor: string, bodyText: string): GateResult {
+  if (containsPersonalInfoPattern(topicAnchor)) {
+    return { ok: false, reason: "anchor_ungrounded", missingTerms: [] };
+  }
+
   const terms = extractFeatureTerms(topicAnchor);
   if (terms.length === 0) {
     return { ok: false, reason: "anchor_ungrounded", missingTerms: [] };
