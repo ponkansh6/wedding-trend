@@ -893,8 +893,21 @@ describe("ingestDiscoveredUrls", () => {
       return rows[0];
     }
 
+    /** jstDayKey() と同じ JST 暦日キーを返すテストヘルパー。 */
+    function jstToday(): string {
+      const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
+      const jstMs = Date.now() + JST_OFFSET_MS;
+      return new Date(jstMs).toISOString().slice(0, 10);
+    }
+
     it("K7（日次リクエスト上限）で中断したとき、中断前に処理した件数が discovery_host_metrics に記録される（0でも満数でもない）", async () => {
-      const today = new Date().toISOString().slice(0, 10);
+      // saveHostGateState の countDay は access-discipline.ts の todayUTC()
+      // （＝UTC の暦日）と比較されるため UTC で渡す必要がある。
+      // 一方、discovery_host_metrics の day 列は discovery-ingest.ts の
+      // jstDayKey()（＝JST の暦日）で書き込まれるため、metrics 行の参照
+      // には jstToday() を使う。2 つは UTC/JST の境目で 1 日ずれることがある。
+      const utcToday = new Date().toISOString().slice(0, 10);
+      const today = jstToday();
       // K7 の閾値ちょうど手前まで既に消費させておく。robots.txt の取得自体も
       // 日次カウントを1消費する（disciplinedFetch は robots 取得後にも
       // capRecheck を行う）ため、1件目の URL 処理だけで robots+article の
@@ -908,7 +921,7 @@ describe("ingestDiscoveredUrls", () => {
         untilAt: null,
         k4Strikes: 0,
         last429At: null,
-        countDay: today,
+        countDay: utcToday,
         countValue: DAILY_REQUEST_CAP_PER_HOST - 2,
       });
 
@@ -948,7 +961,7 @@ describe("ingestDiscoveredUrls", () => {
     });
 
     it("1回の呼び出しにつき discovery_host_metrics への加算はちょうど1回である（ループ側との二重記録が無い）", async () => {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = jstToday();
       const urlA = `https://${HOST}/story/cases/dup-a`;
       const urlB = `https://${HOST}/story/cases/dup-b`;
       await seedDiscoverySeen(HOST, [{ url: urlA }, { url: urlB }]);
@@ -974,7 +987,7 @@ describe("ingestDiscoveredUrls", () => {
     });
 
     it("正常完了時の挙動は従来と変わらない（回帰防止）", async () => {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = jstToday();
       const url = `https://${HOST}/story/cases/normal-complete`;
       await seedPending(HOST, url);
       vi.stubGlobal(
@@ -1006,7 +1019,7 @@ describe("ingestDiscoveredUrls", () => {
       // 内で try/catch されずに直接 await されている `curateSingle()`
       // （抽出ゲート通過後、Q1 の後段で呼ばれる LLM 呼び出し）が投げるケースを
       // 使うことで、実際に未捕捉のまま呼び出し元へ抜ける例外を再現する。
-      const today = new Date().toISOString().slice(0, 10);
+      const today = jstToday();
       const okUrl = `https://${HOST}/story/cases/before-crash`;
       const crashUrl = `https://${HOST}/story/cases/crash`;
       await seedDiscoverySeen(HOST, [{ url: okUrl }, { url: crashUrl }]);
