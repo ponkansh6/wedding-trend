@@ -243,7 +243,7 @@ export function isAllowedArticleUrl(url: string): boolean {
  * コンテナ内基準へ変更済みだが、実測に基づく再校正はまだ行っていない
  * （当面この値のまま据え置く。実データ収集後に見直すこと）。
  */
-export const MAX_LINK_DENSITY = 0.35;
+export const MAX_LINK_DENSITY = 0.25;
 /** 本文と判定するために必要な最小段落数。 */
 export const MIN_PARAGRAPH_COUNT = 3;
 
