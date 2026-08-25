@@ -7,11 +7,30 @@ const { fetchOEmbedMock, detectEmbedProviderMock, curateSingleMock } = vi.hoiste
   detectEmbedProviderMock: vi.fn(),
   curateSingleMock: vi.fn(),
 }));
-const { upsertPostsMock, markCuratedMock, saveEmbedMock, getPostsByUrlsMock } = vi.hoisted(() => ({
+const {
+  upsertPostsMock,
+  markCuratedMock,
+  saveEmbedMock,
+  getPostsByUrlsMock,
+  markDroppedMock,
+  isRemovedMock,
+  enqueueRetryMock,
+  recordPublicationMock,
+  countPublishedSinceMock,
+  countPublishedSinceByHostMock,
+  hashUrlMock,
+} = vi.hoisted(() => ({
   upsertPostsMock: vi.fn(),
   markCuratedMock: vi.fn(),
   saveEmbedMock: vi.fn(),
   getPostsByUrlsMock: vi.fn(),
+  markDroppedMock: vi.fn(),
+  isRemovedMock: vi.fn(),
+  enqueueRetryMock: vi.fn(),
+  recordPublicationMock: vi.fn(),
+  countPublishedSinceMock: vi.fn(),
+  countPublishedSinceByHostMock: vi.fn(),
+  hashUrlMock: vi.fn((url: string) => `hash:${url}`),
 }));
 
 vi.mock("@/lib/embed/oembed", () => ({
@@ -31,9 +50,17 @@ vi.mock("@/lib/db/repository", () => ({
   markCurated: markCuratedMock,
   saveEmbed: saveEmbedMock,
   getPostsByUrls: getPostsByUrlsMock,
+  markDropped: markDroppedMock,
+  isRemoved: isRemovedMock,
+  enqueueRetry: enqueueRetryMock,
+  recordPublication: recordPublicationMock,
+  countPublishedSince: countPublishedSinceMock,
+  countPublishedSinceByHost: countPublishedSinceByHostMock,
+  hashUrl: hashUrlMock,
 }));
 
 import { runSubmitUrl } from "@/lib/pipeline/submit-url";
+import { DAILY_PUBLISH_CAP } from "@/lib/constants";
 
 describe("runSubmitUrl (src/lib/pipeline/submit-url.ts)", () => {
   beforeEach(() => {
@@ -46,12 +73,27 @@ describe("runSubmitUrl (src/lib/pipeline/submit-url.ts)", () => {
       authorName: "IG Author",
       title: "IG Title",
     });
-    curateSingleMock.mockResolvedValue({
-      title: "AI Curated Title",
-      summary: "AI Curated Summary",
-      category: "その他",
-      tag: "classic",
-    });
+    // M1-2 の語彙的接地（plan 07 D4）を通すため、topicAnchor は呼び出し引数の
+    // title（= LLM への実入力の一部）をそのまま使う（静的な固定値だとテスト
+    // ケースごとに異なる title/excerpt と一致せず誤って anchor_ungrounded に
+    // なるため、mockImplementation で動的に生成する）。
+    curateSingleMock.mockImplementation(
+      async (input: { title: string; excerpt: string | null }) => ({
+        title: "AI Curated Title",
+        summary: "AI Curated Summary",
+        category: "その他",
+        tag: "classic",
+        firsthand: true,
+        ceremonyDecision: true,
+        specific: true,
+        tradeoff: false,
+        promotional: false,
+        preDecisionOrPhotoShoot: false,
+        topicAnchor: input.title,
+        rationaleText:
+          "実際の体験に基づく会場選びや進行プロセスにおける具体的な工夫と背景についての客観的な振り返りを行う非常に有用な記事内容である",
+      }),
+    );
     upsertPostsMock.mockResolvedValue({
       succeeded: ["https://www.instagram.com/p/ABC123"],
       failed: [],
@@ -61,27 +103,36 @@ describe("runSubmitUrl (src/lib/pipeline/submit-url.ts)", () => {
       failed: [],
     });
     saveEmbedMock.mockResolvedValue(true);
-    getPostsByUrlsMock.mockResolvedValue(
-      new Map([
-        // canonicalizeUrl は末尾スラッシュを除去するため、実装が引く
-        // キーは正規化後の URL になる。
-        [
-          "https://www.instagram.com/p/ABC123",
-          {
-            id: 42,
-            url: "https://www.instagram.com/p/ABC123",
-            originalTitle: "IG Title",
-            originalExcerpt: null,
-            aiTitle: "AI Curated Title",
-            contentHash: "hash",
-            curationSignature: "sig",
-            status: "published",
-            publishedAt: null,
-            createdAt: "2024-01-01T00:00:00.000Z",
-          },
-        ],
-      ]),
+    // canonicalizeUrl は末尾スラッシュを除去するため、実装が引くキーは
+    // 正規化後の URL になる。どの URL で問い合わせても解決できるよう、
+    // クエリされた URL をそのままキーにして返す。
+    getPostsByUrlsMock.mockImplementation((urls: string[]) =>
+      Promise.resolve(
+        new Map(
+          urls.map((url) => [
+            url,
+            {
+              id: 42,
+              url,
+              originalTitle: "IG Title",
+              originalExcerpt: null,
+              aiTitle: "AI Curated Title",
+              contentHash: "hash",
+              curationSignature: "sig",
+              status: "published",
+              publishedAt: null,
+              createdAt: "2024-01-01T00:00:00.000Z",
+            },
+          ]),
+        ),
+      ),
     );
+    markDroppedMock.mockResolvedValue(undefined);
+    isRemovedMock.mockResolvedValue(false);
+    enqueueRetryMock.mockResolvedValue(undefined);
+    recordPublicationMock.mockResolvedValue(undefined);
+    countPublishedSinceMock.mockResolvedValue(0);
+    countPublishedSinceByHostMock.mockResolvedValue({});
   });
 
   it('returns reason "invalid_url" and does not touch the DB or LLM for a syntactically invalid URL', async () => {
@@ -92,26 +143,74 @@ describe("runSubmitUrl (src/lib/pipeline/submit-url.ts)", () => {
     expect(upsertPostsMock).not.toHaveBeenCalled();
   });
 
-  it("happy path: builds a FeedCard from oEmbed + LLM curation", async () => {
+  it("happy path: builds a FeedCard from oEmbed + LLM curation and records publication", async () => {
     const outcome = await runSubmitUrl("https://www.instagram.com/p/ABC123/?utm_source=ig");
 
     expect(outcome.ok).toBe(true);
     expect(outcome.reason).toBeNull();
-    expect(outcome.card?.aiTitle).toBe("AI Curated Title");
+    expect(outcome.card?.originalTitle).toBe("IG Title");
     expect(outcome.card?.embedProvider).toBe("instagram");
     expect(outcome.card?.id).toBe(42);
     expect(saveEmbedMock).toHaveBeenCalledTimes(1);
+    expect(markCuratedMock).toHaveBeenCalledWith([
+      expect.objectContaining({ status: "published" }),
+    ]);
+    expect(recordPublicationMock).toHaveBeenCalledWith(
+      42,
+      expect.any(String),
+      expect.any(String),
+      "surrogate",
+    );
   });
 
-  it('returns reason "needs_review" (still ok:true) when LLM curation fails and a fallback is used', async () => {
+  // D4: M1-2 の語彙的接地は submit-url レーンでも、LLM に実際に渡した入力
+  // （oEmbed キャプション/タイトル+運営メモ）に対して適用される。
+  it("D4: drops as anchor_ungrounded when the LLM's topicAnchor contains a term absent from the source text", async () => {
+    curateSingleMock.mockResolvedValueOnce({
+      title: "AI Curated Title",
+      summary: "AI Curated Summary",
+      category: "その他",
+      tag: "classic",
+      firsthand: true,
+      ceremonyDecision: true,
+      specific: true,
+      tradeoff: false,
+      promotional: false,
+      preDecisionOrPhotoShoot: false,
+      // sourceTitle="IG Title" には一切現れない語（プロンプトインジェクション/
+      // 幻覚を模擬）。
+      topicAnchor: "架空の温泉旅行特集",
+      rationaleText:
+        "実際の体験に基づく会場選びや進行プロセスにおける具体的な工夫と背景についての客観的な振り返りを行う非常に有用な記事内容である",
+    });
+
+    const outcome = await runSubmitUrl("https://www.instagram.com/p/ABC123/?utm_source=ig");
+
+    expect(outcome.reason).toBe("anchor_ungrounded");
+    expect(outcome.card).toBeNull();
+    expect(markCuratedMock).not.toHaveBeenCalled();
+    expect(recordPublicationMock).not.toHaveBeenCalled();
+  });
+
+  // §7: LLM 呼び出し失敗は一時的技術障害として再試行キューへ（終端棄却しない）。
+  it("queues a retry (does not touch posts/embed) when LLM curation fails", async () => {
     curateSingleMock.mockResolvedValue(null);
 
     const outcome = await runSubmitUrl("https://www.instagram.com/p/ABC123/");
 
     expect(outcome.ok).toBe(true);
-    expect(outcome.reason).toBe("needs_review");
-    expect(outcome.card).not.toBeNull();
-    expect(markCuratedMock).toHaveBeenCalledWith([expect.objectContaining({ status: "pending" })]);
+    expect(outcome.reason).toBe("queued_for_retry");
+    expect(outcome.card).toBeNull();
+    expect(upsertPostsMock).not.toHaveBeenCalled();
+    expect(markCuratedMock).not.toHaveBeenCalled();
+    expect(saveEmbedMock).not.toHaveBeenCalled();
+    expect(enqueueRetryMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: "https://www.instagram.com/p/ABC123",
+        lane: "submit",
+        reason: "llm_transient",
+      }),
+    );
   });
 
   it('returns reason "save_failed" when upsertPosts fails, without throwing', async () => {
@@ -124,6 +223,53 @@ describe("runSubmitUrl (src/lib/pipeline/submit-url.ts)", () => {
 
     expect(outcome).toEqual({ ok: false, reason: "save_failed", card: null });
     expect(markCuratedMock).not.toHaveBeenCalled();
+  });
+
+  // M1-1: 逐語タイトルの無検閲公開フィルタ。恒久棄却（再試行しない）。
+  it("M1: an oEmbed caption carrying an ad marker is terminally dropped as title_filter and never published", async () => {
+    fetchOEmbedMock.mockResolvedValue({
+      provider: "instagram",
+      html: "<blockquote>ig</blockquote>",
+      thumbnailUrl: null,
+      authorName: null,
+      title: "【PR】キャンペーン投稿",
+    });
+
+    const outcome = await runSubmitUrl("https://www.instagram.com/p/ABC123/");
+
+    expect(outcome).toEqual({ ok: true, reason: "title_filter", card: null });
+    expect(markDroppedMock).toHaveBeenCalledWith(42, "title_filter", expect.any(String));
+    expect(markCuratedMock).not.toHaveBeenCalled();
+    expect(enqueueRetryMock).not.toHaveBeenCalled();
+  });
+
+  // M1-3: 撤回済み（sticky）投稿は公開しない。
+  it("M1: a post already recorded as removed (retracted/dropped) is never republished", async () => {
+    isRemovedMock.mockResolvedValueOnce(true);
+
+    const outcome = await runSubmitUrl("https://www.instagram.com/p/ABC123/");
+
+    expect(outcome).toEqual({ ok: true, reason: "removed", card: null });
+    expect(markCuratedMock).not.toHaveBeenCalled();
+    expect(recordPublicationMock).not.toHaveBeenCalled();
+  });
+
+  // Q4: 日次公開上限に達したら公開せず、再試行キューへ繰り延べる（終端棄却しない）。
+  it("Q4: when the daily publish cap is reached, does not publish and enqueues a rate_capped retry instead", async () => {
+    countPublishedSinceMock.mockResolvedValueOnce(DAILY_PUBLISH_CAP);
+
+    const outcome = await runSubmitUrl("https://www.instagram.com/p/ABC123/");
+
+    expect(outcome).toEqual({ ok: true, reason: "rate_limited", card: null });
+    expect(markCuratedMock).not.toHaveBeenCalled();
+    expect(markDroppedMock).not.toHaveBeenCalled();
+    expect(enqueueRetryMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: "https://www.instagram.com/p/ABC123",
+        lane: "submit",
+        reason: "rate_capped",
+      }),
+    );
   });
 
   it("uses the optional note as supplementary excerpt text when oEmbed returns no title", async () => {
@@ -155,14 +301,13 @@ describe("runSubmitUrl (src/lib/pipeline/submit-url.ts)", () => {
       });
     });
 
-    it("never calls curateSingle, saves as pending with null aiTitle/aiSummary, still saves the embed, and returns needs_source_text", async () => {
+    it("never calls curateSingle, terminally drops as extraction_insufficient, still saves the embed", async () => {
       const outcome = await runSubmitUrl("https://www.instagram.com/p/ABC123/");
 
       expect(curateSingleMock).not.toHaveBeenCalled();
       expect(upsertPostsMock).toHaveBeenCalledWith([
         expect.objectContaining({
           url: "https://www.instagram.com/p/ABC123",
-          status: "pending",
         }),
       ]);
       // upsertPosts の入力には aiTitle/aiSummary というフィールド自体が存在しない
@@ -170,6 +315,11 @@ describe("runSubmitUrl (src/lib/pipeline/submit-url.ts)", () => {
       const upsertArg = upsertPostsMock.mock.calls[0]?.[0]?.[0];
       expect(upsertArg).not.toHaveProperty("aiTitle");
       expect(upsertArg).not.toHaveProperty("aiSummary");
+      expect(markDroppedMock).toHaveBeenCalledWith(
+        42,
+        "extraction_insufficient",
+        expect.any(String),
+      );
       expect(markCuratedMock).not.toHaveBeenCalled();
       expect(saveEmbedMock).toHaveBeenCalledTimes(1);
       expect(saveEmbedMock).toHaveBeenCalledWith(
@@ -179,7 +329,7 @@ describe("runSubmitUrl (src/lib/pipeline/submit-url.ts)", () => {
           embedHtml: "<blockquote>ig</blockquote>",
         }),
       );
-      expect(outcome.reason).toBe("needs_source_text");
+      expect(outcome.reason).toBe("extraction_insufficient");
       expect(outcome.card).toBeNull();
     });
 
@@ -193,7 +343,7 @@ describe("runSubmitUrl (src/lib/pipeline/submit-url.ts)", () => {
         title: "会場の装花がとても綺麗でした",
         excerpt: "会場の装花がとても綺麗でした",
       });
-      expect(upsertPostsMock).toHaveBeenCalledWith([
+      expect(markCuratedMock).toHaveBeenCalledWith([
         expect.objectContaining({ status: "published" }),
       ]);
       expect(outcome.ok).toBe(true);
@@ -201,11 +351,11 @@ describe("runSubmitUrl (src/lib/pipeline/submit-url.ts)", () => {
       expect(outcome.card).not.toBeNull();
     });
 
-    it("treats a whitespace-only note as absent and still returns needs_source_text", async () => {
+    it("treats a whitespace-only note as absent and still returns extraction_insufficient", async () => {
       const outcome = await runSubmitUrl("https://www.instagram.com/p/ABC123/", "   ");
 
       expect(curateSingleMock).not.toHaveBeenCalled();
-      expect(outcome.reason).toBe("needs_source_text");
+      expect(outcome.reason).toBe("extraction_insufficient");
     });
   });
 

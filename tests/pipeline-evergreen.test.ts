@@ -6,10 +6,28 @@ const { fetchOgpMetadataMock } = vi.hoisted(() => ({
 const { curateSingleMock } = vi.hoisted(() => ({
   curateSingleMock: vi.fn(),
 }));
-const { upsertPostsMock, markCuratedMock, getPostsByUrlsMock } = vi.hoisted(() => ({
+const {
+  upsertPostsMock,
+  markCuratedMock,
+  getPostsByUrlsMock,
+  markDroppedMock,
+  isRemovedMock,
+  enqueueRetryMock,
+  recordPublicationMock,
+  countPublishedSinceMock,
+  countPublishedSinceByHostMock,
+  hashUrlMock,
+} = vi.hoisted(() => ({
   upsertPostsMock: vi.fn(),
   markCuratedMock: vi.fn(),
   getPostsByUrlsMock: vi.fn(),
+  markDroppedMock: vi.fn(),
+  isRemovedMock: vi.fn(),
+  enqueueRetryMock: vi.fn(),
+  recordPublicationMock: vi.fn(),
+  countPublishedSinceMock: vi.fn(),
+  countPublishedSinceByHostMock: vi.fn(),
+  hashUrlMock: vi.fn((url: string) => `hash:${url}`),
 }));
 const { canonicalizeUrlMock } = vi.hoisted(() => ({
   canonicalizeUrlMock: vi.fn(),
@@ -27,6 +45,13 @@ vi.mock("@/lib/db/repository", () => ({
   upsertPosts: upsertPostsMock,
   markCurated: markCuratedMock,
   getPostsByUrls: getPostsByUrlsMock,
+  markDropped: markDroppedMock,
+  isRemoved: isRemovedMock,
+  enqueueRetry: enqueueRetryMock,
+  recordPublication: recordPublicationMock,
+  countPublishedSince: countPublishedSinceMock,
+  countPublishedSinceByHost: countPublishedSinceByHostMock,
+  hashUrl: hashUrlMock,
 }));
 
 vi.mock("@/lib/url", async (importOriginal) => {
@@ -38,7 +63,7 @@ vi.mock("@/lib/url", async (importOriginal) => {
 });
 
 import { curateEvergreenUrl, resolveSourceName, registrableDomain } from "@/lib/pipeline/evergreen";
-import { LLM_MODEL } from "@/lib/constants";
+import { DAILY_PUBLISH_CAP, LLM_MODEL } from "@/lib/constants";
 
 const BASE_META = {
   title: "Evergreen Article Title",
@@ -53,18 +78,27 @@ describe("curateEvergreenUrl (src/lib/pipeline/evergreen.ts)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     fetchOgpMetadataMock.mockResolvedValue({ ...BASE_META });
-    curateSingleMock.mockResolvedValue({
-      title: "AI Curated Title",
-      summary: "AI Curated Summary",
-      category: "費用・節約",
-      tag: "classic",
-      firsthand: true,
-      ceremonyDecision: false,
-      specific: true,
-      tradeoff: true,
-      promotional: false,
-      preDecisionOrPhotoShoot: false,
-    });
+    // M1-2 の語彙的接地（plan 07 D4）を通すため、topicAnchor は呼び出し引数の
+    // title（= LLM への実入力の一部）をそのまま使う（静的な固定値だとテスト
+    // ケースごとに異なる title/description と一致せず誤って anchor_ungrounded
+    // になるため、mockImplementation で動的に生成する）。
+    curateSingleMock.mockImplementation(
+      async (input: { title: string; excerpt: string | null }) => ({
+        title: "AI Curated Title",
+        summary: "AI Curated Summary",
+        category: "費用・節約",
+        tag: "classic",
+        firsthand: true,
+        ceremonyDecision: false,
+        specific: true,
+        tradeoff: true,
+        promotional: false,
+        preDecisionOrPhotoShoot: false,
+        topicAnchor: input.title,
+        rationaleText:
+          "実際の体験に基づく会場選びや進行プロセスにおける具体的な工夫と背景についての客観的な振り返りを行う非常に有用な記事内容である",
+      }),
+    );
     upsertPostsMock.mockResolvedValue({
       succeeded: ["https://example.com/article"],
       failed: [],
@@ -73,25 +107,33 @@ describe("curateEvergreenUrl (src/lib/pipeline/evergreen.ts)", () => {
       succeeded: ["https://example.com/article"],
       failed: [],
     });
-    getPostsByUrlsMock.mockResolvedValue(
-      new Map([
-        [
-          "https://example.com/article",
-          {
-            id: 7,
-            url: "https://example.com/article",
-            originalTitle: "Evergreen Article Title",
-            originalExcerpt: "Evergreen Article Description",
-            aiTitle: "AI Curated Title",
-            contentHash: "hash",
-            curationSignature: "sig",
-            status: "published",
-            publishedAt: "2026-01-01T00:00:00.000Z",
-            createdAt: "2026-01-01T00:00:00.000Z",
-          },
-        ],
-      ]),
+    getPostsByUrlsMock.mockImplementation((urls: string[]) =>
+      Promise.resolve(
+        new Map(
+          urls.map((url) => [
+            url,
+            {
+              id: 7,
+              url,
+              originalTitle: "Evergreen Article Title",
+              originalExcerpt: "Evergreen Article Description",
+              aiTitle: "AI Curated Title",
+              contentHash: "hash",
+              curationSignature: "sig",
+              status: "published",
+              publishedAt: "2026-01-01T00:00:00.000Z",
+              createdAt: "2026-01-01T00:00:00.000Z",
+            },
+          ]),
+        ),
+      ),
     );
+    markDroppedMock.mockResolvedValue(undefined);
+    isRemovedMock.mockResolvedValue(false);
+    enqueueRetryMock.mockResolvedValue(undefined);
+    recordPublicationMock.mockResolvedValue(undefined);
+    countPublishedSinceMock.mockResolvedValue(0);
+    countPublishedSinceByHostMock.mockResolvedValue({});
   });
 
   it("returns reason 'invalid_url' and does not touch DB or LLM for an invalid URL", async () => {
@@ -101,12 +143,12 @@ describe("curateEvergreenUrl (src/lib/pipeline/evergreen.ts)", () => {
     expect(upsertPostsMock).not.toHaveBeenCalled();
   });
 
-  it("happy path: fetches OGP, curates via LLM, saves to DB with classic tag and usefulness criteria", async () => {
+  it("happy path: fetches OGP, curates via LLM, saves to DB with classic tag, usefulness criteria, and records publication", async () => {
     const outcome = await curateEvergreenUrl("https://example.com/article");
 
     expect(outcome.ok).toBe(true);
     expect(outcome.reason).toBeNull();
-    expect(outcome.card?.aiTitle).toBe("AI Curated Title");
+    expect(outcome.card?.originalTitle).toBe("Evergreen Article Title");
     expect(outcome.card?.tag).toBe("classic");
     expect(outcome.card?.sourceId).toBe("evergreen");
     // P2: 実在しない "エバーグリーン" というクレジットを生成していない
@@ -118,7 +160,6 @@ describe("curateEvergreenUrl (src/lib/pipeline/evergreen.ts)", () => {
         sourceType: "blog",
         sourceId: "evergreen",
         sourceName: "Example Wedding Site",
-        status: "published",
       }),
     ]);
 
@@ -135,8 +176,49 @@ describe("curateEvergreenUrl (src/lib/pipeline/evergreen.ts)", () => {
             tradeoff: true,
           }),
         }),
+        rationale: expect.objectContaining({
+          postId: 7,
+          evidenceSufficient: true,
+        }),
       }),
     ]);
+
+    // §5: 公開の記録。
+    expect(recordPublicationMock).toHaveBeenCalledWith(
+      7,
+      expect.any(String),
+      expect.any(String),
+      "surrogate",
+    );
+  });
+
+  // D4: M1-2 の語彙的接地は evergreen レーンでも、LLM に実際に渡した入力
+  // （title + og:description）に対して適用される。
+  it("D4: drops as anchor_ungrounded when the LLM's topicAnchor contains a term absent from title+og:description", async () => {
+    curateSingleMock.mockResolvedValueOnce({
+      title: "AI Curated Title",
+      summary: "AI Curated Summary",
+      category: "費用・節約",
+      tag: "classic",
+      firsthand: true,
+      ceremonyDecision: false,
+      specific: true,
+      tradeoff: true,
+      promotional: false,
+      preDecisionOrPhotoShoot: false,
+      // BASE_META の title/description には一切現れない語（プロンプト
+      // インジェクション/幻覚を模擬）。
+      topicAnchor: "架空の温泉旅行特集",
+      rationaleText:
+        "実際の体験に基づく会場選びや進行プロセスにおける具体的な工夫と背景についての客観的な振り返りを行う非常に有用な記事内容である",
+    });
+
+    const outcome = await curateEvergreenUrl("https://example.com/article");
+
+    expect(outcome.reason).toBe("anchor_ungrounded");
+    expect(outcome.card).toBeNull();
+    expect(markCuratedMock).not.toHaveBeenCalled();
+    expect(recordPublicationMock).not.toHaveBeenCalled();
   });
 
   it("returns reason 'no_metadata' if fetchOgpMetadata returns null or no title", async () => {
@@ -148,9 +230,8 @@ describe("curateEvergreenUrl (src/lib/pipeline/evergreen.ts)", () => {
     expect(upsertPostsMock).not.toHaveBeenCalled();
   });
 
-  // T1 + T2: og:description が null のとき、curateSingle を呼ばず pending で保存し、
-  // aiTitle/aiSummary は null のまま（§10-4 不変条件）。
-  it("T1/T2: when og:description is null, does NOT call curateSingle and saves as pending without aiTitle/aiSummary", async () => {
+  // Q1相当（簡易）: og:description が無いと LLM を呼ばず即終端棄却する。
+  it("Q1: when og:description is null, does NOT call curateSingle and terminally drops as extraction_insufficient", async () => {
     fetchOgpMetadataMock.mockResolvedValueOnce({
       ...BASE_META,
       description: null,
@@ -160,7 +241,7 @@ describe("curateEvergreenUrl (src/lib/pipeline/evergreen.ts)", () => {
 
     expect(curateSingleMock).not.toHaveBeenCalled();
     expect(outcome.ok).toBe(true);
-    expect(outcome.reason).toBe("needs_source_text");
+    expect(outcome.reason).toBe("extraction_insufficient");
     expect(outcome.card).toBeNull();
 
     expect(upsertPostsMock).toHaveBeenCalledTimes(1);
@@ -169,9 +250,9 @@ describe("curateEvergreenUrl (src/lib/pipeline/evergreen.ts)", () => {
         url: "https://example.com/article",
         sourceName: "Example Wedding Site",
         originalExcerpt: null,
-        status: "pending",
       }),
     ]);
+    expect(markDroppedMock).toHaveBeenCalledWith(7, "extraction_insufficient", expect.any(String));
     // markCurated は呼ばれない（要約が無いのでスコアも付けない）
     expect(markCuratedMock).not.toHaveBeenCalled();
   });
@@ -189,34 +270,70 @@ describe("curateEvergreenUrl (src/lib/pipeline/evergreen.ts)", () => {
     expect(outcome).toEqual({ ok: false, reason: "save_failed", card: null });
   });
 
-  it("handles LLM failure gracefully by falling back to pending status and false criteria", async () => {
+  // §7: LLM 呼び出し失敗は一時的技術障害として再試行キューへ（終端棄却しない）。
+  it("queues a retry (does not terminally drop, does not touch posts) when curateSingle fails", async () => {
     curateSingleMock.mockResolvedValueOnce(null);
 
     const outcome = await curateEvergreenUrl("https://example.com/article");
 
     expect(outcome.ok).toBe(true);
-    expect(outcome.reason).toBe("needs_review");
-    // フォールバックは title を表示タイトルに、excerpt（原文テキスト）を要約に使う
-    expect(outcome.card?.aiTitle).toBe("Evergreen Article Title");
-    expect(outcome.card?.aiSummary).toBe("Evergreen Article Description");
+    expect(outcome.reason).toBe("queued_for_retry");
+    expect(outcome.card).toBeNull();
 
-    expect(upsertPostsMock).toHaveBeenCalledWith([
+    expect(upsertPostsMock).not.toHaveBeenCalled();
+    expect(markCuratedMock).not.toHaveBeenCalled();
+    expect(markDroppedMock).not.toHaveBeenCalled();
+    expect(enqueueRetryMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        status: "pending",
+        url: "https://example.com/article",
+        lane: "evergreen",
+        reason: "llm_transient",
       }),
-    ]);
+    );
+  });
 
-    expect(markCuratedMock).toHaveBeenCalledWith([
+  // M1-1: 逐語タイトルの無検閲公開フィルタ。恒久棄却（再試行しない）。
+  it("M1: title carrying an ad marker is terminally dropped as title_filter and never published", async () => {
+    fetchOgpMetadataMock.mockResolvedValueOnce({
+      ...BASE_META,
+      title: "【PR】Evergreen Article Title",
+    });
+
+    const outcome = await curateEvergreenUrl("https://example.com/article");
+
+    expect(outcome).toEqual({ ok: true, reason: "title_filter", card: null });
+    expect(markDroppedMock).toHaveBeenCalledWith(7, "title_filter", expect.any(String));
+    expect(markCuratedMock).not.toHaveBeenCalled();
+    expect(enqueueRetryMock).not.toHaveBeenCalled();
+  });
+
+  // M1-3: 撤回済み（sticky）投稿は公開しない。
+  it("M1: a post already recorded as removed (retracted/dropped) is never republished", async () => {
+    isRemovedMock.mockResolvedValueOnce(true);
+
+    const outcome = await curateEvergreenUrl("https://example.com/article");
+
+    expect(outcome).toEqual({ ok: true, reason: "removed", card: null });
+    expect(markCuratedMock).not.toHaveBeenCalled();
+    expect(recordPublicationMock).not.toHaveBeenCalled();
+  });
+
+  // Q4: 日次公開上限に達したら公開せず、再試行キューへ繰り延べる（終端棄却しない）。
+  it("Q4: when the daily publish cap is reached, does not publish and enqueues a rate_capped retry instead", async () => {
+    countPublishedSinceMock.mockResolvedValueOnce(DAILY_PUBLISH_CAP);
+
+    const outcome = await curateEvergreenUrl("https://example.com/article");
+
+    expect(outcome).toEqual({ ok: true, reason: "rate_limited", card: null });
+    expect(markCuratedMock).not.toHaveBeenCalled();
+    expect(markDroppedMock).not.toHaveBeenCalled();
+    expect(enqueueRetryMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        status: "pending",
-        usefulness: expect.objectContaining({
-          criteria: expect.objectContaining({
-            firsthand: false,
-            tradeoff: false,
-          }),
-        }),
+        url: "https://example.com/article",
+        lane: "evergreen",
+        reason: "rate_capped",
       }),
-    ]);
+    );
   });
 
   it("returns reason 'save_failed' if upsertPosts fails", async () => {

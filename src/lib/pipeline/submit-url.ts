@@ -1,21 +1,44 @@
-import { AI_SUMMARY_VALIDATE_MAX_CHARS, AI_TITLE_MAX_CHARS } from "@/lib/constants";
-import { getPostsByUrls, markCurated, saveEmbed, upsertPosts } from "@/lib/db/repository";
+import {
+  DAILY_PUBLISH_CAP,
+  HOST_DAILY_SHARE_MAX,
+  RATIONALE_PROMPT_VERSION,
+  RETRY_BACKOFF_HOURS,
+  RETRY_MAX_ATTEMPTS,
+  RETRY_TTL_HOURS,
+} from "@/lib/constants";
+import {
+  completeRetry,
+  countPublishedSince,
+  countPublishedSinceByHost,
+  enqueueRetry,
+  getPostsByUrls,
+  hashUrl,
+  isRemoved,
+  markCurated,
+  markDropped,
+  recordPublication,
+  saveEmbed,
+  upsertPosts,
+} from "@/lib/db/repository";
 import { detectEmbedProvider } from "@/lib/embed/providers";
 import { fetchOEmbed, type OEmbedResult } from "@/lib/embed/oembed";
 import { curateSingle, type CurationResult } from "@/lib/llm/batch";
+import { LLM_MODEL } from "@/lib/llm/client";
 import { computeContentHash, computeCurationSignature } from "@/lib/llm/signature";
-import type { Category, EmbedProvider, FeedCard, TrendTag } from "@/lib/types";
+import { checkAnchorGrounding, filterTitle } from "@/lib/publish/gate";
+import type { DropReason, EmbedProvider, FeedCard, RetryContext, RetryReason } from "@/lib/types";
 import { canonicalizeUrl } from "@/lib/url";
 
 /**
  * SNS 単発投稿の取り込み結果。
  * `reason` は表示用文言そのものではなく、呼び出し側（Route Handler / Server Action）が
  * HTTP ステータスや日本語メッセージへ変換するための安定した内部コード。
- * - 失敗時: `"invalid_url"` | `"save_failed"`
- * - 成功時: `null`（特記事項なし）| `"needs_review"`（LLM キュレーションが
- *   失敗しフォールバック文言で保存された。エラーではなく要確認フラグ）|
- *   `"needs_source_text"`（要約対象となる原文テキストが存在せず、LLM を
- *   呼ばずに `status: "pending"` のまま保存した。card は null）
+ * - 失敗時（`ok:false`）: `"invalid_url"` | `"save_failed"`
+ * - 終端棄却（`ok:true`・plan 07 §7）: `"extraction_insufficient"`（要約対象の
+ *   原文テキストが存在しない） | `"title_filter"`
+ * - 撤回済み（`ok:true`・sticky）: `"removed"`
+ * - 一時的失敗を再試行キューへ繰り延べ（`ok:true`）: `"queued_for_retry"` | `"rate_limited"`
+ * - 成功: `null`
  */
 export type SubmitOutcome = {
   ok: boolean;
@@ -30,87 +53,277 @@ const PROVIDER_DISPLAY_NAME: Record<EmbedProvider, string> = {
   none: "SNS",
 };
 
-/**
- * LLM キュレーションに失敗した場合のフォールバック。
- * FeedCard は aiTitle/aiSummary/category/tag が非 null 必須のため、原文由来の
- * テキストをそのまま切り詰めて埋める。カテゴリ/タグは安全側の既定値とし、
- * status を "pending" にすることで「要確認」として扱う（表示上のフラグ）。
- */
-function buildFallbackCuration(title: string, excerpt: string | null): CurationResult {
-  const fallbackTitle =
-    title.length > AI_TITLE_MAX_CHARS ? title.slice(0, AI_TITLE_MAX_CHARS) : title;
-  const summarySource = excerpt && excerpt.trim() !== "" ? excerpt : title;
-  const fallbackSummary =
-    summarySource.length > AI_SUMMARY_VALIDATE_MAX_CHARS
-      ? summarySource.slice(0, AI_SUMMARY_VALIDATE_MAX_CHARS)
-      : summarySource;
-  return {
-    title: fallbackTitle,
-    summary: fallbackSummary,
-    category: "その他" as Category,
-    tag: "classic" as TrendTag,
-    // LLM が呼べていない（判定材料が無い）ため、6項目とも false に倒す
-    // （spec.md §9.4 の「判断材料が無ければ false」と同じ方針）。
-    firsthand: false,
-    ceremonyDecision: false,
-    specific: false,
-    tradeoff: false,
-    promotional: false,
-    preDecisionOrPhotoShoot: false,
-  };
+// ─────────────────────────────────────────────────────────────
+// plan 07: TTL 付き再試行キュー・レート上限のヘルパ（submit-url レーン）
+// ─────────────────────────────────────────────────────────────
+
+const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
+
+/** `now` を含む JST の暦日の開始時刻（UTC ISO 文字列）。Q4 の集計基準。 */
+function jstDayStartIso(nowIso: string): string {
+  const jstMs = Date.parse(nowIso) + JST_OFFSET_MS;
+  const jst = new Date(jstMs);
+  const startOfDayJstMs = Date.UTC(jst.getUTCFullYear(), jst.getUTCMonth(), jst.getUTCDate());
+  return new Date(startOfDayJstMs - JST_OFFSET_MS).toISOString();
+}
+
+function addHoursIso(baseIso: string, hours: number): string {
+  return new Date(Date.parse(baseIso) + hours * 60 * 60 * 1000).toISOString();
+}
+
+/** Q4: 1ホストが当日の公開のうち占めてよい最大件数。 */
+function hostShareCapCount(): number {
+  return Math.max(1, Math.floor(DAILY_PUBLISH_CAP * HOST_DAILY_SHARE_MAX));
+}
+
+async function isRateCapped(canonical: string, now: string): Promise<boolean> {
+  let host = "";
+  try {
+    host = new URL(canonical).host;
+  } catch {
+    // 正規化済みのはずだが念のため。host 不明時はグローバル上限のみで判定する。
+  }
+  const sinceIso = jstDayStartIso(now);
+  const [total, byHost] = await Promise.all([
+    countPublishedSince(sinceIso),
+    countPublishedSinceByHost(sinceIso),
+  ]);
+  const hostCount = byHost[host] ?? 0;
+  return total >= DAILY_PUBLISH_CAP || hostCount >= hostShareCapCount();
+}
+
+function backoffHoursFor(attempts: number): number {
+  const idx = Math.min(attempts, RETRY_BACKOFF_HOURS.length - 1);
+  return RETRY_BACKOFF_HOURS[idx] ?? RETRY_BACKOFF_HOURS[RETRY_BACKOFF_HOURS.length - 1];
 }
 
 /**
- * 要約対象となる原文テキストが存在しない場合の保存経路。
- * LLM は一切呼ばず、fetch 済みの embed（再取得コストの回避）と url のみを
- * `status: "pending"` で保存する。aiTitle/aiSummary は null のままなので
- * `getFeedCards`（src/lib/db/query.ts）の対象外となり、運営が「補足メモ」を
- * 追加して再投入するまでフィードには表示されない（意図した挙動）。
+ * 一時的失敗（LLM 呼び出し失敗・Q4 レート上限繰り延べ）を再試行キューに積む、
+ * または最大試行数超過なら諦める（plan 07 §7・D5 是正）。
+ *
+ * `ctx` が渡された場合（`ingest.ts` の消費ループが再試行キューから取り出して
+ * 再処理している場合）は既存の attempts / firstQueuedAt を引き継いで
+ * インクリメントする。`null`（初回失敗）の場合は attempts=0 から開始する。
+ * 諦めた場合（最大試行数超過）は `true` を返す。
+ *
+ * ⚠️ 既知の制約: 再試行キューは URL / host / lane / reason のみを保持し、
+ * 管理者が投稿時に添えた任意の補足メモ（`note`）は永続化しない
+ * （スキーマは §7 導入時に固定済みで、追加専用のマイグレーション制約上
+ * カラムを後から足せない）。そのため再試行時の再処理（`ingest.ts` の
+ * 消費ループ）は `note` 無しで `runSubmitUrl` を呼び直す。oEmbed が
+ * キャプション/タイトルを返すホスト（YouTube・TikTok・多くの Instagram
+ * 投稿）では実質的に無害だが、oEmbed が何も返さず `note` だけが唯一の
+ * 原文テキストだったケース（例: キャプション無しの Instagram 投稿）では、
+ * 初回は `note` により公開できたはずの投稿が、再試行時には
+ * `extraction_insufficient` で終端棄却される可能性がある。これは
+ * データを捏造しない安全側の劣化（機能追加ではなく既存の「原文が無ければ
+ * 公開しない」方針の帰結）であり、意図的にこの制約を許容している。
  */
-async function submitWithoutSourceText(
+async function enqueueSubmitRetry(
+  url: string,
+  reason: RetryReason,
+  now: string,
+  ctx: RetryContext | null,
+): Promise<boolean> {
+  const attempts = ctx?.attempts ?? 0;
+  const nextAttempts = attempts + 1;
+  const firstQueuedAt = ctx?.firstQueuedAt ?? now;
+
+  if (nextAttempts > RETRY_MAX_ATTEMPTS) {
+    if (ctx) await completeRetry(ctx.urlHash);
+    return true;
+  }
+
+  let host = "";
+  try {
+    host = new URL(url).host;
+  } catch {
+    // 不正 URL は host 空文字のまま積む（lane="submit" で識別できる）。
+  }
+  await enqueueRetry({
+    urlHash: ctx?.urlHash ?? hashUrl(url),
+    url,
+    host,
+    lane: "submit",
+    reason,
+    attempts: nextAttempts,
+    firstQueuedAt,
+    nextAttemptAt: addHoursIso(now, backoffHoursFor(attempts)),
+    expiresAt: addHoursIso(firstQueuedAt, RETRY_TTL_HOURS),
+  });
+  return false;
+}
+
+// ─────────────────────────────────────────────────────────────
+// posts 行 / embed の書き込みヘルパ
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * posts テーブルへクロール由来フィールドを upsert し、解決した `posts.id` を
+ * 返す（失敗時は null）。`status` は指定しない＝スキーマ既定の "published" の
+ * まま挿入されるが、呼び出し元は必ず直後に `markDropped` / `markCurated` の
+ * いずれかで実際の終端ステータスを確定させる。
+ */
+async function upsertSubmitRow(
   canonical: string,
   provider: EmbedProvider,
+  title: string,
+  excerpt: string | null,
   embed: OEmbedResult | null,
-): Promise<SubmitOutcome> {
-  const now = new Date().toISOString();
-  // ラベルであり要約ではないため、原文が無くても捏造にはあたらない。
-  const placeholderTitle = "SNS 投稿";
-
+): Promise<number | null> {
   const upsertResult = await upsertPosts([
     {
       url: canonical,
       sourceType: "sns",
       sourceId: provider === "none" ? "sns" : provider,
       sourceName: PROVIDER_DISPLAY_NAME[provider],
-      originalTitle: placeholderTitle,
-      originalExcerpt: null,
+      originalTitle: title,
+      originalExcerpt: excerpt,
       author: embed?.authorName ?? null,
       thumbnailUrl: embed?.thumbnailUrl ?? null,
+      // oEmbed は投稿日時を返さないため不明扱い。
       publishedAt: null,
-      status: "pending",
     },
   ]);
-
-  if (upsertResult.failed.length > 0) {
-    return { ok: false, reason: "save_failed", card: null };
-  }
-
-  if (embed) {
-    await saveEmbed(canonical, {
-      embedProvider: embed.provider,
-      embedHtml: embed.html,
-      embedFetchedAt: now,
-    });
-  }
-
-  // 保存自体は成功しているため ok: true。card は aiTitle/aiSummary が無く
-  // FeedCard を構成できないため null（呼び出し側で「要確認」の文言に変換する）。
-  return { ok: true, reason: "needs_source_text", card: null };
+  if (upsertResult.failed.length > 0) return null;
+  const states = await getPostsByUrls([canonical]);
+  return states.get(canonical)?.id ?? null;
 }
 
 /**
- * SNS 投稿 URL を 1 件取り込む（oEmbed 取得 → LLM キュレーション → 保存 →
- * フィードキャッシュ失効）まで一気通貫で行う。`/api/submit-url` の Route Handler
+ * TTL 超過（retry_exhausted）による終端棄却専用のエントリポイント
+ * （plan 07 D5）。`ingest.ts` の消費ループが `expireRetries` で削除された
+ * submit レーンのエントリに対して呼ぶ。この時点では再試行キューの行が
+ * 既に削除されており、元の oEmbed/note は失われているため、捏造せず
+ * URL のみを origin として post 行を作成し終端棄却する。
+ */
+export async function terminateSubmitRetry(url: string, now: string): Promise<void> {
+  const canonical = canonicalizeUrl(url) ?? url;
+  const provider = detectEmbedProvider(canonical);
+  const postId = await upsertSubmitRow(canonical, provider, canonical, null, null);
+  if (postId === null) return;
+  await markDropped(postId, "retry_exhausted", now);
+}
+
+async function saveEmbedIfPresent(
+  canonical: string,
+  embed: OEmbedResult | null,
+  now: string,
+): Promise<void> {
+  if (!embed) return;
+  await saveEmbed(canonical, {
+    embedProvider: embed.provider,
+    embedHtml: embed.html,
+    embedFetchedAt: now,
+  });
+}
+
+/** §7: 終端棄却。post 行を作成・embed を保存したうえで `markDropped` を呼ぶ。 */
+async function dropSubmit(
+  canonical: string,
+  provider: EmbedProvider,
+  embed: OEmbedResult | null,
+  title: string,
+  excerpt: string | null,
+  reason: DropReason,
+  now: string,
+): Promise<SubmitOutcome> {
+  const postId = await upsertSubmitRow(canonical, provider, title, excerpt, embed);
+  if (postId === null) return { ok: false, reason: "save_failed", card: null };
+  await saveEmbedIfPresent(canonical, embed, now);
+  await markDropped(postId, reason, now);
+  return { ok: true, reason, card: null };
+}
+
+/** published として保存し、判定根拠（rationale）・embed・公開記録も行う。 */
+async function publishSubmit(
+  canonical: string,
+  provider: EmbedProvider,
+  embed: OEmbedResult | null,
+  sourceTitle: string,
+  excerpt: string | null,
+  curation: CurationResult,
+  now: string,
+): Promise<SubmitOutcome> {
+  const postId = await upsertSubmitRow(canonical, provider, sourceTitle, excerpt, embed);
+  if (postId === null) return { ok: false, reason: "save_failed", card: null };
+
+  // M1-3: 撤回済み（sticky）投稿は公開しない（自動復帰しない。§5-M4）。
+  if (await isRemoved(postId)) {
+    await saveEmbedIfPresent(canonical, embed, now);
+    return { ok: true, reason: "removed", card: null };
+  }
+
+  const markResult = await markCurated([
+    {
+      url: canonical,
+      aiSummary: curation.summary,
+      category: curation.category,
+      tag: curation.tag,
+      contentHash: computeContentHash(sourceTitle, excerpt),
+      curationSignature: computeCurationSignature(),
+      status: "published",
+      // post_usefulness は体験談レーン（sourceType: "blog"）専用のため、
+      // SNS 単発投稿ではこれまでどおり渡さない。
+      // Q1 相当ゲート（原文テキストの有無）を通過した時点で evidenceSufficient は
+      // 真であることが保証されているため、LLM の自己申告ではなく固定で true を渡す。
+      rationale: {
+        postId,
+        topicAnchor: curation.topicAnchor,
+        rationaleText: curation.rationaleText,
+        evidenceSufficient: true,
+        modelId: LLM_MODEL,
+        promptVersion: RATIONALE_PROMPT_VERSION,
+      },
+    },
+  ]);
+
+  if (markResult.failed.length > 0) {
+    console.warn(`[submit-url] markCurated failed for ${canonical}`);
+    return { ok: false, reason: "save_failed", card: null };
+  }
+
+  await saveEmbedIfPresent(canonical, embed, now);
+
+  // §5 公開の記録。bodyHash は本来「判定に使った正規化本文」のハッシュだが、
+  // submit-url レーンは記事本文を一切取得せず、oEmbed のキャプション＋運営の
+  // 補足メモしか判定材料を持たない。そのため判定に使った唯一のテキスト
+  // （タイトル+抜粋）のハッシュを代替フィンガープリントとして使う。
+  const bodyHash = computeContentHash(sourceTitle, excerpt);
+  // submit-url レーンは oEmbed キャプション等しか持たず記事本文を取得しないため、
+  // bodyHash は本文フィンガープリントではない代替値。"surrogate" として明示する
+  // （plan 07 D3: M4 の本文ドリフト判定に使わせないため）。
+  await recordPublication(postId, now, bodyHash, "surrogate");
+
+  const card: FeedCard = {
+    id: postId,
+    sourceType: "sns",
+    sourceId: provider === "none" ? "sns" : provider,
+    sourceName: PROVIDER_DISPLAY_NAME[provider],
+    url: canonical,
+    originalTitle: sourceTitle,
+    author: embed?.authorName ?? null,
+    publishedAt: null,
+    thumbnailUrl: embed?.thumbnailUrl ?? null,
+    aiSummary: curation.summary,
+    category: curation.category,
+    tag: curation.tag,
+    embedProvider: embed?.provider ?? "none",
+    embedHtml: embed?.html ?? null,
+    // 既存挙動を踏襲: SNS レーンは topicAnchor/rationaleText を表示に使わない
+    // （anchor grounding を検証できないこのレーンでは特に、根拠 UI を出さない
+    // 既存の判断を維持する）。
+    topicAnchor: null,
+    rationaleText: null,
+    usefulness: null,
+  };
+
+  return { ok: true, reason: null, card };
+}
+
+/**
+ * SNS 投稿 URL を 1 件取り込む（oEmbed 取得 → LLM キュレーション → 決定的
+ * ゲート → 保存）まで一気通貫で行う。`/api/submit-url` の Route Handler
  * （curl / 管理者投入）と `submitSnsUrl` Server Action（UI）の両方から呼ばれる
  * 唯一の実装。
  *
@@ -121,11 +334,27 @@ async function submitWithoutSourceText(
  * （2026-08-21 に実リクエストで確認済み）。embed にも note にも実体テキストが
  * 無い状態で LLM に要約させると、原文に存在しない内容を捏造してしまい
  * spec.md §9（法務制約: AI 要約は原文に無い内容を創作しない）に反する。
- * そのため「要約対象の原文テキストが存在するか」を LLM 呼び出しの前に判定し、
- * 存在しない場合は `curateSingle` を呼ばずに `status: "pending"` のまま保存する
- * （embed 自体は保存し、再取得コストを避ける）。
+ * そのため「要約対象の原文テキストが存在するか」を LLM 呼び出しの前に判定し
+ * （Q1 相当・簡易版: このレーンは記事本文の HTML を一切取得しないため
+ * `computeEvidenceSignals()` は適用できず、原文テキストの有無のみを唯一の
+ * 決定的ゲートとして使う）、存在しない場合は `curateSingle` を呼ばずに
+ * 終端棄却する（embed 自体は保存し、再取得コストを避ける）。
+ *
+ * Q3（ホスト allowlist）は適用しない: このレーンは oEmbed（Instagram /
+ * TikTok / YouTube の公式エンドポイント）のみを情報源とし、記事本文を
+ * 任意ホストからスクレイピングしない（プロバイダ自体が固定の allowlist と
+ * して機能する）。
  */
-export async function runSubmitUrl(url: string, note?: string): Promise<SubmitOutcome> {
+export async function runSubmitUrl(
+  url: string,
+  note?: string,
+  /**
+   * 再試行キューからの再処理時に渡す文脈（plan 07 D5）。`ingest.ts` の
+   * 消費ループがこれを渡すことで attempts / TTL の会計を実行をまたいで
+   * 継続できる。管理者/API からの初回呼び出しは省略（`undefined`）でよい。
+   */
+  ctx?: RetryContext | null,
+): Promise<SubmitOutcome> {
   const canonical = canonicalizeUrl(url);
   if (!canonical) {
     return { ok: false, reason: "invalid_url", card: null };
@@ -144,8 +373,11 @@ export async function runSubmitUrl(url: string, note?: string): Promise<SubmitOu
   // どちらも無ければ、LLM に渡せる実体テキストが存在しない。
   const hasSourceText = embedTitle !== null || normalizedNote !== null;
 
+  const now = new Date().toISOString();
+
   if (!hasSourceText) {
-    return submitWithoutSourceText(canonical, provider, embed);
+    // ラベルであり要約ではないため、原文が無くても捏造にはあたらない。
+    return dropSubmit(canonical, provider, embed, "SNS 投稿", null, "extraction_insufficient", now);
   }
 
   // oEmbed のタイトル/キャプションと補足メモを「原文由来のテキスト」として LLM に渡す。
@@ -154,80 +386,52 @@ export async function runSubmitUrl(url: string, note?: string): Promise<SubmitOu
   const excerpt = excerptParts.length > 0 ? excerptParts.join("\n") : null;
 
   const curationResult = await curateSingle({ title: sourceTitle, excerpt });
-  const needsReview = curationResult === null;
-  const finalCuration = curationResult ?? buildFallbackCuration(sourceTitle, excerpt);
-
-  const now = new Date().toISOString();
-
-  const upsertResult = await upsertPosts([
-    {
-      url: canonical,
-      sourceType: "sns",
-      sourceId: provider === "none" ? "sns" : provider,
-      sourceName: PROVIDER_DISPLAY_NAME[provider],
-      originalTitle: sourceTitle,
-      originalExcerpt: excerpt,
-      author: embed?.authorName ?? null,
-      thumbnailUrl: embed?.thumbnailUrl ?? null,
-      // oEmbed は投稿日時を返さないため不明扱い。
-      publishedAt: null,
-      status: needsReview ? "pending" : "published",
-    },
-  ]);
-
-  if (upsertResult.failed.length > 0) {
-    return { ok: false, reason: "save_failed", card: null };
+  if (curationResult === null) {
+    // LLM 呼び出し失敗（一時的技術障害）→ 再試行キューへ。post 行はまだ
+    // 作らない（discovery-ingest.ts の retryOrGiveUp と同じ方針: 終端が
+    // 確定するまで posts テーブルへは書かない）。最大試行数を超えていれば
+    // 諦めて retry_exhausted で終端棄却する（plan 07 D5）。
+    const gaveUp = await enqueueSubmitRetry(canonical, "llm_transient", now, ctx ?? null);
+    if (gaveUp) {
+      return dropSubmit(canonical, provider, embed, sourceTitle, excerpt, "retry_exhausted", now);
+    }
+    return { ok: true, reason: "queued_for_retry", card: null };
   }
 
-  const markResult = await markCurated([
-    {
-      url: canonical,
-      aiTitle: finalCuration.title,
-      aiSummary: finalCuration.summary,
-      category: finalCuration.category,
-      tag: finalCuration.tag,
-      contentHash: computeContentHash(sourceTitle, excerpt),
-      curationSignature: computeCurationSignature(),
-      status: needsReview ? "pending" : "published",
-    },
-  ]);
-
-  if (markResult.failed.length > 0) {
-    console.warn(`[submit-url] markCurated failed for ${canonical}`);
+  // M1-1: タイトル公開フィルタ（第三者が書いた逐語タイトルの無検閲公開を防ぐ）。
+  const titleGate = filterTitle(sourceTitle);
+  if (!titleGate.ok) {
+    return dropSubmit(canonical, provider, embed, sourceTitle, excerpt, "title_filter", now);
   }
 
-  if (embed) {
-    await saveEmbed(canonical, {
-      embedProvider: embed.provider,
-      embedHtml: embed.html,
-      embedFetchedAt: now,
-    });
+  // M1-2: topicAnchor の語彙的接地（plan 07 D4 是正）。submit-url レーンは
+  // 記事本文を取得せず oEmbed キャプション＋運営メモしか持たないが、比較
+  // 対象は本文である必要はない。LLM に実際に渡した入力（sourceTitle+excerpt、
+  // curateSingle() への入力そのもの）に対して検証すれば、プロンプト
+  // インジェクションと幻覚の両方に対する関門として機能する。
+  const anchorGate = checkAnchorGrounding(
+    curationResult.topicAnchor,
+    `${sourceTitle}\n${excerpt ?? ""}`,
+  );
+  if (!anchorGate.ok) {
+    console.warn(
+      `[submit-url] anchor ungrounded for ${canonical}: missingTerms=${JSON.stringify(
+        anchorGate.missingTerms ?? [],
+      )}`,
+    );
+    return dropSubmit(canonical, provider, embed, sourceTitle, excerpt, "anchor_ungrounded", now);
   }
 
-  // `/` は force-dynamic（`src/app/page.tsx`）でキャッシュを経由しないため、
-  // 以前ここにあったフィードキャッシュの明示的失効（revalidateTag）は不要になった。
+  // Q4: 公開レート上限（日次上限・ホストシェア上限）。上限到達は終端棄却では
+  // なく再試行キューへの繰り延べ（良い記事を上限で捨てない）。ただし最大
+  // 試行数を超えていれば諦めて retry_exhausted で終端棄却する（plan 07 D5）。
+  if (await isRateCapped(canonical, now)) {
+    const gaveUp = await enqueueSubmitRetry(canonical, "rate_capped", now, ctx ?? null);
+    if (gaveUp) {
+      return dropSubmit(canonical, provider, embed, sourceTitle, excerpt, "retry_exhausted", now);
+    }
+    return { ok: true, reason: "rate_limited", card: null };
+  }
 
-  // 直前に確定させた値からそのまま FeedCard を組み立てる（再クエリせず、
-  // キャッシュの反映タイミングに依存しない）。id のみ DB から取得する。
-  const states = await getPostsByUrls([canonical]);
-  const state = states.get(canonical);
-
-  const card: FeedCard = {
-    id: state?.id ?? 0,
-    sourceType: "sns",
-    sourceId: provider === "none" ? "sns" : provider,
-    sourceName: PROVIDER_DISPLAY_NAME[provider],
-    url: canonical,
-    author: embed?.authorName ?? null,
-    publishedAt: null,
-    thumbnailUrl: embed?.thumbnailUrl ?? null,
-    aiTitle: finalCuration.title,
-    aiSummary: finalCuration.summary,
-    category: finalCuration.category,
-    tag: finalCuration.tag,
-    embedProvider: embed?.provider ?? "none",
-    embedHtml: embed?.html ?? null,
-  };
-
-  return { ok: true, reason: needsReview ? "needs_review" : null, card };
+  return publishSubmit(canonical, provider, embed, sourceTitle, excerpt, curationResult, now);
 }
