@@ -1,0 +1,83 @@
+name: Daily Discovery Crawler
+
+on:
+  # plan 07 Stage 0（必須統制 M1〜M6）が意図的破壊テストまで完了するまで、
+  # 自動スケジュールは有効化しない。統制が入る前に自動収集が走ると、
+  # M1（無検閲公開チャネルの閉鎖）と M4（客観トリガによる自動撤回）が
+  # 未実装の期間に外部由来の文字列が公開層へ到達しうるため。
+  # Stage 0 完了時に下記 schedule を復帰させること。
+  # schedule:
+  #   - cron: "0 18 * * *" # Every day at 18:00 UTC (03:00 JST)
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+concurrency:
+  group: discovery
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js & pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.14.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run discovery crawler
+        run: pnpm exec tsx scripts/run-discovery.mjs
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+
+      - name: Open GitHub Issue on Failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = "🚨 Discovery Crawler Failed";
+            const body = `Automated daily discovery crawler run failed.\n\n- Workflow run: https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}\n- Please inspect the logs (sitemap discovery / pending URL ingestion) and address the root cause.`;
+
+            // Check if an open issue with this title already exists to avoid spamming
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: "open",
+              labels: ["automated-alert"]
+            });
+
+            const existing = issues.data.find(i => i.title === title);
+            if (existing) {
+              console.log(`Updating existing issue #${existing.number}`);
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body: `Another failure occurred in run ${context.runId}.`
+              });
+            } else {
+              console.log("Creating new alert issue");
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ["automated-alert"]
+              });
+            }

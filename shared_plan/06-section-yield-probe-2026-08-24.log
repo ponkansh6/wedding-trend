@@ -1,0 +1,54 @@
+# mwed.jp 体験談セクションのゲート通過率 実測ログ（2026-08-24）
+
+対象: https://www.mwed.jp/sitemap_stories.xml の 423 URL から無作為抽出（seed=7）した 8 件
+方法: HTML から可視テキストを抽出（script/style/noscript 除去後、先頭ナビ部をスキップして 1500 字）→ 既存 curatePosts に投入
+      リクエスト間隔 3000ms。Gemini calls: 1（バッチ）
+
+## 結果: ゲート通過 4/8 (50.0%)
+
+ゲート判定式: ceremonyDecision && !preDecisionOrPhotoShoot
+
+| URL | 判定 | firsthand | specific | tradeoff | promotional | preDecisionOrPhotoShoot |
+| --- | ---- | --------- | -------- | -------- | ----------- | ----------------------- |
+| /story/cases/174/ | PASS | true | true | true | false | false |
+| /hall/16479/rev/story/83/ | PASS | true | true | true | - | false |
+| /story/cases/211/ | fail | true | true | false | **true** | **true** |
+| /story/cases/343/ | fail | true | true | true | false | **true** |
+| /story/cases/30/ | PASS | true | true | true | false | false |
+| /hall/13920/rev/story/43/ | PASS | true | true | true | **true** | false |
+| /hall/11862/rev/story/456/ | PASS | true | true | true | **true** | false |
+| /story/cases/284/ | fail | true | true | true | false | **true** |
+
+（先頭2件は出力末尾のみ取得。PASS/fail の集計値 4/8 はスクリプトの最終行による）
+
+## 観察
+
+1. **8件すべてが firsthand=true かつ specific=true。** 当事者本人による具体的な記述であり、
+   体験談セクションはソースの性質としてゲート要件に適合している。
+2. **落ちた4件はすべて preDecisionOrPhotoShoot=true**、かつ内容はいずれも**フォトウェディング**
+   （神戸のトータルプロデュース / 和装フォト / 雪山フォト）。式場探し系ではない。
+   plan 02 で導入した判定項目が意図どおり機能して分離している。
+3. **通過した4件のうち2件は promotional=true**（`/hall/*/rev/story/*` は式場レビュー配下のため）。
+   減点4を受けてなお、ゲート自体は通過している。
+4. 通過記事の内容は「総額430万円で神前式と披露宴」「ワイナリーで料理とワインを主役に」
+   「手作り席次表と地酒での鏡開き」など、**実費と演出のトレードオフを含む契約後の意思決定**。
+
+## 比較
+
+| 母集団 | ゲート通過率 | 出典 |
+| ------ | ------------ | ---- |
+| 既存 RSS パイプライン（note + Google News） | 8/43 = **18.6%** | plan 03 §5 V1 実測 |
+| 対照群（式場探し系の商業メディア記事） | 0/4 = **0%** | plan 04 §P4 再測定 |
+| 手動選定のエバーグリーン本群 | 6/6 = 100%（n=6、選定バイアスあり） | plan 04 §P4 再測定 |
+| **mwed.jp 体験談セクション（無作為抽出）** | **4/8 = 50.0%** | 本ログ |
+
+**無作為抽出で 50% は、これまで測定したどのソースより高い。**
+「大手メディアのコンテンツはゲートを通らない」という plan 06 初版 §3 の主張は、
+式場探し系記事4件の対照群からの過度な一般化であり、**実測により否定された**。
+
+## 留保
+
+- n=8 と小さい。rule of three により、この標本から母比率を強く主張することはできない
+- 本文テキストの抽出は測定目的の一時スクリプトによるもので、実装として採用したものではない
+  （測定後に削除済み。再現するには本ログの方法欄の手順による）
+- 8件のみの取得であり、3秒間隔を置いて実施した
