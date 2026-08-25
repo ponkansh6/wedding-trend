@@ -1241,11 +1241,30 @@ export async function recordPublication(
   publishedAt: string,
   bodyHash: string,
   hashKind: BodyHashKind,
+  textLength?: number,
+  linkDensity?: number,
+  paragraphCount?: number,
 ): Promise<void> {
-  await db.insert(postPublications).values({ postId, publishedAt, bodyHash }).onConflictDoUpdate({
-    target: postPublications.postId,
-    set: { publishedAt, bodyHash },
-  });
+  await db
+    .insert(postPublications)
+    .values({
+      postId,
+      publishedAt,
+      bodyHash,
+      ...(textLength !== undefined ? { textLength } : {}),
+      ...(linkDensity !== undefined ? { linkDensity } : {}),
+      ...(paragraphCount !== undefined ? { paragraphCount } : {}),
+    })
+    .onConflictDoUpdate({
+      target: postPublications.postId,
+      set: {
+        publishedAt,
+        bodyHash,
+        ...(textLength !== undefined ? { textLength } : {}),
+        ...(linkDensity !== undefined ? { linkDensity } : {}),
+        ...(paragraphCount !== undefined ? { paragraphCount } : {}),
+      },
+    });
   await db.insert(postPublicationKinds).values({ postId, hashKind }).onConflictDoUpdate({
     target: postPublicationKinds.postId,
     set: { hashKind },

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  extractArticleContainer,
+  extractArticleHeadline,
   extractVisibleText,
   selectJudgmentSlice,
   computeEvidenceSignals,
@@ -12,8 +14,9 @@ import {
   CRAWLER_USER_AGENT,
   MAX_LINK_DENSITY,
   MIN_PARAGRAPH_COUNT,
-  MAX_BOILERPLATE_LINE_RATIO,
 } from "@/lib/constants";
+
+const MWED_HOST = "www.mwed.jp";
 
 describe("article-text extraction", () => {
   it("1. strips script/style/noscript content from fixture HTML", () => {
@@ -43,15 +46,16 @@ describe("article-text extraction", () => {
     expect(visible).toBe("Wedding & Dress <Trend> \"Special\" 'Best' OK");
   });
 
-  it("3. skips leading nav text (~1200 chars) and returns ~1500-char slice", () => {
-    const filler = "ナビゲーションメニュー リンク お問い合わせ ホーム ".repeat(50); // ~1200+ chars
+  it("3. returns up to the first ~1500 chars of the (already container-scoped) body text", () => {
     const bodyContent =
       "ここからが記事の本編である。ウェディングドレスの選び方について詳しく解説する。".repeat(30);
-    const fullText = filler + bodyContent;
 
-    const slice = selectJudgmentSlice(fullText);
+    const slice = selectJudgmentSlice(bodyContent);
     expect(slice.length).toBeLessThanOrEqual(1500);
     expect(slice).toContain("ウェディングドレスの選び方");
+    // 固定オフセット（先頭スキップ）を廃止したため、入力の先頭がそのまま
+    // スライスの先頭になる。
+    expect(slice.startsWith("ここからが記事の本編である。")).toBe(true);
   });
 
   it("4. exposes the 512KB body size cap used by disciplinedFetch (plan 06 §5.2)", () => {
@@ -85,19 +89,147 @@ describe("article-text extraction", () => {
   });
 });
 
+describe("extractArticleHeadline", () => {
+  it("extracts the text of the first h1 inside the mwed.jp container structure", () => {
+    const containerHtml =
+      '<article class="story-detail-main-visual"><div class="story-detail-main-visual-header">' +
+      '<h1 class="story-detail-main-visual-header__title">ゲストの方との縁を伝えたロイヤルクラシックな結婚式</h1>' +
+      '<div class="story-detail-main-visual-header__date"><time>2026-08-01</time></div>' +
+      "</div></article>";
+    expect(extractArticleHeadline(containerHtml)).toBe(
+      "ゲストの方との縁を伝えたロイヤルクラシックな結婚式",
+    );
+  });
+
+  it("returns null when the container has no h1", () => {
+    const containerHtml =
+      "<div class='story-detail'><p>本文だけで見出しが無いページです。</p></div>";
+    expect(extractArticleHeadline(containerHtml)).toBeNull();
+  });
+
+  it("trims whitespace and decodes entities in the h1 text", () => {
+    const containerHtml = "<h1>  &amp;結婚式レポート  </h1>";
+    expect(extractArticleHeadline(containerHtml)).toBe("&結婚式レポート");
+  });
+
+  it("returns null for an empty/whitespace-only h1", () => {
+    const containerHtml = "<h1>   </h1>";
+    expect(extractArticleHeadline(containerHtml)).toBeNull();
+  });
+});
+
+describe("extractArticleContainer (www.mwed.jp incident fix)", () => {
+  /**
+   * 実 HTML の構造ダンプで確定した mwed.jp のツリー形状を模したフィクスチャ。
+   * div.renewal-2023-main-section の下に、口コミ・費用明細
+   * （div#point-section-top）とサブナビ（nav.renewal-2023-place-menu）が
+   * 記事本体（div.produce-story-detail > div.story-detail）の兄弟として存在する。
+   */
+  function mwedPageHtml(): string {
+    return `<html><head><title>体験談タイトル</title></head><body>
+      <header>サイトヘッダー ナビゲーション ログイン</header>
+      <div class="renewal-2023-main-section">
+        <div id="point-section-top">
+          <p>【口コミ】持ち込み料が高くて後悔した第三者の投稿です。星3。</p>
+          <p>費用明細: 会場費 80万円 衣装代 40万円 引き出物 15万円</p>
+        </div>
+        <nav class="renewal-2023-place-menu">
+          <a href="/hall/1">式場一覧</a>
+          <a href="/hall/2">口コミ一覧</a>
+        </nav>
+        <div class="produce-story-detail">
+          <div class="story-detail">
+            <article class="story-detail-main-visual"><h1>記事本文の見出し</h1></article>
+            <article class="story-detail-timeline">
+              <p>実際に結婚式を挙げた新婦が会場選びについて詳しく振り返り、持ち込み料の交渉や式場探しの体験を丁寧に説明しています。</p>
+            </article>
+          </div>
+        </div>
+      </div>
+      <footer>フッター 利用規約 会社概要</footer>
+    </body></html>`;
+  }
+
+  it("extracts only div.story-detail — excludes sibling reviews (point-section-top) and nav", () => {
+    const container = extractArticleContainer(mwedPageHtml(), MWED_HOST);
+    expect(container).not.toBeNull();
+    expect(container).toContain("記事本文の見出し");
+    expect(container).toContain("実際に結婚式を挙げた新婦");
+    expect(container).not.toContain("口コミ");
+    expect(container).not.toContain("持ち込み料が高くて後悔した");
+    expect(container).not.toContain("式場一覧");
+    expect(container).not.toContain("サイトヘッダー");
+    expect(container).not.toContain("フッター 利用規約");
+  });
+
+  it("falls back to div.produce-story-detail when div.story-detail is absent", () => {
+    const html = `<html><body>
+      <div class="renewal-2023-main-section">
+        <div id="point-section-top"><p>口コミです。</p></div>
+        <div class="produce-story-detail">
+          <p>story-detail が無い場合のフォールバック本文です。</p>
+        </div>
+      </div>
+    </body></html>`;
+    const container = extractArticleContainer(html, MWED_HOST);
+    expect(container).not.toBeNull();
+    expect(container).toContain("フォールバック本文");
+    expect(container).not.toContain("口コミです");
+  });
+
+  it("returns null when none of the selectors match (template change / corruption signal)", () => {
+    const html = `<html><body><div class="totally-different-layout"><p>本文らしきもの</p></div></body></html>`;
+    expect(extractArticleContainer(html, MWED_HOST)).toBeNull();
+  });
+
+  it("returns null for a host not in the allowlist", () => {
+    const html = `<html><body><div class="story-detail"><p>本文</p></div></body></html>`;
+    expect(extractArticleContainer(html, "not-on-the-allowlist.example.com")).toBeNull();
+  });
+});
+
+describe("computeEvidenceSignals is invariant to HTML source formatting (pretty vs minified)", () => {
+  it("produces identical signals for the same content pretty-printed and minified", () => {
+    // 旧 boilerplateLineRatio は extractVisibleText() の物理行（HTML ソースの
+    // 改行位置）に依存しており、同一内容でも整形スタイルが違うだけで値が
+    // 変動し（実測: pretty=0.684 / minified=0.000）ゲート判定が反転する欠陥が
+    // あった。3シグナルへの刷新でこの欠陥が再発しないことを固定する。
+    const prettyHtml = `<html>
+  <body>
+    <article>
+      <p>
+        実際に結婚式を挙げた新婦が会場選びについて詳しく振り返り、持ち込み料の交渉や式場探しの体験を丁寧に説明しています。
+      </p>
+      <p>
+        披露宴の演出やスピーチ依頼についても具体的な工夫を紹介しており読者にとって参考になる内容が多く含まれています。
+      </p>
+      <p>
+        装花や引出物の選び方についても触れられており当日の段取りをどう組み立てたかが具体的に書かれています。
+      </p>
+    </article>
+  </body>
+</html>`;
+
+    const minifiedHtml = prettyHtml.replace(/>\s+</g, "><").replace(/\s+/g, " ").trim();
+
+    const prettySignals = computeEvidenceSignals(prettyHtml);
+    const minifiedSignals = computeEvidenceSignals(minifiedHtml);
+
+    expect(prettySignals).toEqual(minifiedSignals);
+  });
+});
+
 describe("computeEvidenceSufficiency boundary behavior (plan 07 §6-Q1)", () => {
   const baseSignals = {
     textLength: MIN_EVIDENCE_INPUT_CHARS,
     linkDensity: 0,
     paragraphCount: MIN_PARAGRAPH_COUNT,
-    boilerplateLineRatio: 0,
   };
 
   it("passes when every signal sits exactly at its permissive boundary", () => {
     const result = computeEvidenceSufficiency({
       ...baseSignals,
       linkDensity: MAX_LINK_DENSITY,
-      boilerplateLineRatio: MAX_BOILERPLATE_LINE_RATIO,
     });
     expect(result).toEqual({ ok: true });
   });
@@ -138,33 +270,15 @@ describe("computeEvidenceSufficiency boundary behavior (plan 07 §6-Q1)", () => 
     });
   });
 
-  it("fails when boilerplateLineRatio exceeds the maximum, identifying boilerplate_line_ratio", () => {
-    const result = computeEvidenceSufficiency({
-      ...baseSignals,
-      boilerplateLineRatio: MAX_BOILERPLATE_LINE_RATIO + 0.01,
-    });
-    expect(result).toEqual({
-      ok: false,
-      reason: "extraction_insufficient",
-      failedConditions: ["boilerplate_line_ratio"],
-    });
-  });
-
-  it("fails with all four conditions reported when everything is simultaneously insufficient", () => {
+  it("fails with all three conditions reported when everything is simultaneously insufficient", () => {
     const result = computeEvidenceSufficiency({
       textLength: MIN_EVIDENCE_INPUT_CHARS - 1,
       linkDensity: MAX_LINK_DENSITY + 0.01,
       paragraphCount: MIN_PARAGRAPH_COUNT - 1,
-      boilerplateLineRatio: MAX_BOILERPLATE_LINE_RATIO + 0.01,
     });
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("unreachable");
-    const expected: EvidenceFailedCondition[] = [
-      "text_length",
-      "link_density",
-      "paragraph_count",
-      "boilerplate_line_ratio",
-    ];
+    const expected: EvidenceFailedCondition[] = ["text_length", "link_density", "paragraph_count"];
     expect(result.failedConditions.sort()).toEqual(expected.sort());
   });
 });
@@ -202,7 +316,7 @@ describe("computeEvidenceSignals (plan 07 §6-Q1)", () => {
     expect(result.failedConditions).toContain("link_density");
   });
 
-  it("computes textLength as 0 (and thus linkDensity 1) for empty HTML, fail-closed on all four conditions", () => {
+  it("computes textLength as 0 (and thus linkDensity 1) for empty HTML, fail-closed on all conditions", () => {
     const signals = computeEvidenceSignals("<html><body></body></html>");
     expect(signals.textLength).toBe(0);
     expect(signals.linkDensity).toBe(1);
@@ -210,12 +324,8 @@ describe("computeEvidenceSignals (plan 07 §6-Q1)", () => {
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("unreachable");
     expect(result.reason).toBe("extraction_insufficient");
-    // fail-closed の意味: 空 HTML は4条件すべてで不合格になる。
-    // `computeBoilerplateLineRatio()` は行が0本のとき `1`（= 100%定型行）を
-    // 返す仕様のため、`boilerplate_line_ratio` も MAX_BOILERPLATE_LINE_RATIO
-    // (0.5) を超えて不合格側に含まれる（曖昧なときは合格側に倒さない）。
     expect(result.failedConditions.sort()).toEqual(
-      ["text_length", "link_density", "paragraph_count", "boilerplate_line_ratio"].sort(),
+      ["text_length", "link_density", "paragraph_count"].sort(),
     );
   });
 
@@ -230,7 +340,7 @@ describe("computeEvidenceSignals (plan 07 §6-Q1)", () => {
       <div class="header">ナビゲーション ホーム 会員登録</div>
       <div class="content">
         <div class="title">結婚式の準備で気をつけたいポイント</div>
-        <div class="body-text">実際に結婚式を挙げた新婦が会場選びについて詳しく振り返り、持ち込み料の交渉や式場探しの体験を丁寧に説明しています。披露宴の演出やスピーチ依頼についても具体的な工夫を紹介しており読者にとって参考になる内容が多く含まれています。装花や引出物の選び方についても触れられており当日の段取りをどう組み立てたかが具体的に書かれています。</div>
+        <div class="body-text">実際に結婚式を挙げた新婦が会場選びについて詳しく振り返った体験談です。持ち込み料の交渉や式場探しの体験を丁寧に説明しています。披露宴の演出やスピーチ依頼についても具体的な工夫を紹介しており読者にとって参考になる内容が多く含まれています。装花や引出物の選び方についても触れられており当日の段取りをどう組み立てたかが具体的に書かれています。</div>
       </div>
       <div class="footer">運営会社 利用規約 お問い合わせ</div>
     </body></html>`;

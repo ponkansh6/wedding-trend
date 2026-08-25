@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, index, primaryKey } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, real, index, primaryKey } from "drizzle-orm/sqlite-core";
 import { CATEGORIES } from "@/lib/types";
 
 /**
@@ -180,6 +180,9 @@ export const postPublications = sqliteTable(
       .references(() => posts.id),
     publishedAt: text("published_at").notNull(),
     bodyHash: text("body_hash").notNull(),
+    textLength: integer("text_length"),
+    linkDensity: real("link_density"),
+    paragraphCount: integer("paragraph_count"),
   },
   (table) => ({
     publishedAtIdx: index("idx_post_publications_published_at").on(table.publishedAt),

@@ -84,6 +84,39 @@ export const AI_SUMMARY_VALIDATE_MAX_CHARS = 200;
 /** 最低限の証拠テキスト長（これ未満は证据不十分として弾く）。 */
 export const MIN_EVIDENCE_INPUT_CHARS = 80;
 
+// ── 判定根拠文（renderRationaleText）の文字数上下限 ──────────────
+/**
+ * `renderRationaleText()`（`src/lib/publish/gate.ts`）が生成する判定根拠文の
+ * 下限文字数。`renderRationaleText()` 自身がこの値を下回ったら例外を投げる
+ * （上限側と対称）。
+ *
+ * 値は「公開経路に実際に到達しうる」構造的最小値——理論上の zod 下限
+ * （`topicAnchor` は `CurationItemSchema` 上 `min(1)`）ではない。`topicAnchor`
+ * が1字の場合、`checkAnchorGrounding()`（`src/lib/publish/gate.ts`）の
+ * `extractFeatureTerms()` が長さ2未満の語を特徴語として採用しないため
+ * 特徴語ゼロとなり `anchor_ungrounded` で終端棄却され、公開経路に乗らない
+ * （`src/lib/pipeline/ingest.ts` / `evergreen.ts` / `discovery-ingest.ts` は
+ * いずれも `publishPost`/`status: "published"` の前に `checkAnchorGrounding()`
+ * を通す）。有用度スコア（`computeUsefulnessScore()`）側には公開を止める
+ * 閾値ゲートが無く、有用度6項目すべて false の投稿も公開されうることは
+ * 確認済み。したがって公開経路上の構造的最小値は「`topicAnchor` が
+ * `checkAnchorGrounding()` を通過する最小の2字、有用度6項目すべて false」
+ * のケースであり、`renderRationaleText()` の実測値は 38 字
+ * （`tests/publish-gate.test.ts` にリテラル固定）。
+ */
+export const RATIONALE_TEXT_MIN_CHARS = 38;
+/**
+ * `renderRationaleText()` が生成する判定根拠文の上限文字数。
+ * `renderRationaleText()` は topicAnchor + 有用度6項目のフラグから決定的に
+ * 組み立てる純粋関数のため、これを超えることは仕様の上限緩和ではなく
+ * テンプレート側の実装バグを意味する（`renderRationaleText()` はこの値を
+ * 超えたら例外を投げる）。
+ *
+ * 構造的最大値（アンカー40字×フラグ6個＝206字）を上回るよう設定。テンプレート
+ * やラベルを変更した場合は構造的最大値を測り直すこと。
+ */
+export const RATIONALE_TEXT_MAX_CHARS = 210;
+
 // ── 再試行キュー（plan 07 §7: pending 廃止）────────────────────
 /** 再試行キューの最大試行回数。超過は `retry_exhausted` で終端棄却する。 */
 export const RETRY_MAX_ATTEMPTS = 3;
@@ -135,6 +168,18 @@ export type AllowlistedHost = {
    * 対象指定は採用しない——セクション＋パス接頭辞で定義する」）。
    */
   readonly articlePathPatterns: readonly RegExp[];
+  /**
+   * 記事本文コンテナを特定する CSS セレクタ（優先順）。実 HTML の構造ダンプで
+   * 確定した「記事本体を囲む最小の要素」を先頭から試し、最初にマッチした
+   * 要素の innerHTML を本文抽出の対象にする（`src/lib/sources/article-text.ts`
+   * の `extractArticleContainer()`）。ページ全体を測るとナビ・フッター・
+   * 第三者コンテンツ（口コミ等）が Q1 ゲートの指標に混入するため、
+   * このセレクタでサブツリーを切り出してから指標を計算する。
+   *
+   * どのセレクタにも一致しない場合はテンプレート変更等による破損とみなし
+   * `null` を返す（サイレントにページ全体へフォールバックしない）。
+   */
+  readonly articleContainerSelectors: readonly string[];
 };
 export const HOST_ALLOWLIST: readonly AllowlistedHost[] = [
   // www.mwed.jp: 規約 URL は実地調査で確認済み（HTTP 200、ページタイトル
@@ -155,6 +200,13 @@ export const HOST_ALLOWLIST: readonly AllowlistedHost[] = [
     host: "www.mwed.jp",
     tosUrl: "https://www.mwed.jp/kiyaku",
     articlePathPatterns: [/^\/story\/cases\/[^/]+\/?$/, /^\/hall\/[^/]+\/rev\/story\/[^/]+\/?$/],
+    // 実 HTML の構造ダンプで確定: div.story-detail が記事本体（見出し・
+    // タイムライン・スタッフ紹介等）のみを含む最小コンテナ。口コミ・費用明細
+    // （div#point-section-top）やサブナビ（nav.renewal-2023-place-menu）は
+    // 兄弟ノードであり、このセレクタで自動的に除外される。
+    // div.produce-story-detail はそのフォールバック（story-detail 自体が
+    // テンプレート変更で消えた場合に一段広い範囲を試す）。
+    articleContainerSelectors: ["div.story-detail", "div.produce-story-detail"],
   },
 ];
 /** allowlist のホスト名のみを取り出した配列（ホスト判定用）。 */
@@ -182,12 +234,18 @@ export function isAllowedArticleUrl(url: string): boolean {
 }
 
 // ── 抽出品質の決定的ゲート（plan 07 §6-Q1）──────────────────
-/** リンクテキスト長 / 全テキスト長。これを超えたら本文抽出破損（ナビ誤認等）とみなす。 */
+/**
+ * リンクテキスト長 / 全テキスト長。これを超えたら本文抽出破損（ナビ誤認等）とみなす。
+ *
+ * この値はページ全体を測っていた旧実装時代のもの。`computeEvidenceSignals()`
+ * は今はホストの `articleContainerSelectors` で切り出したコンテナ HTML の
+ * 内側でのみリンク密度を計算する（ナビ・フッターは既にサブツリー除外済み）。
+ * コンテナ内基準へ変更済みだが、実測に基づく再校正はまだ行っていない
+ * （当面この値のまま据え置く。実データ収集後に見直すこと）。
+ */
 export const MAX_LINK_DENSITY = 0.35;
 /** 本文と判定するために必要な最小段落数。 */
 export const MIN_PARAGRAPH_COUNT = 3;
-/** 定型行（ナビ・フッター等の反復行）が全行に占める割合の上限。 */
-export const MAX_BOILERPLATE_LINE_RATIO = 0.5;
 
 // ── yield 崩壊検知（plan 07 §6-Q2 / K8）─────────────────────
 /** ホストのベースライン算出に必要な最小日数。これ未満は小標本ノイズとして扱わない。 */

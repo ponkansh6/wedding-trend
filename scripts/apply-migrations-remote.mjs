@@ -133,7 +133,7 @@ for (const { file, statement, label } of plan) {
     console.log(`  ✅ [${file}] ${label}`);
   } catch (err) {
     const message = String(err?.message ?? err);
-    if (/already exists/i.test(message)) {
+    if (/already exists|duplicate column name/i.test(message)) {
       skipped += 1;
       console.log(`  ⏭️  [${file}] ${label}  （既存のためスキップ）`);
       continue;

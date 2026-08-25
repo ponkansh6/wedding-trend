@@ -103,5 +103,6 @@ console.log(
   `  checked=${revalidation.checked} seeded=${revalidation.seeded} ok=${revalidation.ok} ` +
     `retracted(source_gone=${revalidation.retractedSourceGone}, ` +
     `robots_disallowed=${revalidation.retractedRobotsDisallowed}, ` +
-    `tos_changed=${revalidation.retractedTosChanged}, body_changed=${revalidation.retractedBodyChanged})`,
+    `tos_changed=${revalidation.retractedTosChanged}, body_changed=${revalidation.retractedBodyChanged}) ` +
+    `containerNotFoundSkipped=${revalidation.containerNotFoundSkipped}`,
 );

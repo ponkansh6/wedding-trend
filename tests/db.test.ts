@@ -926,7 +926,7 @@ describe("Database Repository and Queries", () => {
 
     it("listPublishedForRevalidation returns published rows with host derived from url, including posts with no post_publications row (self-heal seed path)", async () => {
       const seededId = await insertPublished("https://revalidate.example.com/seeded");
-      await recordPublication(seededId, "2026-01-05T00:00:00.000Z", "hash-a", "surrogate");
+      await recordPublication(seededId, "2026-01-05T00:00:00.000Z", "hash-a", "surrogate", 0, 0, 0);
 
       const unseededId = await insertPublished("https://revalidate.example.com/unseeded");
 
@@ -1172,14 +1172,14 @@ describe("Database Repository and Queries", () => {
 
     it("countPublishedSince / countPublishedSinceByHost aggregate from post_publications.published_at", async () => {
       const idA = await insertPublished("https://cap.example.com/a");
-      await recordPublication(idA, "2026-01-05T00:00:00.000Z", "hash-a", "surrogate");
+      await recordPublication(idA, "2026-01-05T00:00:00.000Z", "hash-a", "surrogate", 0, 0, 0);
       const idB = await insertPublished("https://cap.example.com/b");
-      await recordPublication(idB, "2026-01-06T00:00:00.000Z", "hash-b", "surrogate");
+      await recordPublication(idB, "2026-01-06T00:00:00.000Z", "hash-b", "surrogate", 0, 0, 0);
       const idC = await insertPublished("https://other.example.com/c");
-      await recordPublication(idC, "2026-01-06T00:00:00.000Z", "hash-c", "surrogate");
+      await recordPublication(idC, "2026-01-06T00:00:00.000Z", "hash-c", "surrogate", 0, 0, 0);
       // sinceIso より前: 対象外
       const idD = await insertPublished("https://cap.example.com/d");
-      await recordPublication(idD, "2025-12-01T00:00:00.000Z", "hash-d", "surrogate");
+      await recordPublication(idD, "2025-12-01T00:00:00.000Z", "hash-d", "surrogate", 0, 0, 0);
       // post_publications に行が無い（未シード）: 対象外
       await insertPublished("https://cap.example.com/e");
 

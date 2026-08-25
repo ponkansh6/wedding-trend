@@ -71,6 +71,8 @@ import { checkTermsOfServiceChange, disciplinedFetch } from "@/lib/sources/acces
 import {
   computeEvidenceSignals,
   computeEvidenceSufficiency,
+  extractArticleContainer,
+  extractArticleHeadline,
   extractHtmlTitle,
   extractVisibleText,
   selectJudgmentSlice,
@@ -94,7 +96,12 @@ export interface DiscoveryIngestStats {
   extractionFailedByTextLength: number;
   extractionFailedByLinkDensity: number;
   extractionFailedByParagraphCount: number;
-  extractionFailedByBoilerplate: number;
+  /**
+   * `extractArticleContainer()` がホストの `articleContainerSelectors` の
+   * いずれにも一致せず `null` を返した件数（テンプレート変更による破損
+   * シグナル）。この場合 Q1 の他の指標は計算せず即座に終端棄却する。
+   */
+  extractionFailedByContainer: number;
   /** M1 タイトルフィルタで終端棄却。 */
   titleFilterDropped: number;
   /** M1 topicAnchor 接地失敗で終端棄却。 */
@@ -148,7 +155,7 @@ function emptyStats(): DiscoveryIngestStats {
     extractionFailedByTextLength: 0,
     extractionFailedByLinkDensity: 0,
     extractionFailedByParagraphCount: 0,
-    extractionFailedByBoilerplate: 0,
+    extractionFailedByContainer: 0,
     titleFilterDropped: 0,
     anchorUngroundedDropped: 0,
     rateCapped: 0,
@@ -204,6 +211,25 @@ function tokenFingerprintWords(token: string): [number, number] {
  * （§5.3 の「本文の非保存」制約に抵触しない）。ハミング距離ベースで近似
  * 類似度を測れるため、M4 の本文ドリフト検知に使う。
  */
+/**
+ * ページ全体 HTML からコンテナ（ナビ・フッター・第三者コンテンツを排した
+ * 記事本文サブツリー）を切り出し、そのコンテナ HTML 基準で本文ハッシュを
+ * 計算する。`processUrl()`（初回公開）と `revalidatePublishedPosts()`
+ * （M4 再検証）の両方がこの関数を経由することで、保存済みハッシュと
+ * 再検証時のハッシュの算出基盤を一致させる（コンテナ基準 vs ページ全体
+ * 基準の不一致は M4 の誤発火を招く）。
+ *
+ * `extractArticleContainer()` がホストのセレクタに一致せず `null` を返した
+ * 場合、この関数も `null` を返す。呼び出し側はページ全体へフォールバック
+ * してはならない（それは本来のコンテナ基準ハッシュと構造的に食い違う値を
+ * 生成し、以後の全比較を破壊する）。
+ */
+export function computeContainerBodyHash(html: string, host: string): string | null {
+  const containerHtml = extractArticleContainer(html, host);
+  if (containerHtml === null) return null;
+  return computeBodyHash(extractVisibleText(containerHtml));
+}
+
 export function computeBodyHash(text: string): string {
   const tokens = shingles(text);
   if (tokens.length === 0) return "0".repeat(16);
@@ -354,6 +380,7 @@ async function publishPost(
   curation: CurationResult,
   bodyHash: string,
   now: string,
+  signals: { textLength: number; linkDensity: number; paragraphCount: number },
 ): Promise<boolean> {
   if (!(await upsertPostRow(host, url, title, "published"))) return false;
 
@@ -396,7 +423,15 @@ async function publishPost(
   // discovery レーンは HOST_ALLOWLIST のホストの記事本文を実際に取得して
   // 判定するため、bodyHash は実本文フィンガープリント。"body" として明示する
   // （plan 07 D3: M4 の本文ドリフト判定の対象はこの種別のみ）。
-  await recordPublication(postId, now, bodyHash, "body");
+  await recordPublication(
+    postId,
+    now,
+    bodyHash,
+    "body",
+    signals.textLength,
+    signals.linkDensity,
+    signals.paragraphCount,
+  );
   return true;
 }
 
@@ -575,8 +610,27 @@ async function processUrl(
     return { abortedByKillGate: false, abortedByRetryAfter: false };
   }
 
-  // Q1: 決定的抽出品質ゲート（LLM 呼び出しの前）。
-  const signals = computeEvidenceSignals(html);
+  // コンテナ抽出: ナビ・フッター・第三者コンテンツ（口コミ等）を排したサブ
+  // ツリーを切り出す。どのセレクタにも一致しなければテンプレート変更等に
+  // よる破損とみなし、Q1 の他指標を計算せず即座に終端棄却する。
+  const containerHtml = extractArticleContainer(html, host);
+  if (containerHtml === null) {
+    console.warn(`[discovery-ingest] container_not_found for ${url}`);
+    if (retryCtx) await completeRetry(retryCtx.urlHash);
+    await dropPost(host, url, title, "extraction_insufficient", now);
+    await setDiscoverySeenStatus(host, url, "fetched");
+    stats.extractionInsufficientDropped++;
+    stats.extractionFailedByContainer++;
+    return { abortedByKillGate: false, abortedByRetryAfter: false };
+  }
+
+  // originalTitle: コンテナ内 h1（記事見出しそのもの）を第一候補とし、
+  // 取れなければ従来の <title> タグ由来の値へフォールバックする
+  // （h1 の有無はテンプレート差異で起こりうるため、フォールバックを必ず残す）。
+  const originalTitle = extractArticleHeadline(containerHtml) ?? title;
+
+  // Q1: 決定的抽出品質ゲート（LLM 呼び出しの前）。コンテナ HTML 基準で計算する。
+  const signals = computeEvidenceSignals(containerHtml);
   const evidenceGate = computeEvidenceSufficiency(signals);
   if (!evidenceGate.ok) {
     console.warn(
@@ -584,7 +638,7 @@ async function processUrl(
         evidenceGate.failedConditions,
       )} textLength=${signals.textLength} linkDensity=${signals.linkDensity.toFixed(
         3,
-      )} paragraphCount=${signals.paragraphCount} boilerplateLineRatio=${signals.boilerplateLineRatio.toFixed(3)}`,
+      )} paragraphCount=${signals.paragraphCount}`,
     );
     for (const condition of evidenceGate.failedConditions) {
       switch (condition) {
@@ -597,21 +651,23 @@ async function processUrl(
         case "paragraph_count":
           stats.extractionFailedByParagraphCount++;
           break;
-        case "boilerplate_line_ratio":
-          stats.extractionFailedByBoilerplate++;
+        case "container_not_found":
+          // container_not_found はこの分岐に到達する前に既に処理済み
+          // （extractArticleContainer が null を返した場合は上で早期 return
+          // している）。computeEvidenceSufficiency() はこの条件を返さない。
           break;
       }
     }
     if (retryCtx) await completeRetry(retryCtx.urlHash);
-    await dropPost(host, url, title, "extraction_insufficient", now);
+    await dropPost(host, url, originalTitle, "extraction_insufficient", now);
     await setDiscoverySeenStatus(host, url, "fetched");
     stats.extractionInsufficientDropped++;
     return { abortedByKillGate: false, abortedByRetryAfter: false };
   }
 
-  const bodyText = extractVisibleText(html);
+  const bodyText = extractVisibleText(containerHtml);
   const slice = selectJudgmentSlice(bodyText);
-  const curation = await curateSingle({ title, excerpt: slice });
+  const curation = await curateSingle({ title: originalTitle, excerpt: slice });
   if (curation === null) {
     const gaveUp = await retryOrGiveUp(host, url, "llm_transient", now, retryCtx);
     await setDiscoverySeenStatus(host, url, "fetched");
@@ -624,10 +680,10 @@ async function processUrl(
   }
 
   // M1-1: タイトル公開フィルタ。
-  const titleGate = filterTitle(title);
+  const titleGate = filterTitle(originalTitle);
   if (!titleGate.ok) {
     if (retryCtx) await completeRetry(retryCtx.urlHash);
-    await dropPost(host, url, title, "title_filter", now);
+    await dropPost(host, url, originalTitle, "title_filter", now);
     await setDiscoverySeenStatus(host, url, "fetched");
     stats.titleFilterDropped++;
     return { abortedByKillGate: false, abortedByRetryAfter: false };
@@ -642,7 +698,7 @@ async function processUrl(
       )}`,
     );
     if (retryCtx) await completeRetry(retryCtx.urlHash);
-    await dropPost(host, url, title, "anchor_ungrounded", now);
+    await dropPost(host, url, originalTitle, "anchor_ungrounded", now);
     await setDiscoverySeenStatus(host, url, "fetched");
     stats.anchorUngroundedDropped++;
     return { abortedByKillGate: false, abortedByRetryAfter: false };
@@ -669,8 +725,22 @@ async function processUrl(
     return { abortedByKillGate: false, abortedByRetryAfter: false };
   }
 
-  const bodyHash = computeBodyHash(bodyText);
-  const published = await publishPost(host, url, title, curation, bodyHash, now);
+  // processUrl 到達時点で containerHtml は非 null であることを確認済み
+  // （上の container_not_found 早期 return を通過している）ため、ここでの
+  // computeContainerBodyHash() は null を返さない。revalidatePublishedPosts()
+  // と完全に同一の算出基盤（コンテナ抽出 → 可視テキスト化 → simhash）を
+  // 経由させることで、保存時と再検証時のハッシュの不一致を構造的に防ぐ。
+  const bodyHash = computeContainerBodyHash(html, host);
+  if (bodyHash === null) {
+    // 到達しないはずだが、型上は string | null なので安全側で扱う。
+    if (retryCtx) await completeRetry(retryCtx.urlHash);
+    await dropPost(host, url, originalTitle, "extraction_insufficient", now);
+    await setDiscoverySeenStatus(host, url, "fetched");
+    stats.extractionInsufficientDropped++;
+    stats.extractionFailedByContainer++;
+    return { abortedByKillGate: false, abortedByRetryAfter: false };
+  }
+  const published = await publishPost(host, url, originalTitle, curation, bodyHash, now, signals);
   if (!published) {
     // markCurated/upsert 失敗は DB 側の一時的な問題として再試行に回す。
     const gaveUp = await retryOrGiveUp(host, url, "fetch_transient", now, retryCtx);
@@ -860,6 +930,13 @@ export interface RevalidationStats {
   retractedTosChanged: number;
   /** 本文ハッシュの大幅な変化による撤回。 */
   retractedBodyChanged: number;
+  /**
+   * `extractArticleContainer()` がホストのセレクタに一致せず本文ハッシュ
+   * ドリフト判定をスキップした件数（テンプレート変更の疑いはあるが、単独の
+   * 客観的証拠だけでは撤回しない。撤回済みハッシュは維持し次回以降に再判定
+   * する）。撤回ではないため retracted* には含まれない。
+   */
+  containerNotFoundSkipped: number;
   /** 問題なし（正常確認）。 */
   ok: number;
 }
@@ -872,6 +949,7 @@ function emptyRevalidationStats(): RevalidationStats {
     retractedRobotsDisallowed: 0,
     retractedTosChanged: 0,
     retractedBodyChanged: 0,
+    containerNotFoundSkipped: 0,
     ok: 0,
   };
 }
@@ -985,7 +1063,7 @@ export async function revalidatePublishedPosts(opts?: {
         const surrogateHash =
           post.bodyHash ??
           computeContentHash(state?.originalTitle ?? "", state?.originalExcerpt ?? null);
-        await recordPublication(post.id, seededPublishedAt, surrogateHash, "surrogate");
+        await recordPublication(post.id, seededPublishedAt, surrogateHash, "surrogate", 0, 0, 0);
         stats.seeded++;
         continue;
       }
@@ -994,15 +1072,25 @@ export async function revalidatePublishedPosts(opts?: {
     }
 
     const html = await verdict.response.text();
-    const bodyText = extractVisibleText(html);
-    const newHash = computeBodyHash(bodyText);
+    // processUrl() と完全に同一の算出基盤（コンテナ抽出 → 可視テキスト化 →
+    // simhash）で計算する。ページ全体 HTML へのフォールバックは行わない
+    // （保存済みハッシュと基盤が食い違い、M4 が全件誤発火する）。
+    const newHash = computeContainerBodyHash(html, post.host);
+    if (newHash === null) {
+      // コンテナが取れない = テンプレート変更等の疑いはあるが、これ単独は
+      // 客観的な本文変化の証拠ではない（撤回理由コードに該当するものが無い）。
+      // 既存の bodyHash は維持し、比較をスキップして次回以降に再判定する。
+      console.warn(`[discovery-ingest] revalidate container_not_found for post ${post.id}`);
+      stats.containerNotFoundSkipped++;
+      continue;
+    }
 
     if (post.bodyHash == null) {
       // シード経路: この post は post_publications 導入前に公開されたもの。
       // publishedAt は posts.created_at を使う（Q4 の偽バースト防止）。
       const states = await getPostsByUrls([post.url]);
       const seededPublishedAt = states.get(post.url)?.createdAt ?? now;
-      await recordPublication(post.id, seededPublishedAt, newHash, "body");
+      await recordPublication(post.id, seededPublishedAt, newHash, "body", 0, 0, 0);
       stats.seeded++;
       continue;
     }

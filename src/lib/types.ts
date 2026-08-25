@@ -41,7 +41,7 @@ export type PostStatus = "published" | "rejected" | "retracted";
 
 /** `posts.status = "rejected"` の理由コード（plan 07 §7）。 */
 export type DropReason =
-  | "extraction_insufficient" // Q1 決定的ゲート不合格
+  | "extraction_insufficient" // Q1 決定的ゲート不合格（`EvidenceFailedCondition` の詳細内訳は `src/lib/sources/article-text.ts` 参照）
   | "title_filter" // M1 タイトルフィルタ
   | "anchor_ungrounded" // M1 topicAnchor の語彙的接地に失敗
   | "not_useful" // LLM が有用でないと判定

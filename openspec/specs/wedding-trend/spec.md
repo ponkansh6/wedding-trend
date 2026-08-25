@@ -167,8 +167,11 @@ DB を共有しており、`scripts/apply-migrations-remote.mjs` が `ALTER TABL
 - `post_id`: `posts.id` と同じ型の主キー。
 - `topic_anchor`: トピックのアンカー（40字以内、`src/lib/llm/schemas.ts` の
   `CurationItemSchema` が検証）。結論のアンカーであってはならない（§10-3）。
-- `rationale_text`: 判定根拠文（60〜90字、記事固有の具体数値禁止。
-  半角・全角数字を含む場合は zod の `refine` で機械的に拒否される）。
+- `rationale_text`: 判定根拠文（38〜210字、記事固有の具体数値禁止。
+  半角・全角数字を含む場合は zod の `refine` で機械的に拒否される。
+  下限は `RATIONALE_TEXT_MIN_CHARS`、上限は `RATIONALE_TEXT_MAX_CHARS`
+  （いずれも `src/lib/constants.ts`）として `renderRationaleText()` が
+  機械的に強制する。字数要件の改定経緯は §10 第3項を参照）。
 - `evidence_sufficient`: LLM が判定に足る原文テキストを得られたか
   （boolean。`false` の投稿には rationale 行自体を作らない運用のため、
   実質的にこのテーブルに存在する行は常に `true`）。
@@ -325,13 +328,13 @@ RSS フィードが構造的に存在しないセクション（第1対象: `mwe
   `ingestDiscoveredUrls()`）**: `discovery_seen` の `pending` URL を、
   `src/lib/sources/access-discipline.ts` の `disciplinedFetch()`（§10-6）
   経由で 1 件ずつ取得する。取得した HTML から `src/lib/sources/article-text.ts`
-  の `extractHtmlTitle()` で元タイトルを、`extractVisibleText()` +
-  `selectJudgmentSlice()`（先頭 1,200 字をスキップした後続 1,500 字）で
-  判定スライスを得る。判定スライスが `hasSufficientEvidence()`（文字数閾値
-  `MIN_EVIDENCE_INPUT_CHARS`）未満、または `<title>` が取得できない場合は
-  LLM を呼ばずに `pending` 保存（または `skipped`）とする。閾値を満たせば
-  `curateSingle()` に判定スライスを渡し、`evidenceSufficient: true` で
-  返った場合のみ `published` として `post_rationales`（§5）を含めて保存する。
+  の `extractHtmlTitle()` で元タイトルを取得し、続いて**記事本文コンテナの
+  切り出し → 判定スライスの抽出**の2段階で判定対象を得る（詳細は §10-4 第4項）。
+  切り出しに失敗した場合、または判定スライスが `hasSufficientEvidence()`
+  （文字数閾値 `MIN_EVIDENCE_INPUT_CHARS`）未満の場合、あるいは `<title>` が
+  取得できない場合は LLM を呼ばずに `pending` 保存（または `skipped`）とする。
+  条件を満たせば `curateSingle()` に判定スライスを渡し、キュレーション結果を
+  `published` として `post_rationales`（§5）を含めて保存する。
   **`posts.original_excerpt` には常に `null` を保存し、抽出した本文は
   いかなるカラムにも永続化しない**（§10-5。DB への書き込みは
   `upsertPosts()` に渡す直前のオブジェクトで `originalExcerpt: null` を
@@ -652,9 +655,9 @@ false（0点）より上」の**楽観的な中位**に意図的に置いてお�
 - 描画は判定根拠（`topicAnchor`/`rationaleText`）を優先し、無ければ
   `aiSummary` にフォールバックする（`src/components/feed/feed-card.tsx`）。
 - 両フェーズとも `posts.status = "published"` が前提条件であり、
-  `evidenceSufficient=false`（LLM の棄権）の投稿は `post_rationales` 行を
-  持たない・`status` が `"pending"` のまま留まるため、いずれのフェーズでも
-  表示されない（§10-4 の不変条件と整合する）。
+  §10-4 の決定的ゲート（判定に足る原文テキストが存在しない）を満たさない
+  投稿は `post_rationales` 行を持たない・`status` が `"pending"` のまま
+  留まるため、いずれのフェーズでも表示されない（§10-4 の不変条件と整合する）。
 
 ---
 
@@ -670,23 +673,32 @@ false（0点）より上」の**楽観的な中位**に意図的に置いてお�
 1. **元ソースへの導線が最優先 CTA**: すべてのカードにおいて、元投稿・記事へのリンク（または公式埋め込み）を明確なメインアクションとして配置する。
 2. **著作者名の必須クレジット**: 引用（著作権法第32条）の要件を満たすため、カード上に著者名・情報源名を必ず表示する。`sourceName` は常時表示し、`author` は非 null の場合に表示する。
 3. **出力は記事の性質についての言明であり、内容の配達ではない**（ゼロクリック化の回避）:
-   - **タイトルは `originalTitle`（元記事タイトル）の逐語表示**。AI によるタイトルの生成・書き換えは行わない（`src/components/feed/feed-card.tsx` は `card.originalTitle` をそのまま表示する）。他人の記事タイトルを AI が書き換えて表示する行為は同一性保持権（著作権法第20条、非営利免除の無い人格権）への配慮上、本システムで最も改変に近い操作になるため。`aiTitle` カラムは `posts` に残っているが、`ALTER TABLE` 不可の制約上休眠カラムとして残しているだけで、いずれの摂取経路（RSS 自動巡回・`/admin` 手動投入・discovery）も `markCurated()` 呼び出し時に `aiTitle` を渡さず、値は常に null のままである。
-   - **判定根拠文（`rationaleText`、`post_rationales.rationale_text`）は 60〜90字**とし、記事固有の具体数値（半角・全角数字）を含めてはならない。`src/lib/llm/schemas.ts` の `CurationItemSchema` が zod の `refine` で `/[0-9０-９]/` を機械的に拒否する（プロンプト指示だけに依拠しない）。
+   - **タイトルは `originalTitle`（元記事タイトル）の逐語表示**。AI によるタイトルの生成・書き換えは行わない（`src/components/feed/feed-card.tsx` は `card.originalTitle` をそのまま表示する）。他人の記事タイトルを AI が書き換えて表示する行為は同一性保持権（著作権法第20条、非営利免除の無い人格権）への配慮上、本システムで最も改変に近い操作になるため。`aiTitle` カラムは `posts` に残っているが、`ALTER TABLE` 不可の制約上休眠カラムとして残しているだけで、いずれの摂取経路（RSS 自動巡回・`/admin` 手動投入・discovery）も `markCurated()` 呼び出し時に `aiTitle` を渡さず、値は常に null のままである。discovery 経路では、`extractArticleContainer()` が切り出したコンテナ内の見出し要素（`www.mwed.jp` は `h1.story-detail-main-visual-header__title`）から `originalTitle` を取得し、取得できない場合のみ従来どおり `<title>` タグ由来の値（`記事見出し - 会場名の事例 | みんなのウェディング` のようにサイト名・定型句が付随する）にフォールバックする。これは「元記事タイトルの逐語表示」という本項の要件により忠実な取得手段への変更であり、フォールバック経路自体は引き続き存在する。**この変更は今後取得する記事にのみ適用され、既に `published` として保存済みの投稿（id 233〜237 を含む）の `originalTitle` はバックフィルされない**（h1 由来の値を得るには記事本文の再フェッチが必要なため）。
+   - **判定根拠文（`rationaleText`、`post_rationales.rationale_text`）は 38〜210字**とし、記事固有の具体数値（半角・全角数字）を含めてはならない。`src/lib/llm/schemas.ts` の `CurationItemSchema` が zod の `refine` で `/[0-9０-９]/` を機械的に拒否する（プロンプト指示だけに依拠しない）。下限は `RATIONALE_TEXT_MIN_CHARS`（`src/lib/constants.ts`。値 38）、上限は `RATIONALE_TEXT_MAX_CHARS`（同ファイル。値 210）として、いずれも `renderRationaleText()` 自身が機械的に強制し、逸脱した根拠文は例外を投げて公開させない。
+     - **下限38字の決め方（2026-08-25）**: 上限と同じく構造的な値から決めており、実測分布からの帰納ではない。`renderRationaleText()` の出力は `topicAnchor` と有用度6 boolean のみで決まる決定的関数だが、`topicAnchor` の理論上の zod 下限（`CurationItemSchema` は `min(1)`）は公開経路には到達しない——`topicAnchor` が1字の場合、`checkAnchorGrounding()`（`src/lib/publish/gate.ts`）内の `extractFeatureTerms()` が長さ2未満の語を特徴語として採用しないため特徴語ゼロとなり、`anchor_ungrounded` で終端棄却される（`src/lib/pipeline/ingest.ts` / `evergreen.ts` / `discovery-ingest.ts` はいずれも `status: "published"` に至る前に `checkAnchorGrounding()` を通す）。一方、有用度6項目全 false の投稿を公開前に止める閾値ゲートは存在しない（`computeUsefulnessScore()`＝`src/lib/scoring/usefulness.ts` はソート用のスコアを返すのみで、公開可否の判定には使われない）ことも確認済み。したがって**公開経路に実際に到達しうる構造的最小値**は「`topicAnchor` が `checkAnchorGrounding()` を通過する最小の2字、有用度6項目すべて false」のケースであり、`renderRationaleText()` で実測すると38字（`「あい」に関する記事です。自動判定では特筆すべき特徴は検出されませんでした。`）になる。この値は `tests/publish-gate.test.ts` にリテラルで固定している。テンプレート文言を変更した場合はこの構造的最小値を測り直すこと。
+     - **改定の経緯（2026-08-25 当初）**: 当初の要件は 60〜90字だったが、コンテナ抽出導入後に初めて公開された5件（id 233〜237）はいずれも実測146字で、要件に違反していた。原因は `src/lib/publish/gate.ts` の `renderRationaleText()` が、`topicAnchor` と有用度6 boolean のうち true のラベルを `「{anchor}」に関する記事で、{ラベル1}、{ラベル2}…という特徴が自動判定されました。` の形で機械的に連結する**決定的テンプレート**であり、true になったフラグ数に比例して文字数が伸びる構造だったこと。今回の5件は5項目すべてが true だったため、構造的に90字を超過した。これは LLM の応答ブレではなく、テンプレート設計そのものが90字上限を満たせない構造的欠陥だった。公開が0件で続いていたため、この乖離は長期間露見しなかった。
+     - **1回目の対応方針（150字。撤回済み・下記参照）**: `renderRationaleText()` の出力を短縮する実装変更ではなく、要件側の上限を150字に緩和する方針を採用した。しかしこの150字は**実測1点（id 233 の146字）のみを根拠に決めた値**であり、`topicAnchor` の長さが9〜29字とばらつくこと（true フラグ数が同じでも `topicAnchor` が長いほど出力全体も伸びる）を勘定に入れていなかった。結果として、150字への改定と同時に公開済み5件のうち3件（id 234=155字、id 235=166字、id 237=158字）が**改定直後の時点で既に上限超過**という状態になっていた（id 233=146字、id 236=146字の2件は非超過）。単一サンプルから閾値を決めると分布の裾で破綻するという教訓であり、同種の失敗は本 spec 内の他の閾値でも起きている——`boilerplateLineRatio`（閾値0.5、観測最小値0.501の直下という際どい校正）や `MAX_LINK_DENSITY`（閾値0.35、観測分布のほぼ中央に置かれた未校正の暫定値。§10-11 参照）も、実測分布の広がりを十分に見ずに数値を固定した点で同じ性質の問題を抱えている。
+     - **2回目の対応方針（210字。今回・恒久対応）**: 150字も実測ベースの暫定値である以上、同じ失敗を繰り返しかねない。そこで**実測値からではなく、構造的最大値から上限を決め直した**。`renderRationaleText()` の出力を決める変数は `topicAnchor`（`CurationItemSchema` の zod 上限 40字）と、有用度6 boolean のうち true になったラベルの列挙（最大6個）の2つのみであり、この組み合わせで理論上到達しうる最大値は206字である。**210字はこの構造的最大値（206字）を上回るように決めた値であり、実測分布から帰納した値ではない。** テンプレートが変わらない限り出力は原理的に210字を超えることがなく、`RATIONALE_TEXT_MAX_CHARS` 超過時に発生する `renderRationaleText()` の例外（fail-loud）は「実際に起こりうる異常の検知」ではなく**「起こり得ないことのアサーション」**として機能する。**テンプレート文言や有用度ラベルの文言・個数を変更した場合は、構造的最大値（206字という具体値）を必ず測り直す必要がある。** この回帰は `tests/publish-gate.test.ts` にテンプレート変更時の構造的最大値検証として固定してあり、テンプレート変更で構造的最大値が210字を超えた場合はテストが失敗する。
+     - **この緩和で維持される制約（上限の撤廃ではない）**:
+       - 数字（半角・全角）の禁止は維持する。`CurationItemSchema` の zod `refine` による機械的拒否は変更しない。
+       - 原文からの引用・原文固有の表現を含めないという性質は維持する。
+       - 判定根拠文は決定的テンプレートのみで組み立て、LLM の自由文を根拠文として直接採用しない設計は維持する。
+       - 210字という新上限も**撤廃ではなく機械的な強制**であり、`RATIONALE_TEXT_MAX_CHARS = 210`（`src/lib/constants.ts`）を超えた根拠文は公開処理で拒否される。
+     - **公開済み5件（id 233〜237）の扱い**: 上記のとおり id 234・235・237 は150字上限の下では違反状態だったが、今回の210字への改定によりいずれも仕様に適合する（実測最大166字 < 210字）。したがってこれら5件の撤回・再公開処理は不要である。
    - **トピックアンカー（`topicAnchor`、`post_rationales.topic_anchor`）は 40字以内**とし、**トピックのアンカーであって結論のアンカーであってはならない**（可: 「持ち込み料の交渉について書いている」／不可: 「持ち込み料〇万円が交渉で免除された」のような結論の開示）。この制約はプロンプト（`src/lib/llm/prompts.ts` の `RATIONALE_RULES`）で指示するのみで、文字数以外は機械的な検証を持たない。
    - **判定テスト**: 読者がクリックせずに情報要求を満たせる出力は、原文の代替物になっている。カードあたり事実は最大1つ、否定的評価（`promotional=true` 等）は公開画面に一切出さない（§9.8 のスコア非公開と一貫させる）。
 4. **判定に足る原文テキストが存在しない場合は LLM 判定結果を公開しない（経路非依存の不変条件）**: すべての摂取経路において、LLM キュレーション（`curateSingle`）を呼び出す前に「判定対象となる原文テキストが存在するか」を判定する。「原文テキスト」の定義は経路ごとに異なり、新たな摂取経路を追加する際は必ず本項に定義を追記する。
    - **SNS 手動投入経路**（`src/lib/pipeline/submit-url.ts` の `runSubmitUrl`）: oEmbed が返すキャプション（`embed.title`）と、運営が投稿時に添える補足メモ（`note`、空白のみは「補足なし」として扱う）の 2 つのみを指す。
    - **エバーグリーン経路**（`src/lib/pipeline/evergreen.ts` の `curateEvergreenUrl`）: OGP メタデータの `og:description` / `<meta name="description">`（`meta.description`）のみを指す。`<title>` / `og:title` は表示ラベルであり判定の材料にしない。本文 DOM は一切読まない（`src/lib/sources/ogp.ts` は meta タグと JSON-LD のみを走査する。`tests/ogp.test.ts` がこの不変条件を固定する）。
-   - **discovery 経路**（`src/lib/pipeline/discovery-ingest.ts` の `ingestDiscoveredUrls`）: 取得した記事 HTML から `src/lib/sources/article-text.ts` の `extractVisibleText()` + `selectJudgmentSlice()` で抽出した**判定スライス**（先頭 1,200 字をスキップした後続 1,500 字）のみを指す。§10-5 の禁止事項と対になる規律であり、この判定スライスは LLM 入力としてのみ使い DB には一切保存しない。
+   - **discovery 経路**（`src/lib/pipeline/discovery-ingest.ts` の `ingestDiscoveredUrls`）: 取得した記事 HTML から、まず `src/lib/sources/article-text.ts` の `extractArticleContainer()` がホストごとの許可リスト `articleContainerSelectors`（`src/lib/constants.ts` の `HOST_ALLOWLIST` 各エントリ）に従って**記事本文コンテナ**（`www.mwed.jp` は `div.story-detail` を第一候補、`div.produce-story-detail` を次点とする優先順のセレクタ配列）を切り出す。いずれのセレクタにも一致しない場合は `null` を返し、コンテナが存在しない記事は判定対象にしない（破損シグナルとしての扱いは §11 参照）。切り出したコンテナの innerHTML から `extractVisibleText()` でノイズ除去後、その**先頭から最大 1,500 字**を**判定スライス**として抽出する（コンテナ抽出前段が入る以前は「ページ全体の先頭 1,200 字をスキップした後続 1,500 字」であったが、口コミ等の第三者 UGC やナビが判定対象に混入する欠陥があったため、コンテナ抽出後の先頭スライスに変更した）。§10-5 の禁止事項と対になる規律であり、この判定スライスは LLM 入力としてのみ使い DB には一切保存しない。この節は `shared_plan/06-rationale-and-scraping.md` §5.3 に対応する運用規律であり、`src/lib/sources/article-text.ts` と `src/lib/pipeline/discovery-ingest.ts` のコード内コメントが参照する「§5.3」は当該 plan ドキュメントの節番号を指す（spec.md 側の対応内容は本項 §10-3〜§10-5 である）。
    - Instagram のキーなし oEmbed エンドポイント（`graph.facebook.com/.../instagram_oembed`）はキャプション本文を一切返さない（`version` / `provider_name` / `provider_url` / `type` / `width` / `html` のみで `title` が欠落する。2026-08-22 の実リクエストで確認済み）。これに対し YouTube の oEmbed は `title` を返す。
    - SNS 経路で原文テキストが両方とも存在しない場合、`runSubmitUrl` は `curateSingle` を一切呼ばず、`status: "pending"` のまま投稿を保存する（`aiSummary` は null のまま）。取得済みの embed（`embedProvider` / `embedHtml` / `embedFetchedAt`）と `url` は保存し、再取得コストを避ける。呼び出し元には安定コード `"needs_source_text"` を返す。
    - エバーグリーン経路で原文テキストが存在しない場合も同様に、`curateEvergreenUrl` は `curateSingle` を一切呼ばず、取得済みのメタデータ（タイトル・著者・サムネイル・公開日）と `url` を `status: "pending"` で保存する。呼び出し元には安定コード `"needs_source_text"` を返す。LLM 失敗時のフォールバック要約も原文テキスト（excerpt）のみから生成し、title へのフォールバックは行わない。
-   - discovery 経路で判定スライスが `hasSufficientEvidence()`（`MIN_EVIDENCE_INPUT_CHARS` 文字未満）を満たさない場合、または `<title>` が取得できない場合は、`curateSingle` を呼ばず `pending` 保存（`<title>` 不在時は保存すらせず `skipped`）とする。
-   - **LLM 自身による棄権（`evidenceSufficient: false`）でも公開しない。** 判定対象の原文テキストが存在していても、LLM が判定に足る情報が無いと判断した場合は `evidenceSufficient: false` を返し、呼び出し元は `status: "pending"` で保存する（`post_rationales` 行は作らない）。「原文テキストの有無」というゲート単独ではなく、LLM の判定不能宣言も等しく非公開理由になる（`src/lib/llm/schemas.ts` の `CurationItemSchema.evidenceSufficient`）。
+   - discovery 経路では、記事本文コンテナの切り出しに失敗した場合（`extractArticleContainer()` が `null` を返す。理由コード `container_not_found`）、判定スライスが `hasSufficientEvidence()`（`MIN_EVIDENCE_INPUT_CHARS` 文字未満）を満たさない場合、または `<title>` が取得できない場合のいずれかに該当すれば、`curateSingle` を呼ばず `pending` 保存（`<title>` 不在時は保存すらせず `skipped`）とする。これらはすべて LLM 呼び出し前の**決定的ゲート**であり、LLM の自己申告による棄権には依拠しない（決定的ゲートの指標定義とコンテナ未マッチの扱いの設計意図は §11-1 を参照）。
    - 公開の可否は最終的に §9.9 の表示条件（`RATIONALE_DISPLAY_PHASE`）に従う。`status: "pending"` の投稿と `post_rationales` 行が無い投稿はいずれのフェーズでも表示されない。
-   - 原文テキストが存在し、かつ LLM が `evidenceSufficient: true` を返した場合は、従来通り `curateSingle` によるキュレーション結果を `published` として保存する。
+   - 決定的ゲートを通過した場合は、`curateSingle` によるキュレーション結果を `published` として保存する。
    - **出典クレジット（第 2 項）の解決規則（エバーグリーン経路）**: 出典名は「運営の明示指定（CLI の `--source-name`、前後空白は trim）→ `og:site_name` → URL ホスト名（`www.` を除去した実在ドメイン）」の順で解決する。いずれも解決できない場合、架空のソース名を捏造せずに保存を拒否する（安定コード `"no_source_name"`）。サイト名を示さない固定文字列へのフォールバック生成は禁止。discovery 経路の `sourceName` は `registrableDomain(url)`（解決できなければ対象ホスト名）で決定する（`src/lib/pipeline/discovery-ingest.ts`）。
-5. **抽出本文の永続化禁止**: discovery 経路で取得した本文（`extractVisibleText()` / `selectJudgmentSlice()` の出力）は LLM 判定の入力としてのみ使用し、**`posts` を含むいかなるカラムにも永続化しない**。`src/lib/pipeline/discovery-ingest.ts` の `upsertPostRow()` は `originalExcerpt: null` を常に渡し、discovery 経路由来の投稿の `originalExcerpt` は常に `null` になる。理由は3つ: (a) §10-3/§10-4 の「取得・判定は情報解析、公開は表現を含まない言明」という二層構造を維持できる、(b) 「他人の著作物のデータベース」を新たに作らない、(c) 本文が DB に存在すると将来誰かがそれを要約の材料に使う drift を構造的に防ぐ（無ければ使えない）。エバーグリーン経路・SNS 経路の `originalExcerpt`（`og:description` やキャプション等、配信者自身が公開用に提供したメタデータ）とは性質が異なるため区別すること——discovery 経路の抽出本文は配信者が要約用に提供したものではなく、記事本文からの機械的な抽出（複製）である。
+5. **抽出本文の永続化禁止**: discovery 経路で取得した本文（記事本文コンテナ抽出（`extractArticleContainer()`）を経た判定スライスの出力）は LLM 判定の入力としてのみ使用し、**`posts` を含むいかなるカラムにも永続化しない**。`src/lib/pipeline/discovery-ingest.ts` の `upsertPostRow()` は `originalExcerpt: null` を常に渡し、discovery 経路由来の投稿の `originalExcerpt` は常に `null` になる。理由は3つ: (a) §10-3/§10-4 の「取得・判定は情報解析、公開は表現を含まない言明」という二層構造を維持できる、(b) 「他人の著作物のデータベース」を新たに作らない、(c) 本文が DB に存在すると将来誰かがそれを要約の材料に使う drift を構造的に防ぐ（無ければ使えない）。エバーグリーン経路・SNS 経路の `originalExcerpt`（`og:description` やキャプション等、配信者自身が公開用に提供したメタデータ）とは性質が異なるため区別すること——discovery 経路の抽出本文は配信者が要約用に提供したものではなく、記事本文からの機械的な抽出（複製）である。
 6. **アクセス規律（discovery 経路の本文取得のみに適用。実装 `src/lib/sources/access-discipline.ts`）**:
    - **robots.txt の遵守**: 取得前に必ず確認し、`isAllowed()` が false を返す URL は取得しない（`blocked_robots` として `discovery_seen` を `skipped` にする）。取得結果は 24 時間以内でキャッシュする（RFC 9309 の推奨）。
    - **`Crawl-delay` を下限として尊重**: robots.txt に `Crawl-delay` の指定があれば、ホストあたり最小間隔（既定 `MIN_HOST_INTERVAL_MS` = 5秒）とその値（秒）×1000msの大きい方を実際の間隔とする。
@@ -756,8 +768,46 @@ false（0点）より上」の**楽観的な中位**に意図的に置いてお�
 
 以下は §10-6 のアクセス規律に対する追加実装であり、plan 07 の Stage 0（M3・M4・M5）に対応する。
 
-1. **K2（規約変更検知）と allowlist の関係**: `source_policy.tosUrl` は `HOST_ALLOWLIST`（`src/lib/constants.ts` の各エントリの `tosUrl`）から解決する。**allowlist 側が真実の源（source of truth）であり、DB（`source_policy` テーブル）に格納された古い値は allowlist の値で上書きして解決する**（`src/lib/sources/access-discipline.ts`）。allowlist に未登録、または `tosUrl` が未設定のホストは `tosUrl: null` のまま維持され、K2 の対象にならない。
+1. **記事本文コンテナ抽出とセレクタ未マッチの扱い（決定的抽出品質ゲート）**:
+   `src/lib/sources/article-text.ts` の `extractArticleContainer(html, host)`
+   は、ホストごとに `HOST_ALLOWLIST` で定義した優先順のセレクタ配列
+   `articleContainerSelectors`（`www.mwed.jp` は `["div.story-detail",
+"div.produce-story-detail"]`）を先頭から順に試し、最初に一致した要素の
+   innerHTML を返す。**いずれのセレクタも一致しない場合は `null` を返し、
+   これ自体を記事取得の破損シグナルとして扱う**（理由コード
+   `container_not_found`。§10-4 第4項）。ページ全体を測る旧方式では、
+   口コミ領域（`div#point-section-top` 等、第三者 UGC）やサブナビが
+   記事本体と兄弟要素として同一ページ内に存在するため判定対象に混入して
+   いたが、コンテナ抽出はこれを構造的に排除する。
+   - **設計意図**: `container_not_found` を「静かに全文フォールバックする」
+     のではなく終端棄却の破損シグナルとして扱うのは、テンプレート変更の
+     検知とゲートの本来の目的が一致するため。セレクタが外れる主因は
+     ホスト側のテンプレート改訂であり、その場合は旧セレクタで拾える
+     箇所が記事本体ではない可能性が高い——「判定に足る本文が実際に
+     取れているか」を保証するゲートの目的と、「テンプレートが変わったら
+     早期に気づく」という運用上の要請が同じ実装で両立する。
+   - **決定的ゲートの指標**: コンテナ抽出後のテキストに対して
+     `textLength` / `linkDensity` / `paragraphCount` の3指標を算出し、
+     いずれも `src/lib/constants.ts` の閾値（`MIN_EVIDENCE_INPUT_CHARS`・
+     `MAX_LINK_DENSITY`・`MIN_PARAGRAPH_COUNT`）で判定する。**旧指標
+     `boilerplateLineRatio`（`computeBoilerplateLineRatio()`）は廃止した**
+     ——実験により、この指標は本文の内容ではなく HTML ソースの整形
+     スタイル（改行位置）に依存することが確定したため（同一内容でも
+     pretty-print 出力で 0.684、minify 出力で 0.000 となり、ゲート判定が
+     反転する）。本番運用ではこの指標により対象24件中24件が棄却され、
+     公開が一切発生しない状態になっていた。
+   - **判定スライスの再定義**: 「ページ全体の先頭 1,200 字をスキップした
+     後続 1,500 字」から、「**抽出したコンテナ本文の先頭から最大 1,500
+     字**」に変更した（§10-4 第4項）。コンテナ抽出という前段が入った
+     ことで、ページ先頭のスキップ（ナビ等を避けるための経験則）が不要に
+     なった。
+   - **`MAX_LINK_DENSITY` の再校正未了**: 閾値の数値（0.35）自体は変更
+     していないが、この値はページ全体を分母とした旧方式での経験則であり、
+     コンテナ内基準（分母が小さくなる）での実測に基づく再校正はまだ
+     行われていない。新方式運用後の実測データが蓄積次第、見直すこと。
+
+2. **K2（規約変更検知）と allowlist の関係**: `source_policy.tosUrl` は `HOST_ALLOWLIST`（`src/lib/constants.ts` の各エントリの `tosUrl`）から解決する。**allowlist 側が真実の源（source of truth）であり、DB（`source_policy` テーブル）に格納された古い値は allowlist の値で上書きして解決する**（`src/lib/sources/access-discipline.ts`）。allowlist に未登録、または `tosUrl` が未設定のホストは `tosUrl: null` のまま維持され、K2 の対象にならない。
    - **既知の許容トレードオフ（遅延）**: K2 の実行間隔は「1ホストあたり1日1回」であり、`source_policy.checkedAt` 列を robots.txt チェック側と共有している。そのため **robots.txt の変化を検知した直後は、規約チェックが最大1日遅延しうる**。追加専用（append-only）のマイグレーション制約下では列を新設するだけで解決できず、テーブルを分離すると `tosHash` が再び休眠カラム化するリスクを招くため、この遅延は仕様上許容する。
-2. **記事パスのホワイトリスト（`HOST_ALLOWLIST.articlePathPatterns`）**: discovery 対象の URL パスは `src/lib/constants.ts` の `AllowlistedHost.articlePathPatterns` で定義し、**取得前に**2段階で強制する——sitemap からの URL 収集（seed）段階と、本文取得直前の段階。口コミ投稿ページ（`/hall/{hallId}/rev/{commentId}/` 等、記事とはパス構造が異なる投稿単位のページ）はこのパターンに一致しないため、構造的に discovery 対象から除外される。
-3. **日次公開上限とホスト別シェア上限**: `DAILY_PUBLISH_CAP = 10`・`HOST_DAILY_SHARE_MAX = 0.5`（`src/lib/constants.ts`。plan 07 §9 Stage 2 の日次上限 ≤10 に対応）。当日の公開総数が `DAILY_PUBLISH_CAP` に達している、またはあるホストの当日公開数が `Math.max(1, Math.floor(DAILY_PUBLISH_CAP × HOST_DAILY_SHARE_MAX))` に達している場合、以後そのホストの新規公開を打ち切る。SNS 手動投入・エバーグリーン・discovery の全経路（`src/lib/pipeline/submit-url.ts`・`src/lib/pipeline/evergreen.ts`・`src/lib/pipeline/ingest.ts`・`src/lib/pipeline/discovery-ingest.ts`）で共通の判定関数を用いる。
-4. **`RetractionReason` と撤回 CLI**: `RetractionReason`（`src/lib/types.ts`）に `takedown_request` を追加した。4つの客観的トリガ（`source_gone` / `robots_disallowed` / `tos_changed` / `body_changed`）と異なり、**`takedown_request` のみが人間の判断による撤回**であり、自動検知パイプラインからは設定されない。撤回は `pnpm retract`（`scripts/retract.mjs`）で行う——既定は dry-run（対象一覧の表示のみ、DB 変更なし）、接続先を明示し、`--reason` は必須（既定値なし）で人間に毎回明示させる。実際に撤回するには `--yes`（または `--execute`）を要する。
+3. **記事パスのホワイトリスト（`HOST_ALLOWLIST.articlePathPatterns`）**: discovery 対象の URL パスは `src/lib/constants.ts` の `AllowlistedHost.articlePathPatterns` で定義し、**取得前に**2段階で強制する——sitemap からの URL 収集（seed）段階と、本文取得直前の段階。口コミ投稿ページ（`/hall/{hallId}/rev/{commentId}/` 等、記事とはパス構造が異なる投稿単位のページ）はこのパターンに一致しないため、構造的に discovery 対象から除外される。
+4. **日次公開上限とホスト別シェア上限**: `DAILY_PUBLISH_CAP = 10`・`HOST_DAILY_SHARE_MAX = 0.5`（`src/lib/constants.ts`。plan 07 §9 Stage 2 の日次上限 ≤10 に対応）。当日の公開総数が `DAILY_PUBLISH_CAP` に達している、またはあるホストの当日公開数が `Math.max(1, Math.floor(DAILY_PUBLISH_CAP × HOST_DAILY_SHARE_MAX))` に達している場合、以後そのホストの新規公開を打ち切る。SNS 手動投入・エバーグリーン・discovery の全経路（`src/lib/pipeline/submit-url.ts`・`src/lib/pipeline/evergreen.ts`・`src/lib/pipeline/ingest.ts`・`src/lib/pipeline/discovery-ingest.ts`）で共通の判定関数を用いる。
+5. **`RetractionReason` と撤回 CLI**: `RetractionReason`（`src/lib/types.ts`）に `takedown_request` を追加した。4つの客観的トリガ（`source_gone` / `robots_disallowed` / `tos_changed` / `body_changed`）と異なり、**`takedown_request` のみが人間の判断による撤回**であり、自動検知パイプラインからは設定されない。撤回は `pnpm retract`（`scripts/retract.mjs`）で行う——既定は dry-run（対象一覧の表示のみ、DB 変更なし）、接続先を明示し、`--reason` は必須（既定値なし）で人間に毎回明示させる。実際に撤回するには `--yes`（または `--execute`）を要する。

@@ -25,6 +25,7 @@ import {
 import {
   bodyHashSimilarity,
   computeBodyHash,
+  computeContainerBodyHash,
   ingestDiscoveredUrls,
   revalidatePublishedPosts,
 } from "@/lib/pipeline/discovery-ingest";
@@ -105,6 +106,12 @@ const DISALLOW_ALL_ROBOTS = "User-agent: *\nDisallow: /\n";
  * 持たせる。topicAnchor の特徴語（デフォルト「演出の予算配分」）を本文に
  * 逐語で含める。
  */
+/**
+ * HOST（www.mwed.jp）の `articleContainerSelectors` に一致する
+ * `div.story-detail` でラップする。コンテナ抽出導入後、これでラップしないと
+ * `extractArticleContainer()` が null を返し `container_not_found` として
+ * 棄却されてしまうため、既存の全フィクスチャがこれに依存する。
+ */
 function articleHtml(
   title: string | null,
   opts: { bodyChars?: number; includeAnchor?: boolean } = {},
@@ -114,7 +121,7 @@ function articleHtml(
   const anchorSentence =
     opts.includeAnchor === false ? "" : "演出の予算配分について詳しく書きます。";
   const filler = "あ".repeat(Math.max(0, bodyChars - anchorSentence.length));
-  return `<html>${head}<body>${anchorSentence}<p>${filler}</p><p>準備の記録です。</p><p>当日の様子です。</p></body></html>`;
+  return `<html>${head}<body><div class="story-detail">${anchorSentence}<p>${filler}</p><p>準備の記録です。</p><p>当日の様子です。</p></div></body></html>`;
 }
 
 async function seedPending(host: string, url: string): Promise<void> {
@@ -258,6 +265,58 @@ describe("ingestDiscoveredUrls", () => {
     expect(counts).toEqual({ pending: 0, fetched: 1, skipped: 0 });
   });
 
+  it("originalTitle: コンテナ内に h1 があれば <title> ではなく h1 のテキストを使う", async () => {
+    const url = `https://${HOST}/story/cases/with-h1`;
+    await seedPending(HOST, url);
+    const htmlTitle =
+      "ゲストの方との縁を伝えたロイヤルクラシックな結婚式 - ウェスティンホテル東京の事例 | みんなのウェディング";
+    const h1Text = "ゲストの方との縁を伝えたロイヤルクラシックな結婚式";
+    const bodyChars = 2000;
+    const anchorSentence = "演出の予算配分について詳しく書きます。";
+    const filler = "あ".repeat(Math.max(0, bodyChars - anchorSentence.length));
+    const html = `<html><head><title>${htmlTitle}</title></head><body><div class="story-detail"><article class="story-detail-main-visual"><div class="story-detail-main-visual-header"><h1 class="story-detail-main-visual-header__title">${h1Text}</h1></div></article>${anchorSentence}<p>${filler}</p><p>準備の記録です。</p><p>当日の様子です。</p></div></body></html>`;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL) => {
+        const u = String(input);
+        if (u.endsWith("/robots.txt")) return resp({ status: 200, body: ALLOW_ALL_ROBOTS });
+        if (u === url) return resp({ status: 200, body: html });
+        throw new Error(`unexpected fetch: ${u}`);
+      }),
+    );
+    mockedCurate.mockResolvedValue(sufficientCuration());
+
+    const stats = await ingestDiscoveredUrls(HOST);
+    expect(stats.published).toBe(1);
+
+    const post = (await getPostsByUrls([url])).get(url);
+    expect(post?.originalTitle).toBe(h1Text);
+    expect(post?.originalTitle).not.toBe(htmlTitle);
+  });
+
+  it("originalTitle: h1 が無いページは従来どおり <title> にフォールバックする（回帰防止）", async () => {
+    const url = `https://${HOST}/story/cases/no-h1`;
+    await seedPending(HOST, url);
+    const htmlTitle = "h1 の無いページのタイトル";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL) => {
+        const u = String(input);
+        if (u.endsWith("/robots.txt")) return resp({ status: 200, body: ALLOW_ALL_ROBOTS });
+        // articleHtml() のコンテナ（div.story-detail）は <h1> を含まない。
+        if (u === url) return resp({ status: 200, body: articleHtml(htmlTitle) });
+        throw new Error(`unexpected fetch: ${u}`);
+      }),
+    );
+    mockedCurate.mockResolvedValue(sufficientCuration());
+
+    const stats = await ingestDiscoveredUrls(HOST);
+    expect(stats.published).toBe(1);
+
+    const post = (await getPostsByUrls([url])).get(url);
+    expect(post?.originalTitle).toBe(htmlTitle);
+  });
+
   it("Q1: 本文が薄い場合は LLM を呼ばず extraction_insufficient で終端棄却する", async () => {
     const url = `https://${HOST}/story/cases/thin`;
     await seedPending(HOST, url);
@@ -282,7 +341,7 @@ describe("ingestDiscoveredUrls", () => {
     expect(stats.extractionFailedByTextLength).toBe(1);
     expect(stats.extractionFailedByLinkDensity).toBe(0);
     expect(stats.extractionFailedByParagraphCount).toBe(0);
-    expect(stats.extractionFailedByBoilerplate).toBe(0);
+    expect(stats.extractionFailedByContainer).toBe(0);
 
     const post = (await getPostsByUrls([url])).get(url);
     expect(post?.status).toBe("rejected");
@@ -305,7 +364,7 @@ describe("ingestDiscoveredUrls", () => {
     const divBody = "実際に結婚式を挙げた新婦が会場選びについて詳しく振り返った体験談です。".repeat(
       20,
     );
-    const divHtml = `<html><head><title>体験談タイトル</title></head><body><div class="content">${divBody}</div></body></html>`;
+    const divHtml = `<html><head><title>体験談タイトル</title></head><body><div class="story-detail"><div class="content">${divBody}</div></div></body></html>`;
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: string | URL) => {
@@ -322,6 +381,47 @@ describe("ingestDiscoveredUrls", () => {
     expect(mockedCurate).not.toHaveBeenCalled();
     expect(stats.extractionFailedByParagraphCount).toBe(1);
     expect(stats.extractionFailedByTextLength).toBe(0);
+  });
+
+  it("コンテナ抽出: articleContainerSelectors のいずれにも一致しないページは container_not_found で終端棄却し、LLM を呼ばない", async () => {
+    const url = `https://${HOST}/story/cases/no-container`;
+    await seedPending(HOST, url);
+    // div.story-detail / div.produce-story-detail のどちらにも一致しない
+    // レイアウト（テンプレート変更のシミュレーション）。中身自体は Q1 の
+    // 他条件（文字数・段落数・リンク密度）を満たす分量にしてあるが、
+    // コンテナが見つからない時点で他の指標は一切計算されず即座に棄却される。
+    const noContainerHtml = `<html><head><title>体験談タイトル</title></head><body>
+      <div class="totally-different-layout">
+        <p>実際に結婚式を挙げた新婦が会場選びについて詳しく振り返り、持ち込み料の交渉や式場探しの体験を丁寧に説明しています。</p>
+        <p>披露宴の演出やスピーチ依頼についても具体的な工夫を紹介しており読者にとって参考になる内容が多く含まれています。</p>
+        <p>装花や引出物の選び方についても触れられており当日の段取りをどう組み立てたかが具体的に書かれています。</p>
+      </div>
+    </body></html>`;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL) => {
+        const u = String(input);
+        if (u.endsWith("/robots.txt")) return resp({ status: 200, body: ALLOW_ALL_ROBOTS });
+        if (u === url) return resp({ status: 200, body: noContainerHtml });
+        throw new Error(`unexpected fetch: ${u}`);
+      }),
+    );
+
+    const stats = await ingestDiscoveredUrls(HOST);
+
+    expect(stats.extractionInsufficientDropped).toBe(1);
+    expect(stats.extractionFailedByContainer).toBe(1);
+    expect(stats.extractionFailedByTextLength).toBe(0);
+    expect(stats.extractionFailedByLinkDensity).toBe(0);
+    expect(stats.extractionFailedByParagraphCount).toBe(0);
+    expect(mockedCurate).not.toHaveBeenCalled();
+
+    const post = (await getPostsByUrls([url])).get(url);
+    expect(post?.status).toBe("rejected");
+    if (post?.id == null) throw new Error("post id should exist");
+    const removal = await db.select().from(postRemovals).where(eq(postRemovals.postId, post.id));
+    expect(removal[0]?.kind).toBe("dropped");
+    expect(removal[0]?.reason).toBe("extraction_insufficient");
   });
 
   it("M1: タイトルフィルタ不合格は title_filter で終端棄却する", async () => {
@@ -1015,6 +1115,9 @@ describe("revalidatePublishedPosts (M4)", () => {
       new Date().toISOString(),
       computeBodyHash("既存の公開記事（RSS 由来） 抜粋テキスト"),
       "surrogate",
+      0,
+      0,
+      0,
     );
 
     // 再検証が本文を取得しに行った場合、この内容とは一致しないハッシュになる
@@ -1048,6 +1151,9 @@ describe("revalidatePublishedPosts (M4)", () => {
       new Date().toISOString(),
       computeBodyHash("既存の公開記事（RSS 由来） 抜粋テキスト"),
       "surrogate",
+      0,
+      0,
+      0,
     );
 
     let articleFetched = false;
@@ -1084,6 +1190,9 @@ describe("revalidatePublishedPosts (M4)", () => {
       new Date().toISOString(),
       computeBodyHash("元の本文です。"),
       "body",
+      0,
+      0,
+      0,
     );
 
     vi.stubGlobal(
@@ -1111,6 +1220,9 @@ describe("revalidatePublishedPosts (M4)", () => {
       new Date().toISOString(),
       computeBodyHash("元の本文です。"),
       "body",
+      0,
+      0,
+      0,
     );
 
     vi.stubGlobal(
@@ -1135,7 +1247,7 @@ describe("revalidatePublishedPosts (M4)", () => {
     const originalHash = computeBodyHash(
       "結婚式の準備について詳しく書いた元々の記事本文です。".repeat(10),
     );
-    await recordPublication(postId, new Date().toISOString(), originalHash, "body");
+    await recordPublication(postId, new Date().toISOString(), originalHash, "body", 0, 0, 0);
 
     vi.stubGlobal(
       "fetch",
@@ -1145,7 +1257,7 @@ describe("revalidatePublishedPosts (M4)", () => {
         if (u === url)
           return resp({
             status: 200,
-            body: `<html><head><title>差し替え後</title></head><body>${"全く無関係なプログラミング入門講座の内容に差し替わっています。".repeat(10)}</body></html>`,
+            body: `<html><head><title>差し替え後</title></head><body><div class="story-detail">${"全く無関係なプログラミング入門講座の内容に差し替わっています。".repeat(10)}</div></body></html>`,
           });
         throw new Error(`unexpected fetch: ${u}`);
       }),
@@ -1169,5 +1281,188 @@ describe("revalidatePublishedPosts (M4)", () => {
 
     const post = (await getPostsByUrls([url])).get(url);
     expect(post?.status).toBe("retracted");
+  });
+
+  it("computeContainerBodyHash() は同一 HTML に対して安定したハッシュを返す（processUrl() の保存値との単体整合性）", async () => {
+    // 注意: このテストは computeContainerBodyHash() を直接呼び出しているだけで、
+    // revalidatePublishedPosts() の内部呼び出し経路を経由しない。そのため
+    // revalidatePublishedPosts() 内部の算出基盤がページ全体基準に差し替わっても
+    // このテストは検知できない（意図的破壊検証で確認済み）。M4 誤発火の再発防止は
+    // 下記の「E2E回帰」テストが担う。
+    const url = `https://${HOST}/story/cases/hash-basis-parity`;
+    await seedPending(HOST, url);
+    const html = articleHtml("ハッシュ基盤の一致を確認する記事");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL) => {
+        const u = String(input);
+        if (u.endsWith("/robots.txt")) return resp({ status: 200, body: ALLOW_ALL_ROBOTS });
+        if (u === url) return resp({ status: 200, body: html });
+        throw new Error(`unexpected fetch: ${u}`);
+      }),
+    );
+    mockedCurate.mockResolvedValue(sufficientCuration());
+
+    const ingestStats = await ingestDiscoveredUrls(HOST);
+    expect(ingestStats.published).toBe(1);
+
+    const postId = (await getPostsByUrls([url])).get(url)?.id;
+    if (postId == null) throw new Error("post id should exist");
+    const pub = await db.select().from(postPublications).where(eq(postPublications.postId, postId));
+    const storedHash = pub[0]?.bodyHash;
+    expect(storedHash).toMatch(/^[0-9a-f]{16}$/);
+
+    // revalidatePublishedPosts() 内部と同じ関数を、同じ生 HTML に対して直接
+    // 呼び出す（呼び出し箇所は discovery-ingest.ts 側で共有済み）。
+    const revalidateHash = computeContainerBodyHash(html, HOST);
+    expect(revalidateHash).toBe(storedHash);
+  });
+
+  it("E2E回帰: 本文が変わっていない記事は revalidatePublishedPosts() 経由で再検証しても撤回されない（M4 誤発火の再発防止）", async () => {
+    // processUrl() 経由で公開 → post_publications.body_hash を保存 →
+    // 同一 HTML のまま revalidatePublishedPosts() を実際に実行する、という
+    // パイプライン経由の経路をそのまま通す。関数を直接呼んで値を比較するのではなく、
+    // 「同一コンテンツを再検査しても撤回されない」というエンドツーエンドの
+    // 不変条件として検証する。revalidatePublishedPosts() 内部のハッシュ算出を
+    // ページ全体基準（旧実装）に戻すと、コンテナ抽出のみが除外するナビ・口コミ等の
+    // 差分によりハッシュが不一致になり、このテストは必ず落ちる。
+    const url = `https://${HOST}/story/cases/no-drift-e2e`;
+    await seedPending(HOST, url);
+    const html = articleHtml("同一本文の再検証で撤回されないことを確認する記事");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL) => {
+        const u = String(input);
+        if (u.endsWith("/robots.txt")) return resp({ status: 200, body: ALLOW_ALL_ROBOTS });
+        if (u === url) return resp({ status: 200, body: html });
+        throw new Error(`unexpected fetch: ${u}`);
+      }),
+    );
+    mockedCurate.mockResolvedValue(sufficientCuration());
+
+    const ingestStats = await ingestDiscoveredUrls(HOST);
+    expect(ingestStats.published).toBe(1);
+
+    const postId = (await getPostsByUrls([url])).get(url)?.id;
+    if (postId == null) throw new Error("post id should exist");
+    const before = await db
+      .select()
+      .from(postPublications)
+      .where(eq(postPublications.postId, postId));
+    expect(before).toHaveLength(1);
+
+    // 本文（HTML）は変えず、そのままパイプラインの再検証を実行する。
+    const stats = await revalidatePublishedPosts();
+
+    expect(stats.retractedBodyChanged).toBe(0);
+    const post = (await getPostsByUrls([url])).get(url);
+    expect(post?.status).toBe("published");
+  });
+
+  it("コンテナ未検出（セレクタ未マッチ）の HTML を再検証しても誤ってドリフト撤回しない", async () => {
+    const url = `https://${HOST}/story/cases/container-missing-on-revalidate`;
+    const postId = await seedPublished(url);
+    const originalHash = computeBodyHash(
+      "結婚式の準備について詳しく書いた元々の記事本文です。".repeat(10),
+    );
+    await recordPublication(postId, new Date().toISOString(), originalHash, "body", 0, 0, 0);
+
+    // div.story-detail / div.produce-story-detail のどちらにも一致しない HTML
+    // （テンプレート変更等でセレクタが外れたケースを模す）。
+    const noContainerHtml =
+      "<html><head><title>コンテナが見つからないページ</title></head>" +
+      '<body><div class="unrelated-wrapper"><p>何らかの本文らしきもの</p></div></body></html>';
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL) => {
+        const u = String(input);
+        if (u.endsWith("/robots.txt")) return resp({ status: 200, body: ALLOW_ALL_ROBOTS });
+        if (u === url) return resp({ status: 200, body: noContainerHtml });
+        throw new Error(`unexpected fetch: ${u}`);
+      }),
+    );
+
+    const stats = await revalidatePublishedPosts();
+
+    expect(stats.containerNotFoundSkipped).toBe(1);
+    expect(stats.retractedBodyChanged).toBe(0);
+
+    const post = (await getPostsByUrls([url])).get(url);
+    expect(post?.status).toBe("published");
+
+    // 既存のハッシュは維持される（比較不能のまま上書きしない）。
+    const pub = await db.select().from(postPublications).where(eq(postPublications.postId, postId));
+    expect(pub[0]?.bodyHash).toBe(originalHash);
+  });
+
+  it("保護機能の確認: 本文が実際に変わった場合は従来どおり body_changed で撤回する", async () => {
+    const url = `https://${HOST}/story/cases/real-drift-still-detected`;
+    const postId = await seedPublished(url);
+    const originalHash = computeBodyHash(
+      "結婚式の準備について詳しく書いた元々の記事本文です。".repeat(10),
+    );
+    await recordPublication(postId, new Date().toISOString(), originalHash, "body", 0, 0, 0);
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL) => {
+        const u = String(input);
+        if (u.endsWith("/robots.txt")) return resp({ status: 200, body: ALLOW_ALL_ROBOTS });
+        if (u === url)
+          return resp({
+            status: 200,
+            body: articleHtml("全く無関係な内容に差し替わっている実際の記事本文です", {
+              includeAnchor: false,
+              bodyChars: 4000,
+            }),
+          });
+        throw new Error(`unexpected fetch: ${u}`);
+      }),
+    );
+
+    const stats = await revalidatePublishedPosts();
+
+    expect(stats.retractedBodyChanged).toBe(1);
+    expect(stats.containerNotFoundSkipped).toBe(0);
+    const post = (await getPostsByUrls([url])).get(url);
+    expect(post?.status).toBe("retracted");
+  });
+
+  it("観測性: 成功した抽出/ゲート通過時、post_publications に text_length, link_density, paragraph_count が正しく記録される", async () => {
+    const url = `https://${HOST}/story/cases/signals-recorded-on-success`;
+    await seedPending(HOST, url);
+    const html = articleHtml("ウェディングの費用対効果に関する具体的な体験談です。".repeat(15));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL) => {
+        const u = String(input);
+        if (u.endsWith("/robots.txt")) return resp({ status: 200, body: ALLOW_ALL_ROBOTS });
+        if (u === url) return resp({ status: 200, body: html });
+        throw new Error(`unexpected fetch: ${u}`);
+      }),
+    );
+    mockedCurate.mockResolvedValue(sufficientCuration());
+
+    const ingestStats = await ingestDiscoveredUrls(HOST);
+    expect(ingestStats.published).toBe(1);
+
+    const postId = (await getPostsByUrls([url])).get(url)?.id;
+    if (postId == null) throw new Error("post id should exist");
+
+    const pub = await db.select().from(postPublications).where(eq(postPublications.postId, postId));
+    expect(pub).toHaveLength(1);
+
+    const record = pub[0];
+    expect(record).toBeDefined();
+    expect(typeof record?.textLength).toBe("number");
+    expect(record?.textLength).toBeGreaterThan(0);
+
+    expect(typeof record?.paragraphCount).toBe("number");
+    expect(record?.paragraphCount).toBeGreaterThanOrEqual(1);
+
+    expect(typeof record?.linkDensity).toBe("number");
+    expect(record?.linkDensity).toBeGreaterThanOrEqual(0);
+    expect(record?.linkDensity).toBeLessThanOrEqual(1);
   });
 });

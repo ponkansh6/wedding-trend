@@ -8,13 +8,24 @@
  * 取得した本文テキストは LLM の有用度判定・要約の入力（判断燃料）としてのみ使用され、
  * **データベースのいかなるカラム（originalExcerpt を含む）にも絶対に永続化してはならない。**
  * キュレーション処理が完了した後は速やかに破棄されること。
+ *
+ * ⚠️ コンテナ抽出（2026-08 の見直し）:
+ * かつて `computeEvidenceSignals()` はページ全体を測っており、ナビ・フッター・
+ * 第三者コンテンツ（口コミ等）を含んだ値で Q1 ゲートを判定していた（結果、
+ * www.mwed.jp で本番 24 件中 24 件が誤って棄却された）。実 HTML の構造ダンプで
+ * 記事本体と口コミが別サブツリーの兄弟であることが確定したため、
+ * `extractArticleContainer()` でホストごとのセレクタに一致する最小の
+ * サブツリーを切り出し、以降の指標・判定燃料はすべてそのコンテナ HTML を
+ * 基準に計算する。JSON-LD 等の構造化データは存在しないため（実測 0 件）、
+ * DOM セレクタによる抽出が唯一の経路。
  */
 
+import { parseHTML } from "linkedom";
 import {
   MIN_EVIDENCE_INPUT_CHARS,
   MAX_LINK_DENSITY,
   MIN_PARAGRAPH_COUNT,
-  MAX_BOILERPLATE_LINE_RATIO,
+  HOST_ALLOWLIST,
 } from "@/lib/constants";
 // 閾値は定数の一元管理のため constants.ts にのみ定義し、ここで再公開する。
 export { MIN_EVIDENCE_INPUT_CHARS };
@@ -48,6 +59,33 @@ function stripNonRenderedRegions(html: string): string {
 }
 
 /**
+ * ホストの `articleContainerSelectors`（優先順）を順に試し、最初にマッチした
+ * 要素の innerHTML を記事本文コンテナとして返す。どのセレクタにも一致しない
+ * 場合、または `host` が allowlist に無い場合は `null`（＝テンプレート変更や
+ * 未知ホストによる破損シグナル。ページ全体へサイレントにフォールバックしない）。
+ *
+ * HTML パーサ（linkedom）を使う——正規表現では入れ子タグを平衡できないため、
+ * 兄弟サブツリー（口コミ等）を確実に除外するにはこの方法が必須。
+ */
+export function extractArticleContainer(html: string, host: string): string | null {
+  const entry = HOST_ALLOWLIST.find((h) => h.host === host);
+  if (!entry) return null;
+
+  const { document } = parseHTML(html);
+  for (const selector of entry.articleContainerSelectors) {
+    let element: Element | null;
+    try {
+      element = document.querySelector(selector);
+    } catch {
+      // 不正なセレクタ（本来コミット時に混入しないはずだが、防御的に無視して次を試す）。
+      continue;
+    }
+    if (element) return element.innerHTML;
+  }
+  return null;
+}
+
+/**
  * HTML から <script>, <style>, <noscript> 要素・HTML コメントを中身ごと削除し、
  * タグを除去して可視テキストを抽出・整形する。
  */
@@ -72,15 +110,17 @@ export function extractVisibleText(html: string): string {
 }
 
 /**
- * ナビゲーション等のヘッダー部分（最初の約1,200文字）をスキップし、
- * 次の約1,500文字を抽出して判断燃料とする。
+ * コンテナ本文の先頭から最大 1,500 字を判断燃料として抽出する。
+ *
+ * 旧実装は「ナビ等のヘッダー部分（先頭 1,200 字）をスキップ」する固定
+ * オフセットを持っていたが、これはページ全体を対象にしていた時代の名残で
+ * あり、入力が既に `extractArticleContainer()` で本文サブツリーに絞られた
+ * 現在はナビをスキップする理由がない（スキップするとむしろ本文冒頭を
+ * 読み捨てるだけになる）。
  */
 export function selectJudgmentSlice(visibleText: string): string {
-  const skipChars = 1200;
   const takeChars = 1500;
-
-  const sliceTarget = visibleText.length > skipChars ? visibleText.slice(skipChars) : visibleText;
-  return sliceTarget.slice(0, takeChars);
+  return visibleText.slice(0, takeChars);
 }
 
 /**
@@ -93,26 +133,25 @@ export function selectJudgmentSlice(visibleText: string): string {
  * 薄いラッパとして残す（既存呼び出し元 —— discovery-ingest.ts 等 —— は
  * 別レーンが `computeEvidenceSufficiency()` への置き換えを行う）。
  * 新規コードは `computeEvidenceSignals()` + `computeEvidenceSufficiency()`
- * を使うこと（リンク密度・段落数・定型行率も検証する、より厳格なゲート）。
+ * を使うこと（リンク密度・段落数も検証する、より厳格なゲート）。
  */
 export function hasSufficientEvidence(text: string): boolean {
   return text.length >= MIN_EVIDENCE_INPUT_CHARS;
 }
 
-/** Q1: 抽出品質の決定的ゲート（plan 07 §6-Q1）に使う4シグナル。 */
+/**
+ * Q1: 抽出品質の決定的ゲート（plan 07 §6-Q1）に使う3シグナル。
+ * すべて `extractArticleContainer()` が切り出したコンテナ HTML を基準に
+ * 計算する（ページ全体ではない）。
+ */
 export type EvidenceSignals = {
-  /** 可視テキストの総長（空白除去後）。 */
+  /** コンテナ内の可視テキストの総長（空白除去後）。 */
   textLength: number;
-  /** リンクテキストの総長 / 可視テキスト総長（0〜1）。ナビ誤認の主要シグナル。 */
+  /** コンテナ内のリンクテキスト総長 / 可視テキスト総長（0〜1）。ナビ誤認の主要シグナル。 */
   linkDensity: number;
-  /** 本文と判定できる段落（生 HTML の `<p>` タグ数）。 */
+  /** コンテナ内で本文と判定できる段落（生 HTML の `<p>` タグ数）。 */
   paragraphCount: number;
-  /** 定型行（ナビ・フッター等の短い反復行）が全行に占める割合（0〜1）。 */
-  boilerplateLineRatio: number;
 };
-
-/** 定型行とみなす行の最大文字数（ナビ項目・パンくず等は短い傾向がある）。 */
-const BOILERPLATE_LINE_MAX_CHARS = 8;
 
 /**
  * `<a>...</a>` の中身（タグ除去・エンティティデコード・空白除去後）の
@@ -152,18 +191,14 @@ function countParagraphTags(html: string): number {
   return matches ? matches.length : 0;
 }
 
-/** `extractVisibleText()` の出力行のうち、短い（＝定型的な）行の割合。 */
-function computeBoilerplateLineRatio(visibleText: string): number {
-  const lines = visibleText.split("\n").filter((line) => line.length > 0);
-  if (lines.length === 0) return 1;
-  const boilerplateLines = lines.filter((line) => line.length <= BOILERPLATE_LINE_MAX_CHARS);
-  return boilerplateLines.length / lines.length;
-}
-
 /**
- * 生 HTML から Q1 の4シグナルを算出する（plan 07 §6-Q1）。
+ * コンテナ HTML から Q1 の3シグナルを算出する（plan 07 §6-Q1）。
  * リンク密度の算出は生 HTML の `<a>` タグから行う必要があるため、
  * このモジュールが HTML → シグナルの唯一の変換点になる。
+ *
+ * `html` は呼び出し元があらかじめ `extractArticleContainer()` で切り出した
+ * コンテナ HTML を渡すこと（ページ全体を渡すとナビ・フッター・第三者
+ * コンテンツが指標に混入する）。
  */
 export function computeEvidenceSignals(html: string): EvidenceSignals {
   const visibleText = extractVisibleText(html);
@@ -185,21 +220,22 @@ export function computeEvidenceSignals(html: string): EvidenceSignals {
   }
   const linkDensity = Math.min(rawLinkDensity, 1);
   const paragraphCount = countParagraphTags(html);
-  const boilerplateLineRatio = computeBoilerplateLineRatio(visibleText);
 
-  return { textLength, linkDensity, paragraphCount, boilerplateLineRatio };
+  return { textLength, linkDensity, paragraphCount };
 }
 
 /**
- * Q1 の4条件のうち、不合格になった条件を指す識別子。棄却理由の事後観測
+ * Q1の条件のうち、不合格になった条件を指す識別子。棄却理由の事後観測
  * （どの条件で・どの実測値で落ちたか）のために `computeEvidenceSufficiency()`
- * の戻り値に含める。
+ * の戻り値に含める。`container_not_found` は `extractArticleContainer()` が
+ * `null` を返した場合（Q1 の各種シグナル計算自体を行えない）に discovery-ingest
+ * 側が直接付与する。
  */
 export type EvidenceFailedCondition =
+  | "container_not_found"
   | "text_length"
   | "link_density"
-  | "paragraph_count"
-  | "boilerplate_line_ratio";
+  | "paragraph_count";
 
 /**
  * `computeEvidenceSufficiency()` の戻り値。`GateResult`（`{ok:true}` /
@@ -217,6 +253,10 @@ export type EvidenceGateResult =
  *
  * 不合格の場合、同時に不合格となったすべての条件を `failedConditions` に
  * 含める（原因分析には全条件の状態が要るため、最初の不合格で打ち切らない）。
+ *
+ * `container_not_found` はこの関数の対象外（`extractArticleContainer()` が
+ * `null` を返した時点でシグナル自体を計算できないため、呼び出し元
+ * ——discovery-ingest.ts—— が別途処理する）。
  */
 export function computeEvidenceSufficiency(signals: EvidenceSignals): EvidenceGateResult {
   const failedConditions: EvidenceFailedCondition[] = [];
@@ -224,13 +264,33 @@ export function computeEvidenceSufficiency(signals: EvidenceSignals): EvidenceGa
   if (signals.textLength < MIN_EVIDENCE_INPUT_CHARS) failedConditions.push("text_length");
   if (signals.linkDensity > MAX_LINK_DENSITY) failedConditions.push("link_density");
   if (signals.paragraphCount < MIN_PARAGRAPH_COUNT) failedConditions.push("paragraph_count");
-  if (signals.boilerplateLineRatio > MAX_BOILERPLATE_LINE_RATIO)
-    failedConditions.push("boilerplate_line_ratio");
 
   if (failedConditions.length > 0) {
     return { ok: false, reason: "extraction_insufficient", failedConditions };
   }
   return { ok: true };
+}
+
+/**
+ * コンテナ HTML（`extractArticleContainer()` が切り出した記事本文サブツリー）
+ * の中から最初の `<h1>` のテキストを抽出する。spec §10-3「元記事タイトルの
+ * 逐語表示」に対し、`<title>` タグ（サイト名・定型句が付与されがち）より
+ * 記事見出しそのものの方が忠実なため、`originalTitle` の第一候補として使う
+ * （実 HTML 調査: www.mwed.jp の
+ * `div.story-detail-main-visual-header__title` が該当）。
+ *
+ * コンテナに `<h1>` が無ければ `null`（呼び出し元は `<title>` へフォールバック
+ * すること。h1 の有無はテンプレート差異で起こりうるため、フォールバックを
+ * 必ず残す）。
+ */
+export function extractArticleHeadline(containerHtml: string): string | null {
+  const { document } = parseHTML(containerHtml);
+  const h1 = document.querySelector("h1");
+  if (!h1) return null;
+  const text = decodeHtmlEntities(h1.textContent ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return text.length > 0 ? text : null;
 }
 
 /**

@@ -5,6 +5,7 @@ import {
   renderRationaleText,
   type RationaleTemplateInput,
 } from "@/lib/publish/gate";
+import { RATIONALE_TEXT_MAX_CHARS, RATIONALE_TEXT_MIN_CHARS } from "@/lib/constants";
 
 describe("filterTitle (plan 07 §5-M1: 無検閲の公開チャネルを閉じる)", () => {
   it("rejects titles with a full-width PR bracket tag", () => {
@@ -248,5 +249,165 @@ describe("renderRationaleText (plan 07 §6-Q5: rationaleText のテンプレー�
   it("incorporates the topicAnchor into the generated sentence", () => {
     const text = renderRationaleText(baseInput);
     expect(text).toContain("会場選びのコツ");
+  });
+
+  it("throws when the deterministically-assembled sentence exceeds the cap via an out-of-spec topicAnchor (fail-loud, not silent truncation)", () => {
+    // `topicAnchor` の zod 上限は40字（`CurationItemSchema`）。有用度6項目
+    // すべて true の状態で、その上限を超える50字のアンカー（意図的に不正な
+    // 入力）を与えると、構造的最大値（206字）をさらに超え、
+    // RATIONALE_TEXT_MAX_CHARS（210字）も超過する。renderRationaleText()
+    // は決定的テンプレートのため、これは実装バグまたはスキーマ制約破りを
+    // 意味する — 黙って切り詰めず例外を投げること。
+    const overLongInput: RationaleTemplateInput = {
+      topicAnchor: "あ".repeat(50),
+      usefulness: {
+        firsthand: true,
+        ceremonyDecision: true,
+        specific: true,
+        tradeoff: true,
+        promotional: true,
+        preDecisionOrPhotoShoot: true,
+      },
+    };
+    expect(() => renderRationaleText(overLongInput)).toThrow();
+  });
+
+  it("never exceeds RATIONALE_TEXT_MAX_CHARS at the structural maximum: topicAnchor at the zod cap (40 chars) with all 6 usefulness flags true", () => {
+    // これが今回欠けていた保護そのもの: RATIONALE_TEXT_MAX_CHARS が
+    // 構造的最大値（アンカー40字×フラグ6個）を常に上回ることを保証する。
+    // 将来テンプレートやラベル文言を増やして構造的最大値が伸びた場合、
+    // このテストが落ちて気づけるようにする。
+    const structuralMaxInput: RationaleTemplateInput = {
+      topicAnchor: "あ".repeat(40),
+      usefulness: {
+        firsthand: true,
+        ceremonyDecision: true,
+        specific: true,
+        tradeoff: true,
+        promotional: true,
+        preDecisionOrPhotoShoot: true,
+      },
+    };
+    let text = "";
+    expect(() => {
+      text = renderRationaleText(structuralMaxInput);
+    }).not.toThrow();
+    expect(text.length).toBeLessThanOrEqual(RATIONALE_TEXT_MAX_CHARS);
+  });
+
+  it("fixes the structural maximum output length (topicAnchor at the zod cap, all 6 flags true) as a literal (regression guard against silent template growth)", () => {
+    // 構造的最大値の実測: 206字。テンプレート文言やラベルを変更した際、
+    // この期待値がズレることで気づけるようにする。期待値は定数から導出せず
+    // リテラルで固定する。
+    const structuralMaxInput: RationaleTemplateInput = {
+      topicAnchor: "あ".repeat(40),
+      usefulness: {
+        firsthand: true,
+        ceremonyDecision: true,
+        specific: true,
+        tradeoff: true,
+        promotional: true,
+        preDecisionOrPhotoShoot: true,
+      },
+    };
+    const text = renderRationaleText(structuralMaxInput);
+    expect(text.length).toBe(206);
+  });
+
+  it("fixes the actual output length for a 5-true-flag combination as a literal (regression guard against silent template growth)", () => {
+    // 実データ相当: 5項目 true（promotional のみ false）+ 実在ケースと同じ
+    // 桁数の topicAnchor。テンプレート文言を将来変更した際、この期待値が
+    // ズレることで気づけるようにする。期待値は定数から導出せずリテラルで
+    // 固定する。
+    const fiveTrueInput: RationaleTemplateInput = {
+      topicAnchor: "会場選びのコツ",
+      usefulness: {
+        firsthand: true,
+        ceremonyDecision: true,
+        specific: true,
+        tradeoff: true,
+        promotional: false,
+        preDecisionOrPhotoShoot: true,
+      },
+    };
+    const text = renderRationaleText(fiveTrueInput);
+    expect(text).toBe(
+      "「会場選びのコツ」に関する記事で、実際に挙式・披露宴を経験した立場からの記述である、挙式・披露宴の中身の意思決定に役立つ内容を含む、具体的な選択や工夫についての記述がある、判断の理由や振り返りが述べられている、式場決定前の段階や前撮り・後撮りに関する話題が中心であるという特徴が自動判定されました。",
+    );
+    expect(text.length).toBe(149);
+    expect(text.length).toBeLessThanOrEqual(RATIONALE_TEXT_MAX_CHARS);
+  });
+
+  it("does not throw for a real-data-scale case: 29-char anchor with 5 true flags (166 chars, previously exceeded the old 150-char cap)", () => {
+    // shared_plan の実測（postId 235）相当: アンカー29字 × フラグ5個
+    // （preDecisionOrPhotoShoot のみ false）= 166字。旧上限150字では例外が
+    // 飛んでいたケースが、構造的最大値から引き直した上限で正しく通ることを
+    // 確認する。
+    const realDataScaleInput: RationaleTemplateInput = {
+      topicAnchor: "あ".repeat(29),
+      usefulness: {
+        firsthand: true,
+        ceremonyDecision: true,
+        specific: true,
+        tradeoff: true,
+        promotional: true,
+        preDecisionOrPhotoShoot: false,
+      },
+    };
+    let text = "";
+    expect(() => {
+      text = renderRationaleText(realDataScaleInput);
+    }).not.toThrow();
+    expect(text.length).toBe(166);
+  });
+
+  it("fixes the publish-reachable structural minimum output length (2-char topicAnchor — the shortest that survives checkAnchorGrounding — all 6 flags false) as a literal (regression guard against silent template shrinkage)", () => {
+    // 公開経路に実際に到達しうる構造的最小値: topicAnchor は zod の
+    // min(1) ではなく、checkAnchorGrounding() の extractFeatureTerms() が
+    // 特徴語として採用する最小長（2字）を使う——1字のアンカーは特徴語ゼロと
+    // なり anchor_ungrounded で終端棄却され、公開経路に乗らない
+    // （src/lib/pipeline/ingest.ts / evergreen.ts / discovery-ingest.ts は
+    // いずれも公開前に checkAnchorGrounding() を通す）。有用度6項目全 false
+    // の投稿を止める公開ゲートは存在しない
+    // （computeUsefulnessScore() はソート用スコアであり公開可否には使われ
+    // ない）。期待値は定数から導出せずリテラルで固定する。
+    const structuralMinInput: RationaleTemplateInput = {
+      topicAnchor: "あい",
+      usefulness: {
+        firsthand: false,
+        ceremonyDecision: false,
+        specific: false,
+        tradeoff: false,
+        promotional: false,
+        preDecisionOrPhotoShoot: false,
+      },
+    };
+    const text = renderRationaleText(structuralMinInput);
+    expect(text).toBe(
+      "「あい」に関する記事です。自動判定では特筆すべき特徴は検出されませんでした。",
+    );
+    expect(text.length).toBe(38);
+    expect(text.length).toBeGreaterThanOrEqual(RATIONALE_TEXT_MIN_CHARS);
+  });
+
+  it("throws when the deterministically-assembled sentence falls below RATIONALE_TEXT_MIN_CHARS via an out-of-spec 1-char topicAnchor (fail-loud, symmetric with the upper-bound guard)", () => {
+    // renderRationaleText() 自体は checkAnchorGrounding() を呼ばない純関数
+    // であり、zod の min(1) を満たす1字の topicAnchor をそのまま受け取れる
+    // （たとえ公開経路では checkAnchorGrounding() が anchor_ungrounded として
+    // 別途弾くとしても）。1字アンカー・全 false は37字となり、
+    // RATIONALE_TEXT_MIN_CHARS（38）を下回るため、上限超過と対称に例外を
+    // 投げることを検証する。
+    const belowMinInput: RationaleTemplateInput = {
+      topicAnchor: "あ",
+      usefulness: {
+        firsthand: false,
+        ceremonyDecision: false,
+        specific: false,
+        tradeoff: false,
+        promotional: false,
+        preDecisionOrPhotoShoot: false,
+      },
+    };
+    expect(() => renderRationaleText(belowMinInput)).toThrow();
   });
 });

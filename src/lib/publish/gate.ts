@@ -13,6 +13,7 @@
  *   生成に置き換える（plan 07 §6-Q5）
  */
 
+import { RATIONALE_TEXT_MAX_CHARS, RATIONALE_TEXT_MIN_CHARS } from "@/lib/constants";
 import type { DropReason } from "@/lib/types";
 
 export type GateResult = { ok: true } | { ok: false; reason: DropReason; missingTerms?: string[] };
@@ -282,9 +283,38 @@ export function renderRationaleText(input: RationaleTemplateInput): string {
 
   const anchorPhrase = `「${input.topicAnchor}」に関する記事`;
 
-  if (activeLabels.length === 0) {
-    return `${anchorPhrase}です。自動判定では特筆すべき特徴は検出されませんでした。`;
+  const text =
+    activeLabels.length === 0
+      ? `${anchorPhrase}です。自動判定では特筆すべき特徴は検出されませんでした。`
+      : `${anchorPhrase}で、${activeLabels.join("、")}という特徴が自動判定されました。`;
+
+  // 決定的テンプレートである以上、上限超過は入力データの異常ではなく実装
+  // バグ（ラベル文言・組み立てロジックが上限を踏まえずに変更された等）を
+  // 意味する。フォールバックとして黙って切り詰めると文が途中で切れたまま
+  // 公開されてしまうため、ここで確実に気づける形（例外）にする。
+  if (text.length > RATIONALE_TEXT_MAX_CHARS) {
+    throw new Error(
+      `[gate] renderRationaleText() produced ${text.length} chars, exceeding ` +
+        `RATIONALE_TEXT_MAX_CHARS (${RATIONALE_TEXT_MAX_CHARS}). This is a template ` +
+        "implementation bug, not a data issue — renderRationaleText() is a deterministic " +
+        "pure function.",
+    );
   }
 
-  return `${anchorPhrase}で、${activeLabels.join("、")}という特徴が自動判定されました。`;
+  // 下限側も上限側と対称に扱う。決定的テンプレートである以上、下限割れも
+  // 入力データの異常ではなく実装バグ（ラベル文言の削除・組み立てロジックの
+  // 変更等）を意味する。呼び出し元（ingest / evergreen / discovery-ingest）は
+  // いずれも公開前に `checkAnchorGrounding()` を通しているため、ここに届く
+  // `topicAnchor` は既に2字以上の接地済み特徴語を含む——この関数に単独で
+  // min(1) の入力が渡ることは想定しない。
+  if (text.length < RATIONALE_TEXT_MIN_CHARS) {
+    throw new Error(
+      `[gate] renderRationaleText() produced ${text.length} chars, below ` +
+        `RATIONALE_TEXT_MIN_CHARS (${RATIONALE_TEXT_MIN_CHARS}). This is a template ` +
+        "implementation bug, not a data issue — renderRationaleText() is a deterministic " +
+        "pure function.",
+    );
+  }
+
+  return text;
 }
