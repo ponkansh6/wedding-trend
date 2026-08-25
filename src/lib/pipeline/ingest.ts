@@ -1,18 +1,42 @@
-import { CURATION_BUDGET, SOURCE_ITEM_LIMIT } from "@/lib/constants";
 import {
+  CURATION_BUDGET,
+  DAILY_PUBLISH_CAP,
+  HOST_DAILY_SHARE_MAX,
+  RATIONALE_PROMPT_VERSION,
+  RETRY_BACKOFF_HOURS,
+  RETRY_MAX_ATTEMPTS,
+  RETRY_TTL_HOURS,
+  SOURCE_ITEM_LIMIT,
+} from "@/lib/constants";
+import {
+  completeRetry,
+  countPublishedSince,
+  countPublishedSinceByHost,
+  dueRetries,
+  enqueueRetry,
+  expireRetries,
+  filterRemoved,
   getPostsByUrls,
   getStaleCurationCandidates,
+  hashUrl,
   markCurated,
+  markDropped,
   readLastRunSummary,
+  recordPublication,
   saveLastRunSummary,
   upsertPosts,
   type CurationCandidate,
+  type CurationUpdate,
   type PostUpsertInput,
 } from "@/lib/db/repository";
 import { curatePosts } from "@/lib/llm/batch";
 import { LLM_MODEL } from "@/lib/llm/client";
 import { computeContentHash, computeCurationSignature } from "@/lib/llm/signature";
+import { checkAnchorGrounding, filterTitle } from "@/lib/publish/gate";
+import { curateEvergreenUrl, terminateEvergreenRetry } from "@/lib/pipeline/evergreen";
+import { runSubmitUrl, terminateSubmitRetry } from "@/lib/pipeline/submit-url";
 import { SOURCE_IDS, SOURCE_REGISTRY, type SourceAdapter } from "@/lib/sources/registry";
+import type { PostStatus, RetryContext, RetryLane, RetryReason } from "@/lib/types";
 import { canonicalizeUrl } from "@/lib/url";
 
 /**
@@ -112,6 +136,242 @@ function isLastRunSummary(value: unknown): value is LastRunSummary {
   );
 }
 
+// ─────────────────────────────────────────────────────────────
+// plan 07: TTL 付き再試行キュー・レート上限のヘルパ（RSS レーン）
+// ─────────────────────────────────────────────────────────────
+
+const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
+
+/** `now` を含む JST の暦日の開始時刻（UTC ISO 文字列）。Q4 の集計基準。 */
+function jstDayStartIso(nowIso: string): string {
+  const jstMs = Date.parse(nowIso) + JST_OFFSET_MS;
+  const jst = new Date(jstMs);
+  const startOfDayJstMs = Date.UTC(jst.getUTCFullYear(), jst.getUTCMonth(), jst.getUTCDate());
+  return new Date(startOfDayJstMs - JST_OFFSET_MS).toISOString();
+}
+
+function addHoursIso(baseIso: string, hours: number): string {
+  return new Date(Date.parse(baseIso) + hours * 60 * 60 * 1000).toISOString();
+}
+
+/** Q4: 1ホストが当日の公開のうち占めてよい最大件数。 */
+function hostShareCapCount(): number {
+  return Math.max(1, Math.floor(DAILY_PUBLISH_CAP * HOST_DAILY_SHARE_MAX));
+}
+
+function backoffHoursFor(attempts: number): number {
+  const idx = Math.min(attempts, RETRY_BACKOFF_HOURS.length - 1);
+  return RETRY_BACKOFF_HOURS[idx] ?? RETRY_BACKOFF_HOURS[RETRY_BACKOFF_HOURS.length - 1];
+}
+
+/**
+ * 一時的失敗（LLM 呼び出し失敗・Q4 レート上限繰り延べ）を再試行キューに積む、
+ * または最大試行数超過なら諦める（plan 07 §7・D5 是正）。
+ *
+ * `ctx` が渡された場合（この関数末尾の `processDueRetries` が再試行キューから
+ * 取り出して再処理している場合）は既存の attempts / firstQueuedAt を引き継いで
+ * インクリメントする。`null`（初回失敗）の場合は attempts=0 から開始する
+ * （discovery-ingest.ts の `retryOrGiveUp` と同じ方針）。
+ * 諦めた場合（最大試行数超過）は `true` を返す。
+ */
+async function enqueueRssRetry(
+  url: string,
+  reason: RetryReason,
+  now: string,
+  ctx: RetryContext | null,
+): Promise<boolean> {
+  const attempts = ctx?.attempts ?? 0;
+  const nextAttempts = attempts + 1;
+  const firstQueuedAt = ctx?.firstQueuedAt ?? now;
+
+  if (nextAttempts > RETRY_MAX_ATTEMPTS) {
+    if (ctx) await completeRetry(ctx.urlHash);
+    return true;
+  }
+
+  let host = "";
+  try {
+    host = new URL(url).host;
+  } catch {
+    // 正規化済み URL のはずだが念のため。host 空文字のまま積む（lane="rss" で識別できる）。
+  }
+  await enqueueRetry({
+    urlHash: ctx?.urlHash ?? hashUrl(url),
+    url,
+    host,
+    lane: "rss",
+    reason,
+    attempts: nextAttempts,
+    firstQueuedAt,
+    nextAttemptAt: addHoursIso(now, backoffHoursFor(attempts)),
+    expiresAt: addHoursIso(firstQueuedAt, RETRY_TTL_HOURS),
+  });
+  return false;
+}
+
+/**
+ * 再試行キューから取り出した rss レーンのエントリを単発で再処理する
+ * （plan 07 D5）。rss レーンの post 行は初回失敗時点で既に upsert 済み
+ * （main loop 冒頭の `upsertPosts`）のため、ここでは再クロールではなく、
+ * 保存済みの `originalTitle` / `originalExcerpt` を使ってキュレーションを
+ * やり直す。main loop の per-item ゲート（M1-1/M1-2/Q4）と同じ順序で適用する。
+ */
+async function reprocessRssRetry(url: string, ctx: RetryContext, now: string): Promise<void> {
+  const states = await getPostsByUrls([url]);
+  const state = states.get(url);
+  if (state?.id == null) {
+    // post 行が見当たらない（何らかの理由で失われた）。キューだけ掃除する。
+    await completeRetry(ctx.urlHash);
+    return;
+  }
+  const postId = state.id;
+  const title = state.originalTitle;
+  const excerpt = state.originalExcerpt;
+
+  const { results } = await curatePosts([{ title, excerpt }]);
+  const result = results[0];
+  if (!result) {
+    const gaveUp = await enqueueRssRetry(url, "llm_transient", now, ctx);
+    if (gaveUp) await markDropped(postId, "retry_exhausted", now);
+    return;
+  }
+
+  const titleGate = filterTitle(title);
+  if (!titleGate.ok) {
+    await completeRetry(ctx.urlHash);
+    await markDropped(postId, "title_filter", now);
+    return;
+  }
+
+  const groundingInput = `${title}\n${excerpt ?? ""}`;
+  const anchorGate = checkAnchorGrounding(result.topicAnchor, groundingInput);
+  if (!anchorGate.ok) {
+    console.warn(
+      `[ingest] anchor ungrounded (retry) for ${url}: missingTerms=${JSON.stringify(
+        anchorGate.missingTerms ?? [],
+      )}`,
+    );
+    await completeRetry(ctx.urlHash);
+    await markDropped(postId, "anchor_ungrounded", now);
+    return;
+  }
+
+  let host = "";
+  try {
+    host = new URL(url).host;
+  } catch {
+    // 正規化済み URL のはずだが念のため。
+  }
+  const sinceIso = jstDayStartIso(now);
+  const [total, byHost] = await Promise.all([
+    countPublishedSince(sinceIso),
+    countPublishedSinceByHost(sinceIso),
+  ]);
+  const hostCount = byHost[host] ?? 0;
+  if (total >= DAILY_PUBLISH_CAP || hostCount >= hostShareCapCount()) {
+    const gaveUp = await enqueueRssRetry(url, "rate_capped", now, ctx);
+    if (gaveUp) await markDropped(postId, "retry_exhausted", now);
+    return;
+  }
+
+  const bodyHash = computeContentHash(title, excerpt);
+  const markResult = await markCurated([
+    {
+      url,
+      aiSummary: result.summary,
+      category: result.category,
+      tag: result.tag,
+      contentHash: bodyHash,
+      curationSignature: computeCurationSignature(),
+      status: "published" as PostStatus,
+      usefulness: {
+        postId,
+        modelId: LLM_MODEL,
+        criteria: {
+          firsthand: result.firsthand,
+          ceremonyDecision: result.ceremonyDecision,
+          specific: result.specific,
+          tradeoff: result.tradeoff,
+          promotional: result.promotional,
+          preDecisionOrPhotoShoot: result.preDecisionOrPhotoShoot,
+        },
+      },
+      rationale: {
+        postId,
+        topicAnchor: result.topicAnchor,
+        rationaleText: result.rationaleText,
+        evidenceSufficient: true,
+        modelId: LLM_MODEL,
+        promptVersion: RATIONALE_PROMPT_VERSION,
+      },
+    },
+  ]);
+  if (markResult.failed.length === 0) {
+    await completeRetry(ctx.urlHash);
+    // rss レーンは本文を取得しないため bodyHash は代替値。"surrogate" として
+    // 明示する（plan 07 D3）。
+    await recordPublication(postId, now, bodyHash, "surrogate");
+  }
+}
+
+const RETRY_PROCESS_LIMIT = 50;
+const RSS_ADJACENT_LANES: RetryLane[] = ["rss", "evergreen", "submit"];
+
+/**
+ * plan 07 D5: rss/evergreen/submit レーン分の再試行キューの消費者。
+ * discovery レーンは discovery-ingest.ts が `lanes: ["discovery"]` で独立に
+ * 処理するため、ここでは触れない（双方が互いのエントリを奪い合わない）。
+ */
+async function processDueAndExpiredRetries(now: string): Promise<{ errors: string[] }> {
+  const errors: string[] = [];
+
+  // TTL 超過分の終端棄却。
+  const expired = await expireRetries(now, RSS_ADJACENT_LANES);
+  for (const entry of expired) {
+    try {
+      if (entry.lane === "rss") {
+        const states = await getPostsByUrls([entry.url]);
+        const postId = states.get(entry.url)?.id;
+        if (postId != null) await markDropped(postId, "retry_exhausted", now);
+      } else if (entry.lane === "evergreen") {
+        await terminateEvergreenRetry(entry.url, now);
+      } else {
+        await terminateSubmitRetry(entry.url, now);
+      }
+    } catch (err) {
+      errors.push(
+        `retry-expire[${entry.lane}] ${entry.url}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  // due（nextAttemptAt <= now、まだ TTL 内）分の実際の再処理。
+  const due = await dueRetries(now, RETRY_PROCESS_LIMIT);
+  for (const entry of due) {
+    if (entry.lane === "discovery") continue; // discovery-ingest.ts が処理する。
+    const ctx: RetryContext = {
+      urlHash: entry.urlHash,
+      attempts: entry.attempts,
+      firstQueuedAt: entry.firstQueuedAt,
+    };
+    try {
+      if (entry.lane === "rss") {
+        await reprocessRssRetry(entry.url, ctx, now);
+      } else if (entry.lane === "evergreen") {
+        await curateEvergreenUrl(entry.url, undefined, ctx);
+      } else {
+        await runSubmitUrl(entry.url, undefined, ctx);
+      }
+    } catch (err) {
+      errors.push(
+        `retry-due[${entry.lane}] ${entry.url}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  return { errors };
+}
+
 /**
  * SOURCE_REGISTRY は各アダプタごとに固有のアイテム型 T を持つが、ここではソース
  * ID を横断的にループするため T を型消去して扱う（fetch と toPost は常に対の
@@ -154,6 +414,13 @@ export async function runIngest(trigger: IngestTrigger = "manual"): Promise<Inge
   });
 
   const errors: string[] = [];
+
+  // 0. plan 07 D5: rss/evergreen/submit レーン分の再試行キューを消費する。
+  // RSS cron の入口であるここから毎回呼ぶことで、Q4 の「上限到達分は翌日に
+  // 回す」約束・§7 の TTL/最大試行数の会計を実際に機能させる（discovery
+  // レーンは discovery-ingest.ts が独立して処理する）。
+  const { errors: retryErrors } = await processDueAndExpiredRetries(startedAt);
+  errors.push(...retryErrors);
 
   // 1. 全ブログアダプタを並列取得（1 ソースの失敗が他ソースを止めないよう個別に catch）
   const perSource = await Promise.all(
@@ -252,54 +519,190 @@ export async function runIngest(trigger: IngestTrigger = "manual"): Promise<Inge
   const includedFreshCount = Math.min(freshCandidates.length, CURATION_BUDGET);
   const skipped = deduped.length - includedFreshCount;
 
-  // 5. LLM キュレーション → 結果を保存（posts の要約/カテゴリ等 + post_usefulness の有用度判定）
+  // plan 07 §7/§5-M4: 一度終端棄却・撤回された post（post_removals にある）は
+  // 再キュレーションの対象から除外する（isRemoved の sticky 性を候補選定の
+  // 入口で保証する。撤回は自動、復帰は人間。§5-M4 も参照）。
+  const candidateIds = toCurate.map((c) => c.id).filter((id): id is number => id !== null);
+  const removedIds = await filterRemoved(candidateIds);
+  const workingCandidates = toCurate.filter((c) => c.id === null || !removedIds.has(c.id));
+
+  // 5. LLM キュレーション → 決定的ゲート（Q1 相当・M1・Q4）→ 保存
   let curated = 0;
   let geminiCalls = 0;
-  if (toCurate.length > 0) {
+  const now = new Date().toISOString();
+
+  if (workingCandidates.length > 0) {
     try {
+      // Q1 相当（簡易版）: RSS レーンはフィードのメタデータ（タイトル・抜粋）
+      // のみを取得し、記事本文の HTML は取得しない。そのため
+      // computeEvidenceSignals()（リンク密度・段落数・定型行率）は原理的に
+      // 適用できない（生 HTML が無い）。唯一入手可能な決定的シグナルである
+      // 「抜粋の有無」のみを LLM 呼び出し前のゲートとして使う（以前は空抜粋
+      // でも LLM に投げて自己申告の evidenceSufficient に頼っていたが、その
+      // 自己申告フィールドは plan 07 §6-Q1 により CurationResult から削除された）。
+      const evidenceOk: CurationCandidate[] = [];
+      const evidenceInsufficient: CurationCandidate[] = [];
+      for (const c of workingCandidates) {
+        const hasExcerpt = !!c.originalExcerpt && c.originalExcerpt.trim() !== "";
+        (hasExcerpt ? evidenceOk : evidenceInsufficient).push(c);
+      }
+
+      for (const c of evidenceInsufficient) {
+        if (c.id !== null) {
+          await markDropped(c.id, "extraction_insufficient", now);
+        } else {
+          console.warn(`[ingest] extraction_insufficient but no postId resolved: ${c.url}`);
+        }
+      }
+
       const { results, geminiCalls: calls } = await curatePosts(
-        toCurate.map((post) => ({ title: post.originalTitle, excerpt: post.originalExcerpt })),
+        evidenceOk.map((post) => ({ title: post.originalTitle, excerpt: post.originalExcerpt })),
       );
       geminiCalls = calls;
 
-      const updates = toCurate
-        .map((post, i) => {
-          const result = results[i];
-          if (!result) return null;
-          return {
-            url: post.url,
-            aiTitle: result.title,
-            aiSummary: result.summary,
-            category: result.category,
-            tag: result.tag,
-            contentHash: computeContentHash(post.originalTitle, post.originalExcerpt),
-            curationSignature: currentSignature,
-            // postId が解決できなかった投稿（fresh candidates の一部。上記コメント
-            // 参照）は post_usefulness への書き込みをスキップし、posts の更新だけ
-            // 安全側で行う。
-            usefulness:
-              post.id !== null
-                ? {
-                    postId: post.id,
-                    modelId: LLM_MODEL,
-                    criteria: {
-                      firsthand: result.firsthand,
-                      ceremonyDecision: result.ceremonyDecision,
-                      specific: result.specific,
-                      tradeoff: result.tradeoff,
-                      promotional: result.promotional,
-                      preDecisionOrPhotoShoot: result.preDecisionOrPhotoShoot,
-                    },
-                  }
-                : undefined,
-          };
-        })
-        .filter((u): u is NonNullable<typeof u> => u !== null);
+      // Q4: 公開レート上限（当日 JST 基準）。バッチ内で複数件を公開判定する
+      // ため、承認するたびにローカルのカウンタを増やして同一ラン内でも
+      // 上限を守る。
+      const sinceIso = jstDayStartIso(now);
+      let totalPublishedToday = await countPublishedSince(sinceIso);
+      const hostCounts = await countPublishedSinceByHost(sinceIso);
+      const hostCap = hostShareCapCount();
 
-      const markResult = await markCurated(updates);
-      curated = markResult.succeeded.length;
-      if (markResult.failed.length > 0) {
-        errors.push(`markCurated failed for ${markResult.failed.length} posts`);
+      const updates: CurationUpdate[] = [];
+      const publishedByUrl = new Map<string, { postId: number; bodyHash: string }>();
+
+      for (let i = 0; i < evidenceOk.length; i++) {
+        const post = evidenceOk[i];
+        const result = results[i];
+
+        if (!result) {
+          // LLM 呼び出し自体が失敗（timeout / 5xx 相当）。一時的失敗として再試行キューへ。
+          // 最大試行数を超えていれば諦めて retry_exhausted で終端棄却する（plan 07 D5）。
+          const gaveUp = await enqueueRssRetry(post.url, "llm_transient", now, null);
+          if (gaveUp && post.id !== null) {
+            await markDropped(post.id, "retry_exhausted", now);
+          }
+          continue;
+        }
+
+        // M1-1: タイトル公開フィルタ（第三者が書いた逐語タイトルの無検閲公開を防ぐ）。
+        const titleGate = filterTitle(post.originalTitle);
+        if (!titleGate.ok) {
+          if (post.id !== null) {
+            await markDropped(post.id, "title_filter", now);
+          }
+          continue;
+        }
+
+        // M1-2: topicAnchor の語彙的接地（plan 07 D4 是正）。
+        // RSS レーンは記事本文を取得しないため「取得本文」への接地は検証
+        // できないが、M1 の趣旨は「LLM が入力に無い語を出力していないか」の
+        // 検証であり、比較対象が本文である必要はない。LLM に実際に渡した
+        // 入力（タイトル+抜粋、curatePosts() への入力そのもの）に対して検証
+        // すれば、プロンプトインジェクションと幻覚の両方に対する関門として
+        // 機能する。
+        const groundingInput = `${post.originalTitle}\n${post.originalExcerpt ?? ""}`;
+        const anchorGate = checkAnchorGrounding(result.topicAnchor, groundingInput);
+        if (!anchorGate.ok) {
+          console.warn(
+            `[ingest] anchor ungrounded for ${post.url}: missingTerms=${JSON.stringify(
+              anchorGate.missingTerms ?? [],
+            )}`,
+          );
+          if (post.id !== null) {
+            await markDropped(post.id, "anchor_ungrounded", now);
+          }
+          continue;
+        }
+
+        let host = "";
+        try {
+          host = new URL(post.url).host;
+        } catch {
+          // 正規化済み URL のはずだが念のため。host 不明時はグローバル上限
+          // のみで判定される。
+        }
+        const hostPublishedToday = hostCounts[host] ?? 0;
+        if (totalPublishedToday >= DAILY_PUBLISH_CAP || hostPublishedToday >= hostCap) {
+          // Q4: 上限到達は終端棄却ではなく再試行キューへの繰り延べ。ただし
+          // 最大試行数を超えていれば諦めて retry_exhausted で終端棄却する
+          // （plan 07 D5）。
+          const gaveUp = await enqueueRssRetry(post.url, "rate_capped", now, null);
+          if (gaveUp && post.id !== null) {
+            await markDropped(post.id, "retry_exhausted", now);
+          }
+          continue;
+        }
+
+        const bodyHash = computeContentHash(post.originalTitle, post.originalExcerpt);
+        updates.push({
+          url: post.url,
+          aiSummary: result.summary,
+          category: result.category,
+          tag: result.tag,
+          contentHash: bodyHash,
+          curationSignature: currentSignature,
+          status: "published" as PostStatus,
+          // postId が解決できなかった投稿（fresh candidates の一部。上記コメント
+          // 参照）は post_usefulness / post_rationales への書き込みをスキップし、posts の更新だけ
+          // 安全側で行う。
+          usefulness:
+            post.id !== null
+              ? {
+                  postId: post.id,
+                  modelId: LLM_MODEL,
+                  criteria: {
+                    firsthand: result.firsthand,
+                    ceremonyDecision: result.ceremonyDecision,
+                    specific: result.specific,
+                    tradeoff: result.tradeoff,
+                    promotional: result.promotional,
+                    preDecisionOrPhotoShoot: result.preDecisionOrPhotoShoot,
+                  },
+                }
+              : undefined,
+          // Q1 相当ゲートを通過した時点で evidenceSufficient は真であることが
+          // 保証されているため、LLM の自己申告ではなく固定で true を渡す。
+          rationale:
+            post.id !== null
+              ? {
+                  postId: post.id,
+                  topicAnchor: result.topicAnchor,
+                  rationaleText: result.rationaleText,
+                  evidenceSufficient: true,
+                  modelId: LLM_MODEL,
+                  promptVersion: RATIONALE_PROMPT_VERSION,
+                }
+              : undefined,
+        });
+        if (post.id !== null) {
+          publishedByUrl.set(post.url, { postId: post.id, bodyHash });
+        }
+        totalPublishedToday++;
+        hostCounts[host] = hostPublishedToday + 1;
+      }
+
+      if (updates.length > 0) {
+        const markResult = await markCurated(updates);
+        curated = markResult.succeeded.length;
+        if (markResult.failed.length > 0) {
+          errors.push(`markCurated failed for ${markResult.failed.length} posts`);
+        }
+        // §5 公開の記録。bodyHash は本来「判定に使った正規化本文」のハッシュ
+        // だが、RSS レーンは記事本文の HTML を一切取得しない（フィードの
+        // タイトル・抜粋のみで判定する）ため、判定に使った唯一のテキスト
+        // （タイトル+抜粋）のハッシュを代替フィンガープリントとして使う。
+        // hashKind="surrogate" として明示する（plan 07 D3 是正）。これにより
+        // `revalidatePublishedPosts`（M4）はこの post を本文ドリフト判定
+        // （body_changed）の対象から除外する——保存値（タイトル+抜粋由来）と
+        // 再取得後の実本文ハッシュは構造的に一致しないため、対象にすると全件
+        // 誤って自動撤回される。
+        for (const url of markResult.succeeded) {
+          const entry = publishedByUrl.get(url);
+          if (entry) {
+            await recordPublication(entry.postId, now, entry.bodyHash, "surrogate");
+          }
+        }
       }
     } catch (err) {
       console.error("[ingest] curation failed:", err);
