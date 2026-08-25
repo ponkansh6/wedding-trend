@@ -39,38 +39,111 @@ Guards pushes to remote repositories:
 3. **Quality Gates**: Runs `pnpm run lint`, `pnpm run spec-refs`, `pnpm run format:check`, `pnpm run security-check`, and `node scripts/check-migrations-additive.mjs`.
 4. **Targeted Tests & Smoke**: If `src/` or `tests/` files have changed relative to the target branch, runs vitest coverage tiers and `bash scripts/smoke-test.sh`.
 
-### Migrations additive-only gate (`scripts/check-migrations-additive.mjs`)
+### Migrations ownership gate (`scripts/check-migrations-additive.mjs`)
 
 **Why this exists**: the production Turso DB is shared with another project
-(news-watch, 9 tables, hundreds of rows). `scripts/apply-migrations-remote.mjs`
-only ever executes `CREATE TABLE` / `CREATE INDEX` / `CREATE UNIQUE INDEX`
-statements against it — anything else (`ALTER`, `DROP`, `DELETE`, `UPDATE`, ...)
-makes it abort the **entire** apply plan on the spot, and because it aborts as
-soon as it hits the first non-additive statement, every migration file after
-the offending one becomes permanently inapplicable to production until the
-offending file is fixed or removed.
+(news-watch, 8 tables, hundreds of rows). The invariant that must never break
+is **ownership**: a wedding-trend migration must never create, alter, or
+collide with a news-watch table. `scripts/apply-migrations-remote.mjs` is the
+runtime safety net that enforces this against the real DB.
 
-This constraint was violated in practice once: a migration containing
-`ALTER TABLE` was created and merged, and nobody noticed until someone tried to
-deploy it — by which point the fix required an out-of-band edit to migration
-history. That is the failure mode this gate closes: it makes the check run at
-migration-creation time (pre-push), not at deploy time, so a non-additive
-statement can never reach `main` in the first place.
+The gate used to approximate that invariant with "statement kind" (allow only
+`CREATE TABLE` / `CREATE INDEX` / `CREATE UNIQUE INDEX`, reject everything
+else). That approximation was simultaneously **too broad and too narrow**:
 
-The additive-only rule lives in one place, `scripts/migrations-additive.mjs`,
-imported by both `check-migrations-additive.mjs` (this gate) and
-`apply-migrations-remote.mjs` (the runtime safety net) — duplicating the
-regex in two files would eventually let them drift apart, which is exactly
-the kind of silent failure this gate exists to prevent. The check is a pure
-static read of `src/lib/db/migrations/*.sql` — no network or DB access — so
-it is safe to run on every push and in CI.
+- **Too broad**: a `CREATE TABLE`/`CREATE INDEX` whose name happened to
+  collide with a news-watch table was allowed through as long as the
+  statement _kind_ matched — the check never looked at _which_ table was
+  being touched. Worse, a migration file with multiple statements but no
+  drizzle `--> statement-breakpoint` marker between them was extracted as a
+  single "statement" and matched against the allow regex with a prefix test
+  (`ALLOWED.test(statement)`), so a payload like
+  `CREATE TABLE probe (...); DROP TABLE articles;` (no marker) passed the
+  gate whole — the leading `CREATE TABLE` satisfied the prefix match and the
+  trailing `DROP TABLE articles` was invisible to the checker.
+- **Too narrow**: `ALTER TABLE ... ADD COLUMN` on a table wedding-trend
+  itself owns was banned outright, forcing every "add one column" change
+  into a brand-new side table (see `post_publication_kind`, which exists
+  solely because `posts.hash_kind` couldn't be added directly). Every reader
+  of that data now has to `JOIN` and tolerate missing rows — a real,
+  permanent cost paid for a rule that was never actually about columns.
 
-If this check fails: rewrite the offending migration file so it only adds
-new tables/indexes (a new table + a backfill script, rather than `ALTER
-TABLE ... ADD COLUMN`, for example), or drop it if it was created in error.
-Do not bypass this hook to get a non-additive migration through — see
-"Emergency Bypass" above; the whole point of this check is that this specific
-class of mistake must not reach `main`.
+The gate is now **ownership-based**, not statement-kind-based:
+
+1. **Statement splitting is robust**, not marker-dependent.
+   `splitStatements()` in `scripts/migrations-additive.mjs` strips
+   `--> statement-breakpoint` markers and then splits on top-level `;`,
+   tracking string-literal quoting (`'...'` with `''` escapes), quoted
+   identifiers (`` `...` ``/`"..."`/`[...]`), and `BEGIN ... END` trigger
+   bodies so it never splits inside them. A file with multiple statements is
+   always seen as multiple statements, marker or no marker — the hole above
+   is closed structurally, not by policy.
+2. **Every statement is matched against its full shape**, anchored with
+   `^...$`, not a prefix test — trailing garbage after a valid `CREATE
+TABLE (...)` no longer slips through.
+3. **The owned-table set is derived from `src/lib/db/schema.ts`**
+   (`loadOwnedTables()` extracts every `sqliteTable("name", ...)` first
+   argument) — there is no hand-maintained "our tables" list to drift out of
+   sync with the schema. A small, explicitly-commented denylist of known
+   news-watch table names (`EXTERNAL_DENYLIST` in
+   `scripts/migrations-additive.mjs`) exists only to break the circularity
+   that "writing to our schema.ts would otherwise make us own anything" — if
+   the derived owned set ever intersects the denylist, `loadOwnedTables()`
+   throws immediately rather than silently trusting either side.
+4. **`CREATE TABLE`, `CREATE INDEX`, and `ALTER TABLE` are all
+   ownership-checked** against that set. Previously only the statement kind
+   was checked and ownership was ignored entirely for `CREATE` statements —
+   that was the more dangerous gap, because `apply-migrations-remote.mjs`
+   silently treats "table already exists" as success, so a colliding
+   `CREATE TABLE` for a news-watch table name would have failed quietly and
+   never been noticed.
+5. **`ALTER TABLE <owned-table> ADD COLUMN ...` is allowed**, but only in a
+   narrowly, exactly-matched safe shape: `ADD COLUMN <name> <type>` with an
+   optional `DEFAULT <literal>`, `NOT NULL DEFAULT <literal>`, or
+   `REFERENCES <table>(<column>)` clause — nothing else. `UNIQUE` /
+   `PRIMARY KEY` on the new column, non-constant defaults (function calls),
+   `DROP COLUMN`, `RENAME`, and any `ALTER` against a non-owned table are all
+   rejected. **Policy**: add new columns as nullable and enforce any
+   "required" semantics in the application layer (Zod / repository code) —
+   SQLite's `ALTER TABLE` cannot add a `NOT NULL` column without a constant
+   default, and anything that requires a real table rebuild (dropping a
+   column, changing a type, adding a `UNIQUE`/`PRIMARY KEY` constraint) is
+   **not** something this gate will ever automate. Do that out-of-band: take
+   the DB offline to news-watch traffic (or coordinate a maintenance window),
+   run the rebuild by hand against a fresh export/import, verify row counts
+   match before and after, and only then land a migration file that reflects
+   the new shape going forward — never ask this gate to do a rebuild live
+   against the shared production DB.
+
+The ownership rule lives in one place, `scripts/migrations-additive.mjs`,
+imported by both `check-migrations-additive.mjs` (this gate, pre-push /
+create-time) and `apply-migrations-remote.mjs` (the runtime safety net,
+deploy-time) — duplicating the logic in two files would eventually let them
+drift apart, which is exactly the kind of silent failure this gate exists to
+prevent. `apply-migrations-remote.mjs` additionally re-checks the live
+`sqlite_master` state before applying and aborts if a planned `CREATE
+TABLE`/`CREATE INDEX` would collide with an _existing_ denylisted (news-watch)
+object — schema.ts and the real DB are independent sources of truth, and
+either one can catch what the other misses. The check itself is a pure
+static read of `src/lib/db/migrations/*.sql` and `src/lib/db/schema.ts` — no
+network or DB access — so it is safe to run on every push and in CI.
+
+`tests/migrations-additive.test.ts` pins this behavior with destructive
+fixtures: it asserts that all 11 existing migrations still pass (regression
+guard — if this ever fails, the gate itself broke), that the marker-less
+multi-statement hole (`CREATE TABLE x; DROP TABLE articles;`) is rejected,
+that every denylisted-table CREATE/ALTER/INDEX form is rejected, that unsafe
+`ADD COLUMN` shapes (`UNIQUE`, `PRIMARY KEY`, non-constant `DEFAULT`) are
+rejected, and that the newly-allowed safe `ADD COLUMN` shapes pass.
+
+If this check fails: either the migration touches a table this project
+doesn't own (fix the table name, or if it's genuinely new, add it to
+`schema.ts` first), or it uses an `ALTER TABLE` shape outside the allowed
+`ADD COLUMN` form (split it into an out-of-band rebuild as described above),
+or drop the migration file if it was created in error. Do not bypass this
+hook to get a non-additive migration through — see "Emergency Bypass" above;
+the whole point of this check is that this specific class of mistake must
+not reach `main`.
 
 ### How to Resolve Pre-Push Failures
 

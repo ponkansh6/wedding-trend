@@ -7,10 +7,16 @@
  * 相手のテーブルが丸ごと削除される。実際に共有先には articles / knowledge
  * など 9 テーブル・数百行のデータが存在する。
  *
- * そのため本スクリプトは安全装置として、
- *   - CREATE TABLE / CREATE INDEX / CREATE UNIQUE INDEX 以外の文を実行拒否する
- *   - 既存テーブルは "already exists" として読み飛ばす
- * を守る。DROP / ALTER / DELETE / UPDATE を含む文が現れた時点で異常終了する。
+ * そのため本スクリプトは安全装置として、所有権ベースの検査を行う
+ * （`scripts/migrations-additive.mjs` 参照）:
+ *   - CREATE TABLE / CREATE INDEX / 所有テーブルへの単純な ALTER TABLE ...
+ *     ADD COLUMN 以外の文を実行拒否する
+ *   - denylist（news-watch 所有と判明しているテーブル）と衝突する
+ *     CREATE TABLE / CREATE INDEX / ALTER TABLE は事前検査で拒否する
+ *   - 自プロジェクト所有テーブルの再作成（適用済みマイグレーションの
+ *     再実行）は "already exists" として読み飛ばす
+ * を守る。DROP / DELETE / UPDATE、denylist テーブルへの操作、非所有
+ * テーブルへの CREATE/ALTER を含む文が現れた時点で異常終了する。
  *
  * 使い方:
  *   node scripts/apply-migrations-remote.mjs          # dry-run（実行計画のみ表示）
@@ -22,6 +28,8 @@ import {
   loadMigrationStatements,
   findNonAdditiveStatements,
   extractCreatedName,
+  loadOwnedTables,
+  EXTERNAL_DENYLIST,
 } from "./migrations-additive.mjs";
 
 const APPLY = process.argv.includes("--apply");
@@ -50,36 +58,36 @@ if (!url) {
   process.exit(1);
 }
 
+const ownedTables = loadOwnedTables();
 const entries = loadMigrationStatements();
-const violations = findNonAdditiveStatements(entries);
+const violations = findNonAdditiveStatements(entries, ownedTables);
 if (violations.length > 0) {
-  const { file, statement } = violations[0];
+  const { file, statement, verdict } = violations[0];
   console.error(
-    `\n❌ 追加専用ではない文を検出しました。中止します。\n   ファイル: ${file}\n   文: ${statement.slice(0, 200)}`,
+    `\n❌ 所有権を守らない文を検出しました。中止します。\n   ファイル: ${file}\n   理由: ${verdict.reason}\n   文: ${statement.slice(0, 200)}`,
   );
   process.exit(1);
 }
 const plan = entries;
 
 console.log(`接続先スキーム: ${url.split(":")[0]}`);
-console.log(`実行計画（${plan.length} 文、すべて追加専用）:`);
+console.log(`実行計画（${plan.length} 文、すべて所有権を満たす）:`);
 for (const { file, label } of plan) console.log(`  [${file}] ${label}`);
 
 const client = createClient({ url, authToken: process.env.TURSO_AUTH_TOKEN });
 
-// --- 名前衝突の事前検査 ---
+// --- 名前衝突の事前検査（所有権ベース・厳格化） ---
 // 本番 DB は他プロジェクト（news-watch）と単一のスキーマ名前空間（テーブル名・
 // インデックス名）を共有している。applier は既存オブジェクトを "already exists"
-// として黙って読み飛ばすため、同名オブジェクトが既に存在する場合、それが
-// 「このプロジェクトが過去に作ったもの」なのか「他プロジェクトのもの」なのかを
-// 見分けずに読み飛ばしてしまうと、意図せず他プロジェクトのテーブル/インデックスを
-// 読み書きし始める危険がある。
+// として黙って読み飛ばすため、事前に denylist（news-watch 所有と判明している
+// テーブル）と衝突する CREATE/ALTER が計画に含まれていないかを検査する。
+// これは通常 findNonAdditiveStatements の所有権検査で既に弾かれているはずだが、
+// 「適用直前の本番 DB の実態」との突き合わせとして二重に検査する
+// （schema.ts のみからの静的判定と、実際の sqlite_master の状態は独立した
+// 情報源であるため、片方の見落としがもう片方で拾えることがある）。
 //
-// 限界: 名前だけでは「自分が過去に作ったもの」と「他プロジェクトのもの」を
-// 判別できない（両者は sqlite_master 上で区別不能）。したがって、ここでは
-// 自動判定して中止する、という強い制御はしない。衝突候補を列挙して人間の目視
-// 確認を促すに留める。誤って自動 skip 実装に倒すと、確認なしに他プロジェクトの
-// テーブルへ書き込む事故を防げなくなる。
+// 自プロジェクト所有テーブルとの同名衝突（= 適用済みマイグレーションの
+// 再実行）は、既存のとおり "already exists" として読み飛ばしてよい。
 const existing = await client.execute(
   "SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'",
 );
@@ -87,25 +95,22 @@ const existingNames = new Set(
   existing.rows.filter((r) => r.type === "table" || r.type === "index").map((r) => String(r.name)),
 );
 
-const collisions = [];
+const denylistCollisions = [];
 for (const { file, statement } of plan) {
   const created = extractCreatedName(statement);
-  if (created && existingNames.has(created.name)) {
-    collisions.push({ file, ...created });
+  if (created && EXTERNAL_DENYLIST.has(created.name) && existingNames.has(created.name)) {
+    denylistCollisions.push({ file, ...created });
   }
 }
 
-if (collisions.length > 0) {
-  console.log(
-    `\n⚠️  本番 DB に同名の ${collisions[0].type === "table" ? "テーブル/インデックス" : "オブジェクト"}が既に存在します（衝突候補、${collisions.length} 件）:`,
+if (denylistCollisions.length > 0) {
+  console.error(
+    `\n❌ 本番 DB に存在する他プロジェクト（news-watch）所有のオブジェクトと衝突しています（${denylistCollisions.length} 件）。中止します。`,
   );
-  for (const { file, type, name } of collisions) {
-    console.log(`  [${file}] ${type}: ${name}`);
+  for (const { file, type, name } of denylistCollisions) {
+    console.error(`   [${file}] ${type}: ${name}`);
   }
-  console.log(
-    "   → このプロジェクトが過去に作成したものか、news-watch など他プロジェクトのものかを名前だけでは判別できません。\n" +
-      "     適用前に必ず目視で確認してください（このスクリプトは自動判定しません）。",
-  );
+  process.exit(1);
 }
 
 if (!APPLY) {
