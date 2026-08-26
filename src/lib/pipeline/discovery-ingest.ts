@@ -135,8 +135,10 @@ export interface DiscoveryIngestStats {
   retryExpiredRaw: number;
   /** `reapStaleNonTerminal()` が定常収束させた件数。 */
   staleReaped: number;
-  /** kill gate 発火でランを中断した。 */
+  /** kill gate（K1〜K6・異常検知・人手解除要）発火でランを中断した。 */
   abortedByKillGate: boolean;
+  /** B1（日次リクエスト予算消化・soft stop・UTC 日次自動リセット）でランを中断した。 */
+  abortedByBudget: boolean;
   /** Retry-After 指定でランを中断した。 */
   abortedByRetryAfter: boolean;
   /** 時間予算枯渇で中断した。 */
@@ -170,6 +172,7 @@ function emptyStats(): DiscoveryIngestStats {
     retryExpiredRaw: 0,
     staleReaped: 0,
     abortedByKillGate: false,
+    abortedByBudget: false,
     abortedByRetryAfter: false,
     budgetExhausted: false,
     hostNotAllowed: false,
@@ -533,7 +536,7 @@ async function processUrl(
   stats: DiscoveryIngestStats,
   now: string,
   retryCtx: RetryContext | null,
-): Promise<{ abortedByKillGate: boolean; abortedByRetryAfter: boolean }> {
+): Promise<{ abortedByKillGate: boolean; abortedByBudget: boolean; abortedByRetryAfter: boolean }> {
   stats.processed++;
 
   // Q3 深化: ホスト単位の allowlist に加え、記事パスのホワイトリストにも
@@ -544,25 +547,34 @@ async function processUrl(
     if (retryCtx) await completeRetry(retryCtx.urlHash);
     await setDiscoverySeenStatus(host, url, "skipped");
     stats.skippedPathNotAllowed++;
-    return { abortedByKillGate: false, abortedByRetryAfter: false };
+    return { abortedByKillGate: false, abortedByBudget: false, abortedByRetryAfter: false };
   }
 
   const verdict = await disciplinedFetch(url, { purpose: "article" });
 
   switch (verdict.kind) {
     case "kill_gate": {
+      // K1〜K6: 異常検知。stateKind を永続化済みで人手解除を要する（hard stop）。
       console.warn(`[discovery-ingest] kill gate ${verdict.gate}: ${verdict.detail}`);
-      return { abortedByKillGate: true, abortedByRetryAfter: false };
+      return { abortedByKillGate: true, abortedByBudget: false, abortedByRetryAfter: false };
+    }
+    case "budget_exhausted": {
+      // B1: 日次リクエスト予算を消化した（soft stop）。積み残しがある限り
+      // 毎日発火するのが正常な定常状態であり、異常ではない。
+      console.log(
+        `[discovery-ingest] 日次リクエスト予算(${verdict.gate})を消化したため本日の巡回を終了: ${verdict.detail}`,
+      );
+      return { abortedByKillGate: false, abortedByBudget: true, abortedByRetryAfter: false };
     }
     case "retry_after": {
       console.warn(`[discovery-ingest] retry-after until ${verdict.retryAtISO}, aborting run`);
-      return { abortedByKillGate: false, abortedByRetryAfter: true };
+      return { abortedByKillGate: false, abortedByBudget: false, abortedByRetryAfter: true };
     }
     case "blocked_robots": {
       if (retryCtx) await completeRetry(retryCtx.urlHash);
       await setDiscoverySeenStatus(host, url, "skipped");
       stats.skippedRobots++;
-      return { abortedByKillGate: false, abortedByRetryAfter: false };
+      return { abortedByKillGate: false, abortedByBudget: false, abortedByRetryAfter: false };
     }
     case "http_error": {
       if (verdict.status === 404 || verdict.status === 410) {
@@ -578,12 +590,12 @@ async function processUrl(
           stats.enqueuedRetries++;
         }
       }
-      return { abortedByKillGate: false, abortedByRetryAfter: false };
+      return { abortedByKillGate: false, abortedByBudget: false, abortedByRetryAfter: false };
     }
     case "not_modified": {
       if (retryCtx) await completeRetry(retryCtx.urlHash);
       await setDiscoverySeenStatus(host, url, "fetched");
-      return { abortedByKillGate: false, abortedByRetryAfter: false };
+      return { abortedByKillGate: false, abortedByBudget: false, abortedByRetryAfter: false };
     }
     case "too_large": {
       // 取得サイズ上限超過（plan 06 §5.2）。相手のエラーではないが、ページの
@@ -592,7 +604,7 @@ async function processUrl(
       if (retryCtx) await completeRetry(retryCtx.urlHash);
       await setDiscoverySeenStatus(host, url, "skipped");
       stats.skippedTooLarge++;
-      return { abortedByKillGate: false, abortedByRetryAfter: false };
+      return { abortedByKillGate: false, abortedByBudget: false, abortedByRetryAfter: false };
     }
     case "ok":
       break;
@@ -607,7 +619,7 @@ async function processUrl(
     if (retryCtx) await completeRetry(retryCtx.urlHash);
     await setDiscoverySeenStatus(host, url, "skipped");
     stats.skippedNoTitle++;
-    return { abortedByKillGate: false, abortedByRetryAfter: false };
+    return { abortedByKillGate: false, abortedByBudget: false, abortedByRetryAfter: false };
   }
 
   // コンテナ抽出: ナビ・フッター・第三者コンテンツ（口コミ等）を排したサブ
@@ -621,7 +633,7 @@ async function processUrl(
     await setDiscoverySeenStatus(host, url, "fetched");
     stats.extractionInsufficientDropped++;
     stats.extractionFailedByContainer++;
-    return { abortedByKillGate: false, abortedByRetryAfter: false };
+    return { abortedByKillGate: false, abortedByBudget: false, abortedByRetryAfter: false };
   }
 
   // originalTitle: コンテナ内 h1（記事見出しそのもの）を第一候補とし、
@@ -662,7 +674,7 @@ async function processUrl(
     await dropPost(host, url, originalTitle, "extraction_insufficient", now);
     await setDiscoverySeenStatus(host, url, "fetched");
     stats.extractionInsufficientDropped++;
-    return { abortedByKillGate: false, abortedByRetryAfter: false };
+    return { abortedByKillGate: false, abortedByBudget: false, abortedByRetryAfter: false };
   }
 
   const bodyText = extractVisibleText(containerHtml);
@@ -676,7 +688,7 @@ async function processUrl(
     } else {
       stats.enqueuedRetries++;
     }
-    return { abortedByKillGate: false, abortedByRetryAfter: false };
+    return { abortedByKillGate: false, abortedByBudget: false, abortedByRetryAfter: false };
   }
 
   // M1-1: タイトル公開フィルタ。
@@ -686,7 +698,7 @@ async function processUrl(
     await dropPost(host, url, originalTitle, "title_filter", now);
     await setDiscoverySeenStatus(host, url, "fetched");
     stats.titleFilterDropped++;
-    return { abortedByKillGate: false, abortedByRetryAfter: false };
+    return { abortedByKillGate: false, abortedByBudget: false, abortedByRetryAfter: false };
   }
 
   // M1-2: topicAnchor の語彙的接地（取得本文全体に対して検証する）。
@@ -701,7 +713,7 @@ async function processUrl(
     await dropPost(host, url, originalTitle, "anchor_ungrounded", now);
     await setDiscoverySeenStatus(host, url, "fetched");
     stats.anchorUngroundedDropped++;
-    return { abortedByKillGate: false, abortedByRetryAfter: false };
+    return { abortedByKillGate: false, abortedByBudget: false, abortedByRetryAfter: false };
   }
 
   // M1-3: sticky removal。同一 URL が過去に自動撤回（retracted）済みなら、
@@ -712,7 +724,7 @@ async function processUrl(
     if (retryCtx) await completeRetry(retryCtx.urlHash);
     await setDiscoverySeenStatus(host, url, "fetched");
     stats.stickyRemovedBlocked++;
-    return { abortedByKillGate: false, abortedByRetryAfter: false };
+    return { abortedByKillGate: false, abortedByBudget: false, abortedByRetryAfter: false };
   }
 
   // Q4: 公開レート上限（日次上限・ホストシェア上限）。上限到達は終端棄却では
@@ -722,7 +734,7 @@ async function processUrl(
     await retryOrGiveUp(host, url, "rate_capped", now, retryCtx);
     await setDiscoverySeenStatus(host, url, "fetched");
     stats.rateCapped++;
-    return { abortedByKillGate: false, abortedByRetryAfter: false };
+    return { abortedByKillGate: false, abortedByBudget: false, abortedByRetryAfter: false };
   }
 
   // processUrl 到達時点で containerHtml は非 null であることを確認済み
@@ -738,7 +750,7 @@ async function processUrl(
     await setDiscoverySeenStatus(host, url, "fetched");
     stats.extractionInsufficientDropped++;
     stats.extractionFailedByContainer++;
-    return { abortedByKillGate: false, abortedByRetryAfter: false };
+    return { abortedByKillGate: false, abortedByBudget: false, abortedByRetryAfter: false };
   }
   const published = await publishPost(host, url, originalTitle, curation, bodyHash, now, signals);
   if (!published) {
@@ -750,13 +762,13 @@ async function processUrl(
     } else {
       stats.enqueuedRetries++;
     }
-    return { abortedByKillGate: false, abortedByRetryAfter: false };
+    return { abortedByKillGate: false, abortedByBudget: false, abortedByRetryAfter: false };
   }
 
   if (retryCtx) await completeRetry(retryCtx.urlHash);
   await setDiscoverySeenStatus(host, url, "fetched");
   stats.published++;
-  return { abortedByKillGate: false, abortedByRetryAfter: false };
+  return { abortedByKillGate: false, abortedByBudget: false, abortedByRetryAfter: false };
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -854,6 +866,10 @@ export async function ingestDiscoveredUrls(
           stats.abortedByKillGate = true;
           return stats;
         }
+        if (outcome.abortedByBudget) {
+          stats.abortedByBudget = true;
+          return stats;
+        }
         if (outcome.abortedByRetryAfter) {
           stats.abortedByRetryAfter = true;
           return stats;
@@ -871,6 +887,10 @@ export async function ingestDiscoveredUrls(
       const outcome = await processUrl(host, url, stats, now, null);
       if (outcome.abortedByKillGate) {
         stats.abortedByKillGate = true;
+        return stats;
+      }
+      if (outcome.abortedByBudget) {
+        stats.abortedByBudget = true;
         return stats;
       }
       if (outcome.abortedByRetryAfter) {
@@ -999,8 +1019,13 @@ export async function revalidatePublishedPosts(opts?: {
         await markRetracted(post.id, "tos_changed", now);
         stats.retractedTosChanged++;
       }
-      // 他の gate（K1/K4/K5/K6/K7 等）はホスト全体の一時停止であり、この
+      // 他の gate（K1/K4/K5/K6 等）はホスト全体の一時停止であり、この
       // post 個別の客観トリガではないため撤回しない（次回以降に再確認）。
+      continue;
+    }
+    if (tosVerdict && tosVerdict.kind === "budget_exhausted") {
+      // B1: 日次リクエスト予算消化（soft stop・異常ではない）。この post
+      // 個別の客観トリガではないため撤回しない（次回以降に再確認）。
       continue;
     }
 
@@ -1013,6 +1038,8 @@ export async function revalidatePublishedPosts(opts?: {
         }
         continue;
       }
+      case "budget_exhausted":
+        continue; // B1: 日次リクエスト予算消化（soft stop）。異常ではないため撤回しない。
       case "retry_after":
         continue; // 相手都合の一時停止。次回ランに委ねる。
       case "blocked_robots": {

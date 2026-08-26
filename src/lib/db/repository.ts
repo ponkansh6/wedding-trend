@@ -1049,9 +1049,9 @@ export interface HostGateState {
   k4Strikes: number;
   /** 直近の 429 発生時刻（ISO 8601）。K6 の 24h 判定に使う。 */
   last429At: string | null;
-  /** K7 日次カウンタの UTC 日付キー（YYYY-MM-DD）。 */
+  /** B1 日次カウンタの UTC 日付キー（YYYY-MM-DD）。 */
   countDay: string;
-  /** K7 日次カウンタの値。 */
+  /** B1 日次カウンタの値。 */
   countValue: number;
 }
 
@@ -1088,7 +1088,7 @@ export async function getHostGateState(host: string): Promise<HostGateState | nu
  *
  * 書き込み失敗時は例外を握りつぶす（fail-open）。kill gate は実レスポンスから
  * 決定的に再誘発されるため、永続化漏れは次回の同レスポンスで再適用され、
- * 収集ラン全体を落とすより被害が小さい。ただし K7 日次カウンタのみ
+ * 収集ラン全体を落とすより被害が小さい。ただし B1 日次カウンタのみ
  * 再構成不能なため、失敗時は警告ログで検知可能にしておく。
  */
 export async function saveHostGateState(state: HostGateState): Promise<void> {

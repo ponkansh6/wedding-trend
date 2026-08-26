@@ -900,7 +900,7 @@ describe("ingestDiscoveredUrls", () => {
       return new Date(jstMs).toISOString().slice(0, 10);
     }
 
-    it("K7（日次リクエスト上限）で中断したとき、中断前に処理した件数が discovery_host_metrics に記録される（0でも満数でもない）", async () => {
+    it("B1（日次リクエスト予算）で中断したとき、中断前に処理した件数が discovery_host_metrics に記録される（0でも満数でもない）", async () => {
       // saveHostGateState の countDay は access-discipline.ts の todayUTC()
       // （＝UTC の暦日）と比較されるため UTC で渡す必要がある。
       // 一方、discovery_host_metrics の day 列は discovery-ingest.ts の
@@ -908,10 +908,10 @@ describe("ingestDiscoveredUrls", () => {
       // には jstToday() を使う。2 つは UTC/JST の境目で 1 日ずれることがある。
       const utcToday = new Date().toISOString().slice(0, 10);
       const today = jstToday();
-      // K7 の閾値ちょうど手前まで既に消費させておく。robots.txt の取得自体も
+      // B1 の閾値ちょうど手前まで既に消費させておく。robots.txt の取得自体も
       // 日次カウントを1消費する（disciplinedFetch は robots 取得後にも
       // capRecheck を行う）ため、1件目の URL 処理だけで robots+article の
-      // 2リクエスト分を消費する。よって「1件目は通り、2件目の直前で K7 に
+      // 2リクエスト分を消費する。よって「1件目は通り、2件目の直前で B1 に
       // 到達する」状態を作るには CAP - 2 から開始する必要がある
       // （本番の processed=50/50 中断の再現）。
       await saveHostGateState({
@@ -925,8 +925,8 @@ describe("ingestDiscoveredUrls", () => {
         countValue: DAILY_REQUEST_CAP_PER_HOST - 2,
       });
 
-      const okUrl = `https://${HOST}/story/cases/before-k7`;
-      const blockedUrl = `https://${HOST}/story/cases/after-k7`;
+      const okUrl = `https://${HOST}/story/cases/before-b1`;
+      const blockedUrl = `https://${HOST}/story/cases/after-b1`;
       await seedDiscoverySeen(HOST, [{ url: okUrl }, { url: blockedUrl }]);
       vi.stubGlobal(
         "fetch",
@@ -934,16 +934,19 @@ describe("ingestDiscoveredUrls", () => {
           const u = String(input);
           if (u.endsWith("/robots.txt")) return resp({ status: 200, body: ALLOW_ALL_ROBOTS });
           if (u === okUrl) return resp({ status: 200, body: articleHtml("上限直前の記事") });
-          throw new Error(`unexpected fetch: ${u} (K7 must block network I/O for this URL)`);
+          throw new Error(`unexpected fetch: ${u} (B1 must block network I/O for this URL)`);
         }),
       );
       mockedCurate.mockResolvedValue(sufficientCuration());
 
       const stats = await ingestDiscoveredUrls(HOST);
 
-      expect(stats.abortedByKillGate).toBe(true);
+      // B1（soft stop）は abortedByBudget のみを立て、abortedByKillGate は
+      // false のままにする（両者が同時に true になってはならない）。
+      expect(stats.abortedByBudget).toBe(true);
+      expect(stats.abortedByKillGate).toBe(false);
       // `processUrl()` は `stats.processed++` を関数の先頭・kill_gate 判定より
-      // 前で行う（disciplinedFetch の戻り値を見る前）ため、K7 でネットワーク
+      // 前で行う（disciplinedFetch の戻り値を見る前）ため、B1 でネットワーク
       // I/O ゼロのまま中断された2件目もカウントされる。これは
       // `DiscoveryIngestStats.processed` 自身のドキュメントコメント
       // 「処理を試みた URL 数」（＝attempted、succeeded ではない）と整合する
@@ -953,6 +956,15 @@ describe("ingestDiscoveredUrls", () => {
       // 記録されること」であり、その意図はこの値でも保たれている。
       expect(stats.processed).toBe(2);
       expect(stats.published).toBe(1);
+
+      // B1 発火では host_gate_state に stateKind/gateId/untilAt が書かれない
+      // （永続停止にならない = 人手解除不要）。
+      const gate = await getHostGateState(HOST);
+      expect(gate?.stateKind ?? null).not.toBe("stopped");
+      expect(gate?.stateKind ?? null).not.toBe("permanent");
+      expect(gate?.stateKind ?? null).not.toBe("cooloff");
+      expect(gate?.gateId).toBeNull();
+      expect(gate?.untilAt).toBeNull();
 
       const row = await readHostMetricsRow(HOST, today);
       expect(row).toBeDefined();
@@ -1294,6 +1306,45 @@ describe("revalidatePublishedPosts (M4)", () => {
 
     const post = (await getPostsByUrls([url])).get(url);
     expect(post?.status).toBe("retracted");
+  });
+
+  it("B1（日次リクエスト予算消化）で中断した post は soft stop として撤回しない", async () => {
+    const url = `https://${HOST}/story/cases/budget-during-revalidate`;
+    const postId = await seedPublished(url);
+    await recordPublication(
+      postId,
+      new Date().toISOString(),
+      computeBodyHash("元の本文です。"),
+      "body",
+      0,
+      0,
+      0,
+    );
+    const utcToday = new Date().toISOString().slice(0, 10);
+    await saveHostGateState({
+      host: HOST,
+      gateId: null,
+      stateKind: "none",
+      untilAt: null,
+      k4Strikes: 0,
+      last429At: null,
+      countDay: utcToday,
+      countValue: DAILY_REQUEST_CAP_PER_HOST,
+    });
+    const fetchMock = vi.fn(async () => {
+      throw new Error("B1 must block network I/O entirely (soft stop before robots fetch)");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const stats = await revalidatePublishedPosts();
+
+    // budget_exhausted は個別 post の客観的なトリガではないため撤回しない。
+    expect(stats.retractedSourceGone).toBe(0);
+    expect(stats.retractedRobotsDisallowed).toBe(0);
+    expect(stats.retractedBodyChanged).toBe(0);
+    expect(stats.retractedTosChanged).toBe(0);
+    const post = (await getPostsByUrls([url])).get(url);
+    expect(post?.status).toBe("published");
   });
 
   it("computeContainerBodyHash() は同一 HTML に対して安定したハッシュを返す（processUrl() の保存値との単体整合性）", async () => {

@@ -299,7 +299,7 @@ export const sourcePolicy = sqliteTable("source_policy", {
  *
  * - `stateKind`: `null` = 稼働中 / `"cooloff"` = 一時停止（`untilAt` まで）/
  *   `"stopped"` = K1 由来の人手復帰待ち / `"permanent"` = 恒久停止
- * - `countDay` / `countValue`: K7 日次リクエスト上限のカウンタ（UTC 日付キー）
+ * - `countDay` / `countValue`: B1 日次リクエスト予算のカウンタ（UTC 日付キー）
  */
 export const hostGateState = sqliteTable("host_gate_state", {
   host: text("host").primaryKey(),

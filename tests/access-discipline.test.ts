@@ -20,7 +20,7 @@ import {
   normalizeTosText,
 } from "@/lib/sources/access-discipline";
 
-/** K7 日次キャップの上限到達状態を直接シードする。 */
+/** B1 日次キャップの上限到達状態を直接シードする。 */
 async function seedDailyCap(host: string): Promise<void> {
   await saveHostGateState({
     host,
@@ -126,14 +126,14 @@ describe("Access Discipline", () => {
     expect(sleeps[0]).toBeLessThanOrEqual(MIN_HOST_INTERVAL_MS);
   });
 
-  it("4. daily cap exceeded -> K7 refusal without any network I/O", async () => {
+  it("4. daily cap exceeded -> B1 budget_exhausted refusal without any network I/O", async () => {
     await seedDailyCap("cap.com");
     const fetchMock = vi.fn(async () => resp({ status: 200, body: "" }));
     vi.stubGlobal("fetch", fetchMock);
 
     const verdict = await disciplinedFetch("https://cap.com/post-1", { purpose: "article" });
 
-    expect(verdict).toMatchObject({ kind: "kill_gate", gate: "K7" });
+    expect(verdict).toMatchObject({ kind: "budget_exhausted", gate: "B1" });
     expect(fetchMock.mock.calls.length).toBe(0);
   });
 
@@ -272,17 +272,102 @@ describe("Access Discipline", () => {
     expect(st?.gateId).toBe("K6");
   });
 
-  it("10. K7 refusal precedes robots fetch and policy side effects", async () => {
+  it("10. B1 budget_exhausted refusal precedes robots fetch and policy side effects", async () => {
     await seedDailyCap("pure.com");
     const fetchMock = vi.fn(async () => resp({ status: 200, body: "" }));
     vi.stubGlobal("fetch", fetchMock);
 
     const verdict = await disciplinedFetch("https://pure.com/post-1", { purpose: "article" });
 
-    expect(verdict).toMatchObject({ kind: "kill_gate", gate: "K7" });
+    expect(verdict).toMatchObject({ kind: "budget_exhausted", gate: "B1" });
     expect(fetchMock.mock.calls.length).toBe(0);
     // robots にも触れていないため source_policy のスナップショットも存在しない。
     expect(await getSourcePolicy("pure.com")).toBeNull();
+  });
+
+  it("14. B1 は host_gate_state に stateKind/gateId/untilAt を書かない（人手解除不要の soft stop）", async () => {
+    await seedDailyCap("softcap.com");
+    const fetchMock = vi.fn(async () => resp({ status: 200, body: "" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const verdict = await disciplinedFetch("https://softcap.com/post-1", { purpose: "article" });
+    expect(verdict).toMatchObject({ kind: "budget_exhausted", gate: "B1" });
+
+    const st = await getHostGateState("softcap.com");
+    expect(st?.stateKind).toBeNull();
+    expect(st?.gateId).toBeNull();
+    expect(st?.untilAt).toBeNull();
+  });
+
+  it("15. K1〜K6（hard stop）では対照的に stateKind/gateId が書き込まれる（B1 との対比の固定）", async () => {
+    // K3 を代表として使う（451 は即恒久停止）。
+    const fetchMock = vi.fn(async (url: string | URL) => {
+      const u = String(url);
+      if (u.endsWith("/robots.txt")) return resp({ status: 200, body: "" });
+      return resp({ status: 451 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const verdict = await disciplinedFetch("https://hardstop.com/post-1", { purpose: "article" });
+    expect(verdict).toMatchObject({ kind: "kill_gate", gate: "K3" });
+
+    const st = await getHostGateState("hardstop.com");
+    expect(st?.stateKind).toBe("permanent");
+    expect(st?.gateId).toBe("K3");
+  });
+
+  it("16. UTC 日付が変わると B1 の拒否は自動的に解除される（countDay が別日なら carry over しない）", async () => {
+    // 前日の日付で上限到達状態をシードする。
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    await saveHostGateState({
+      host: "rollover.com",
+      gateId: null,
+      stateKind: null,
+      untilAt: null,
+      k4Strikes: 0,
+      last429At: null,
+      countDay: yesterday,
+      countValue: DAILY_REQUEST_CAP_PER_HOST,
+    });
+    const fetchMock = vi.fn(async (url: string | URL) => {
+      const u = String(url);
+      if (u.endsWith("/robots.txt")) return resp({ status: 200, body: "" });
+      return resp({ status: 200, body: "<html>ok</html>" });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const verdict = await disciplinedFetch("https://rollover.com/post-1", { purpose: "article" });
+
+    // 別日のカウントは carry over しないため B1 は発火しない。
+    expect(verdict.kind).toBe("ok");
+  });
+
+  it("17. FetchVerdict の判別は文字列比較ではなく型（kind）で行う: budget_exhausted と kill_gate は互いに排他的な判別可能ユニオンである", async () => {
+    await seedDailyCap("typecheck.com");
+    const fetchMock = vi.fn(async () => resp({ status: 200, body: "" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const verdict = await disciplinedFetch("https://typecheck.com/post-1", {
+      purpose: "article",
+    });
+
+    // kind による判別のみを信頼する。gate の値そのものを分岐条件にはしない
+    // （将来 B2 が追加されても、この分岐ロジックは変更を要さない）。
+    function classify(v: typeof verdict): "hard" | "soft" | "other" {
+      switch (v.kind) {
+        case "kill_gate":
+          return "hard";
+        case "budget_exhausted":
+          return "soft";
+        default:
+          return "other";
+      }
+    }
+
+    expect(classify(verdict)).toBe("soft");
+    if (verdict.kind === "budget_exhausted") {
+      expect(verdict.gate).toBe("B1");
+    }
   });
 
   it("11. content-length exceeding the cap is rejected without reading the body", async () => {
@@ -578,6 +663,30 @@ describe("M3-K2: Terms of Service change detection", () => {
       const gate = await getHostGateState("fetch-fail.com");
       expect(gate?.stateKind).toBe("stopped");
       expect(gate?.gateId).toBe("K2");
+    });
+
+    it("回帰防止: budget_exhausted（B1）を hard な K2 停止に誤昇格させない", async () => {
+      // 修正前は checkTermsOfServiceChange が verdict.kind === "kill_gate" 以外を
+      // すべて fail-closed（K2 停止）扱いしており、B1（soft stop）まで誤って
+      // 恒久停止に昇格させる潜在バグがあった。今回の型分離でこれを修正した。
+      await seedPolicyForTos("budget-during-tos.com", {
+        tosUrl: "https://budget-during-tos.com/terms",
+        tosHash: "some-existing-hash",
+        checkedAt: HOURS_25_AGO,
+      });
+      await seedDailyCap("budget-during-tos.com");
+      const fetchMock = vi.fn(async () => resp({ status: 200, body: "" }));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const result = await checkTermsOfServiceChange("budget-during-tos.com");
+
+      // budget_exhausted がそのまま伝播する（kill_gate/K2 に化けない）。
+      expect(result).toMatchObject({ kind: "budget_exhausted", gate: "B1" });
+      const gate = await getHostGateState("budget-during-tos.com");
+      expect(gate?.stateKind).not.toBe("stopped");
+      expect(gate?.gateId).not.toBe("K2");
+      // ネットワーク I/O ゼロで拒否される（robots.txt 取得すら発生しない）。
+      expect(fetchMock.mock.calls.length).toBe(0);
     });
   });
 });

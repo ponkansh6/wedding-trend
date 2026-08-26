@@ -237,13 +237,15 @@ kill gate K1（robots.txt 変化検知）の入力。取得のたびに内容ハ
 永続化する。
 
 - `host`: 主キー。
-- `gate_id`: 直近発火した gate（`K1`/`K3`/`K4`/`K5`/`K6`/`K7`。未発火なら null）。
+- `gate_id`: 直近発火した kill gate（`K1`/`K3`/`K4`/`K5`/`K6`。未発火なら null）。
+  B1（日次リクエスト予算。kill gate ではない。下記§10-6直後の小見出しを参照）は
+  `stateKind` を変更しないため、この列には記録しない。
 - `state_kind`: `null`（稼働中）/ `"cooloff"`（`until_at` まで一時停止）/
   `"stopped"`（K1 由来の人手復帰待ち）/ `"permanent"`（恒久停止）。
 - `until_at`: `cooloff` の期限（ISO8601。他の state では null）。
 - `k4_strikes`: K4（記事取得 403）の連続回数。2 回で `permanent` に遷移する。
 - `last_429_at`: 直近の 429 応答時刻（K6 の 24 時間窓判定に使う）。
-- `count_day` / `count_value`: K7（日次リクエスト上限）用のカウンタ
+- `count_day` / `count_value`: B1（日次リクエスト予算）用のカウンタ
   （UTC 日付キー、`post_usefulness_criteria` 同様この日を跨いだらリセット）。
 - `updated_at`: ISO8601 文字列。
 
@@ -342,9 +344,10 @@ RSS フィードが構造的に存在しないセクション（第1対象: `mwe
   明示している）。`sourceId` は既存のエバーグリーン経路と同じ
   `EVERGREEN_SOURCE_ID`（`"evergreen"`）を共有する。
   ランは 1 回の実行時間予算（`DISCOVERY_INGEST_TIME_BUDGET_MS`、既定 15分）を
-  超えたら残りを次回ランに委ねる。kill gate 発火（§10-6）または
-  `Retry-After` 指定を受けたホストは、そのランの残り URL の処理を即座に
-  中断する（継続は無意味かつ無礼であるため）。
+  超えたら残りを次回ランに委ねる。kill gate 発火（§10-6）・B1（日次リクエスト
+  予算超過。§10-6 直後の小見出しを参照）または `Retry-After` 指定を受けた
+  ホストは、そのランの残り URL の処理を即座に中断する（継続は無意味かつ
+  無礼であるため）。
 - **実行基盤**: GitHub Actions（`.github/workflows/discovery.yml`）が
   UTC 18:00（JST 3:00）に日次実行する。`timeout-minutes: 20` と
   `concurrency: { group: discovery, cancel-in-progress: false }` により、
@@ -754,7 +757,6 @@ THEN 1 ELSE 0 END` で判定している。`json_extract` は文字列値をク�
      | K4  | 記事取得（`purpose: "article"`）で 403                             | 初回は `stateKind = "cooloff"`（24時間）。連続2回目（`k4Strikes >= 2`）で `permanent`                                |
      | K5  | robots.txt / sitemap 取得（`purpose` が `robots`/`sitemap`）で 403 | `stateKind = "permanent"`。1回で即恒久停止（配信の意思そのものへの拒否と評価するため）                               |
      | K6  | 429 応答                                                           | `Retry-After` を厳密に守って1回だけ再開（`retry_after` verdict）。24時間以内に2回目の429で `stateKind = "permanent"` |
-     | K7  | ホストあたり日次リクエスト数が `DAILY_REQUEST_CAP_PER_HOST` 超過   | `stateKind` は変更せず、その日の残り時間は `kill_gate` verdict で拒否し続ける（UTC日次でリセット）                   |
      | K9  | 根拠文が §10-3 の数値禁止制約に違反                                | `src/lib/llm/schemas.ts` の zod `refine` により LLM 応答のバリデーション自体が失敗する（保存前に機械的に拒否）       |
      | K2  | 利用規約テキストが変化                                             | `checkTermsOfServiceChange()`（`src/lib/sources/access-discipline.ts`）。詳細は §10-7 K2                             |
 
@@ -767,6 +769,40 @@ THEN 1 ELSE 0 END` で判定している。`json_extract` は文字列値をク�
      **未実装のゲート**: K8（採用率低下によるフィルタ/抽出破損の検知）・
      K10（判定根拠と元記事の内容不一致の自動検知）は、本仕様時点でコードと
      して実装されていない。
+
+   #### 日次リクエスト予算 B1（kill gate ではない）
+
+   旧仕様では本項目を `K7` として上記 kill gate 表に含めていたが、**B1 を
+   `K7` として kill gate 表に含めたのは誤りであり、その混同が実装（`discovery-ingest.ts`
+   が K1〜K7 を同一の `kill_gate` verdict に統合していたこと）に伝播し、
+   正常な予算消化のたびに GitHub Actions ワークフローを失敗扱いにする事故を
+   起こした。** 上記「kill gate: 1つでも観測されたら該当ホストの discovery を
+   即座に停止する。回復には人間の再判断を要する」という総説は無条件のまま
+   維持し、例外を設けない。B1 はこの無条件の性質に当てはまらないため、
+   kill gate 族から分離し独立の項目として扱う。
+
+   - **観測事象**: ホストあたり日次リクエスト数が `DAILY_REQUEST_CAP_PER_HOST`
+     （既定50件）を超過。
+   - **性質**: レート制御であり、恒久停止でも人間の判断待ちでもない。
+     `host_gate_state.stateKind` は変更しない。その日の残り時間は当該ホストへの
+     リクエストを拒否し続けるが、**UTC 日次で自動的にリセットされ、人手の
+     解除操作を必要としない**。
+   - **verdict の型**: kill gate（K1・K3〜K6・K9）の verdict は `kill_gate`
+     （hard）。B1 の verdict は型レベルで区別された `budget_exhausted`
+     （soft）とする。`src/lib/pipeline/discovery-ingest.ts` の `ingestDiscoveredUrls()`
+     の戻り値は、kill gate 発火を表す `abortedByKillGate`（K1〜K6 専用）と、
+     B1 発火を表す `abortedByBudget` を別フィールドとして持つ。
+   - **不変条件（終了コードでの区別）**: `scripts/run-discovery.mjs` の終了コードは
+     3値: `0` = 正常終了 / `2` = soft stop（`abortedByBudget`。予算消化による
+     想定内の停止）/ `1` = hard stop（`abortedByKillGate`）または想定外エラー。
+     `.github/workflows/discovery.yml` は終了コード `2` を成功として扱いつつ
+     `::notice` とジョブサマリで可視化し、GitHub Issue の自動起票は終了コード
+     `1` のときのみ行う。**理由**: 積み残し URL がある限り B1 が毎日発火するのは
+     正常な定常状態であり、これを失敗として報告し続けると警報疲れ
+     （alert fatigue）を招き、hard stop（本物の障害）を見逃す原因になる。
+     soft stop と hard stop を終了コードの段階で機械的に区別することで、
+     「kill gate 発火は必ず人間に通知される」という保証を、定常的なノイズで
+     薄めずに保つ。
 
 7. **著作者クレジット要件についての記録（2026-08-25 訂正）**: 2026-08-25 の初版では、本項に「要件が達成しようとしていた目的（著作者への出所明示）は `www.mwed.jp` に関しては達成されていない」と記載していた。**この評価は撤回する。** 誤りの経緯: 第2項の原文を逐語で確認せず、要約された記憶（「著作者クレジットを必ず表示する」）のみを根拠に「要件が満たせない」と判断した。しかし第2項の原文は当初から条件付きである——「`sourceName` は常時表示し、`author` は非 null の場合に表示する」。`www.mwed.jp` は `author` が構造上取得できないため常に null であり、**要件は「表示しない」を正しく指示しており、実装（§10-4 の「クレジットは構造化メタデータのみから取得し、解決できなければ捏造せず非表示にする」方針）はこれを仕様どおり満たしている。**
    - **法的な裏付け**: 著作権法48条1項1号が求めるのは「利用の態様に応じ合理的と認められる方法及び程度による出所の明示」であり、媒体名＋元記事への明示的リンク（要件1・`sourceName` 常時表示）はこれに十分該当しうる。48条2項が求めるのは「当該著作物につき**表示されている**著作者名を示すこと」——すなわち**ソース側が表示している著作者名を転記する義務**であり、**表示されていない著作者を特定・調査する義務ではない**。したがって §10-4 の「構造化メタデータから取得できなければ捏造せず非表示にする」方針は 48条2項の建付けと整合する。

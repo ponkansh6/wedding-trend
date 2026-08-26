@@ -288,7 +288,7 @@ export const CRAWLER_USER_AGENT =
   "WeddingTrendBot/1.0 (+https://github.com/ponkansh6/wedding-trend)";
 /** 同一ホストへの最小リクエスト間隔（ms）。robots.txt の Crawl-delay が大きい場合はそちらを下限として尊重する。 */
 export const MIN_HOST_INTERVAL_MS = 5_000;
-/** ホストあたり日次リクエストのハードキャップ（kill gate K7）。間隔だけでなく総量を見る。 */
+/** ホストあたり日次リクエストのハードキャップ（日次リクエスト予算 B1・soft stop）。間隔だけでなく総量を見る。 */
 export const DAILY_REQUEST_CAP_PER_HOST = 50;
 /** 記事取得の本文サイズ上限（plan 06 §5.2）。超過は打ち切る（kill gate ではない）。 */
 export const MAX_BODY_BYTES = 512 * 1024;

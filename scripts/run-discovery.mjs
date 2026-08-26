@@ -91,6 +91,12 @@ if (ingest.abortedByKillGate) {
   console.error("kill gate が発火しました。ホスト停止状態を確認してください。");
   process.exit(1);
 }
+if (ingest.abortedByBudget) {
+  console.log(
+    "[B1] 日次リクエスト予算を消化したため本日の巡回を終了しました（正常な定常状態・UTC 日次で自動リセット）。",
+  );
+  process.exit(2);
+}
 if (ingest.abortedByRetryAfter) {
   console.error("Retry-After 指定により中断しました。次回ランまで待機します。");
   process.exit(0);

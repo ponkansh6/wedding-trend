@@ -20,7 +20,9 @@ import type { HostGateState } from "@/lib/db/repository";
  *
  * - 間隔: ホストあたり最低 5 秒。robots.txt の Crawl-delay があればその値を下限として尊重する
  * - 並列: ホスト内は逐次（最終リクエスト時刻で強制）。ホスト間のみ並列
- * - 総量: ホストあたり日次ハードキャップ（K7）。間隔だけでなく総量を見る
+ * - 総量: ホストあたり日次リクエスト予算（B1）。間隔だけでなく総量を見る。
+ *   B1 は kill gate（K1〜K6・異常検知・人手解除要）とは性質が異なり、
+ *   積み残しがある限り毎日発火するのが正常な定常状態（予算消化・UTC 日次自動リセット）。
  * - 条件付き GET: If-Modified-Since / ETag を送り、304 を扱う
  * - User-Agent: WeddingTrendBot/1.0（連絡先必須・UA 偽装禁止）
  * - robots.txt: 取得前に確認。キャッシュは 24 時間以内（RFC 9309 推奨）
@@ -31,13 +33,17 @@ import type { HostGateState } from "@/lib/db/repository";
  * いった非 ISO の状態値はこちらに置く。
  */
 
-export type KillGateId = "K1" | "K2" | "K3" | "K4" | "K5" | "K6" | "K7";
+/** K1〜K6: 異常検知。`stateKind` を永続化し、人間の手動解除を要する（hard stop）。 */
+export type KillGateId = "K1" | "K2" | "K3" | "K4" | "K5" | "K6";
+/** B1: 予算消化。`stateKind` は書かず、UTC 日次で自動リセットされる（soft stop）。 */
+export type BudgetGateId = "B1";
 
 export type FetchVerdict =
   | { kind: "ok"; response: Response }
   | { kind: "not_modified" }
   | { kind: "blocked_robots" }
   | { kind: "kill_gate"; gate: KillGateId; detail: string }
+  | { kind: "budget_exhausted"; gate: BudgetGateId; detail: string }
   | { kind: "retry_after"; retryAtISO: string }
   | { kind: "http_error"; status: number }
   | { kind: "too_large" };
@@ -174,20 +180,36 @@ function parseRetryAfterMs(headerValue: string | null): number {
   return DEFAULT_RETRY_AFTER_MS;
 }
 
-interface HostBlock {
+/**
+ * ホストの停止判別を型で分離する。soft/hard は判別可能なユニオンで表現し、
+ * 呼び出し側（`disciplinedFetch`）は `kind` を読むだけで正しい `FetchVerdict`
+ * を組み立てられるようにする（文字列比較で分岐させない）。
+ */
+interface HardHostBlock {
+  kind: "hard";
   gate: KillGateId;
   detail: string;
 }
 
+interface SoftHostBlock {
+  kind: "soft";
+  gate: BudgetGateId;
+  detail: string;
+}
+
+type HostBlock = HardHostBlock | SoftHostBlock;
+
 /**
  * ホストの停止状態を確認する（ネットワーク I/O ゼロで拒否できる段階）。
+ * K1〜K6 由来の hard stop のみを扱う。
  * - `"permanent"` / `"stopped"`: gate 識別子つきで即拒否（stopped は K1 由来の人手復帰待ち）
  * - `"cooloff"`: `untilAt` 経過までは拒否、経過後は自動再開
  */
-async function getHostBlock(host: string): Promise<HostBlock | null> {
+async function getHostBlock(host: string): Promise<HardHostBlock | null> {
   const st = await loadGateState(host);
   if (st.stateKind === "permanent" || st.stateKind === "stopped") {
     return {
+      kind: "hard",
       gate: (st.gateId ?? "K3") as KillGateId,
       detail: `host ${host} is ${st.stateKind} by ${st.gateId ?? "unknown gate"}`,
     };
@@ -196,6 +218,7 @@ async function getHostBlock(host: string): Promise<HostBlock | null> {
     const untilMs = Date.parse(st.untilAt);
     if (!Number.isNaN(untilMs) && Date.now() < untilMs) {
       return {
+        kind: "hard",
         gate: (st.gateId ?? "K4") as KillGateId,
         detail: `host ${host} is cooling off until ${st.untilAt}`,
       };
@@ -204,14 +227,20 @@ async function getHostBlock(host: string): Promise<HostBlock | null> {
   return null;
 }
 
-/** K7: 日次ハードキャップ。差分巡回が壊れたときの事故形態（総量青天井）を防ぐ。 */
-async function checkDailyCap(host: string): Promise<HostBlock | null> {
+/**
+ * B1: 日次リクエスト予算。差分巡回が壊れたときの事故形態（総量青天井）を防ぐ
+ * ためのハードキャップだが、性質は K1〜K6 の異常検知とは異なる soft stop
+ * （`stateKind` を書かず UTC 日次で自動リセット）。積み残しがある限り毎日
+ * 発火するのが正常な定常状態であるため、B1 は決して kill gate 側に混ぜない。
+ */
+async function checkDailyCap(host: string): Promise<SoftHostBlock | null> {
   const st = await loadGateState(host);
   const count = st.countDay === todayUTC() ? st.countValue : 0;
   if (count >= DAILY_REQUEST_CAP_PER_HOST) {
     return {
-      gate: "K7",
-      detail: `daily request cap exceeded for ${host}: ${count}/${DAILY_REQUEST_CAP_PER_HOST}`,
+      kind: "soft",
+      gate: "B1",
+      detail: `daily request budget exhausted for ${host}: ${count}/${DAILY_REQUEST_CAP_PER_HOST}`,
     };
   }
   return null;
@@ -471,10 +500,10 @@ export async function disciplinedFetch(
     return { kind: "kill_gate", gate: block.gate, detail: block.detail };
   }
 
-  // 2) K7: 日次ハードキャップ。robots 取得より先に拒否できる。
+  // 2) B1: 日次リクエスト予算。robots 取得より先に拒否できる。
   const capBlock = await checkDailyCap(host);
   if (capBlock) {
-    return { kind: "kill_gate", gate: capBlock.gate, detail: capBlock.detail };
+    return { kind: "budget_exhausted", gate: capBlock.gate, detail: capBlock.detail };
   }
 
   // 3) robots.txt の確認（purpose:"robots" の取得自身は対象外）。
@@ -495,7 +524,7 @@ export async function disciplinedFetch(
     // robots 取得でも日次カウントを消費しているため、本取得の前に境界を再確認する。
     const capRecheck = await checkDailyCap(host);
     if (capRecheck) {
-      return { kind: "kill_gate", gate: capRecheck.gate, detail: capRecheck.detail };
+      return { kind: "budget_exhausted", gate: capRecheck.gate, detail: capRecheck.detail };
     }
   }
 
@@ -592,8 +621,10 @@ export async function checkTermsOfServiceChange(host: string): Promise<FetchVerd
   const verdict = await disciplinedFetch(tosUrl, { purpose: "article" });
 
   if (verdict.kind !== "ok") {
-    // 既に別ゲートで停止済みならその detail をそのまま伝播する。
-    if (verdict.kind === "kill_gate") {
+    // 既に別ゲートで停止済み（hard）や日次予算消化（soft）ならその detail を
+    // そのまま伝播する。B1 は異常ではないため、ここで K2（hard・人手解除要）
+    // に格上げしてはならない。
+    if (verdict.kind === "kill_gate" || verdict.kind === "budget_exhausted") {
       return verdict;
     }
     // 取得自体の失敗は fail-closed（無検証で走り続けない）。

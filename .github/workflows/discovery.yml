@@ -43,19 +43,44 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Run discovery crawler
-        run: pnpm exec tsx scripts/run-discovery.mjs
+        id: discovery
+        run: |
+          set +e
+          pnpm exec tsx scripts/run-discovery.mjs
+          ec=$?
+          set -e
+          echo "exit_code=${ec}" >> "$GITHUB_OUTPUT"
+          if [ "$ec" -eq 0 ] || [ "$ec" -eq 2 ]; then
+            exit 0
+          fi
+          exit "$ec"
         env:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
 
+      - name: Report soft stop (daily budget exhausted)
+        if: steps.discovery.outputs.exit_code == '2'
+        run: |
+          echo "::notice title=Discovery soft stop::Daily request budget (B1) was exhausted; crawler stopped normally and will resume automatically on the next scheduled run."
+          {
+            echo "### Discovery Crawler: soft stop (exit 2)"
+            echo ""
+            echo "日次リクエスト予算（B1）を消化して停止しました。積み残しがある限り毎日発生するのが正常であり、自動的に回復します。"
+            echo ""
+            echo "- Workflow run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Open GitHub Issue on Failure
-        if: failure()
+        # exit 2（soft stop）以外の失敗はすべて拾う。exit_code が未設定になる
+        # ケース（checkout / pnpm install の失敗、ステップのタイムアウト kill 等）で
+        # 無音になるのを防ぐため、'== 1' ではなく "!= 2" で判定する。
+        if: failure() && steps.discovery.outputs.exit_code != '2'
         uses: actions/github-script@v7
         with:
           script: |
             const title = "🚨 Discovery Crawler Failed";
-            const body = `Automated daily discovery crawler run failed.\n\n- Workflow run: https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}\n- Please inspect the logs (sitemap discovery / pending URL ingestion) and address the root cause.`;
+            const body = `Automated daily discovery crawler run hit a hard stop (exit code 1).\n\n- Workflow run: https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}\n- This indicates a kill gate (K1-K6) tripped, or an unexpected error occurred.\n- Check \`host_gate_state\` and the run logs (sitemap discovery / pending URL ingestion). Kill gates require manual human release — do not assume this will self-recover.`;
 
             // Check if an open issue with this title already exists to avoid spamming
             const issues = await github.rest.issues.listForRepo({
