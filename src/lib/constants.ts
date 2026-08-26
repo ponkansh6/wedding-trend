@@ -132,13 +132,22 @@ export const RETRY_BACKOFF_HOURS: readonly number[] = [1, 6, 24];
  */
 export const STALE_NON_TERMINAL_HOURS = 72;
 
-// ── 公開レート上限（plan 07 §6-Q4）──────────────────────────
+// ── 公開レート上限（plan 07 §6-Q4 / plan 10 S0）──────────────────────────
 /**
  * 1 日あたりの公開上限件数。
- * plan 07 §9 Stage 2（監督付き自動運転）の被害半径限定のため 10 に制限する。
- * Stage 3（完全自動運転）移行時に見直す。
+ *
+ * plan 10 §2-S0: 目標フィード供給量を 15 件/日と定め、`DAILY_PUBLISH_CAP`
+ * を 10 → 15 に引き上げる。根拠:
+ * - 現在の pending=242 + retry(rate_capped)=91 に対して CAP=10 は供給不足
+ * - mwed.jp の discovery 歩留まり 16.7%（90件中15件）を維持するには
+ *   最低でも 15件/日必要（90件×16.7%÷6日 ≒ 15件/日）
+ * - 変更前の影響: rate_capped 91件が毎日 5件ずつ解放されるだけの状態
+ * - ホスト分散: HOST_DAILY_SHARE_MAX=0.5 により単一ホスト最大 7件/日
+ *   （Math.floor(15×0.5)=7）。mwed.jp の 242 pending を吸収するのに十分
+ * - 守っている失敗モード: 単一ホストへの偏り（HOST_DAILY_SHARE_MAX で制御）、
+ *   低品質記事の量産（extraction_insufficient ゲートが 96% を通過前棄却）
  */
-export const DAILY_PUBLISH_CAP = 10;
+export const DAILY_PUBLISH_CAP = 15;
 /** 1 日の公開のうち単一ホストが占めてよい最大割合。 */
 export const HOST_DAILY_SHARE_MAX = 0.5;
 

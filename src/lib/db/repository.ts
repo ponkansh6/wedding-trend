@@ -15,6 +15,7 @@ import {
   hostGateState,
   postRetryQueue,
   discoveryHostMetrics,
+  evidenceSignalObservations,
 } from "./schema";
 import type {
   BodyHashKind,
@@ -1602,7 +1603,36 @@ export async function countPublishedSinceByHost(sinceIso: string): Promise<Recor
 }
 
 /**
- * Q2（K8 yield 崩壊検知）用のホスト×日テレメトリを加算する。既存行が無ければ
+ * plan 10 I2: シャドウ記録（オブザーベーション・モード）用のエビデンスシグナル観測データを追加する。
+ */
+export async function recordEvidenceObservation(data: {
+  urlHash: string;
+  host: string;
+  textLength: number;
+  linkDensity: number;
+  paragraphCount: number;
+  passedGate: boolean;
+  failedConditions: string | null;
+  observedAt: string;
+}): Promise<void> {
+  try {
+    await db.insert(evidenceSignalObservations).values({
+      urlHash: data.urlHash,
+      host: data.host,
+      textLength: data.textLength,
+      linkDensity: data.linkDensity,
+      paragraphCount: data.paragraphCount,
+      passedGate: data.passedGate,
+      failedConditions: data.failedConditions,
+      observedAt: data.observedAt,
+    });
+  } catch (err) {
+    console.warn(`[db] recordEvidenceObservation error for urlHash=${data.urlHash}:`, err);
+  }
+}
+
+/**
+ * Q2（K8 yield 崩壊検知）用のホスト×日テレメテレメトリを加算する。既存行が無ければ
  * 0 起点で作成する。`delta` の未指定フィールドは 0 として扱う（加算なし）。
  */
 export async function recordHostMetrics(

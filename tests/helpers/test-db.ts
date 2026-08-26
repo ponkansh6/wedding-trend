@@ -33,6 +33,7 @@ const KNOWN_TABLES = [
   "host_gate_state",
   "post_retry_queue",
   "discovery_host_metrics",
+  "evidence_signal_observations",
 ];
 
 /**

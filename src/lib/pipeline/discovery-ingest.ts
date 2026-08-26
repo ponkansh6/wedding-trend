@@ -60,6 +60,7 @@ import {
   reapStaleNonTerminal,
   recordHostMetrics,
   recordPublication,
+  recordEvidenceObservation,
   setDiscoverySeenStatus,
   upsertPosts,
 } from "@/lib/db/repository";
@@ -76,6 +77,7 @@ import {
   extractHtmlTitle,
   extractVisibleText,
   selectJudgmentSlice,
+  type EvidenceFailedCondition,
 } from "@/lib/sources/article-text";
 import { checkAnchorGrounding, filterTitle } from "@/lib/publish/gate";
 import type { DropReason, RetryQueueEntry, RetryReason, TrendTag } from "@/lib/types";
@@ -364,6 +366,7 @@ async function dropPost(
   title: string | null,
   reason: DropReason,
   now: string,
+  failedConditions?: EvidenceFailedCondition[],
 ) {
   if (!(await upsertPostRow(host, url, title ?? url, "rejected"))) return;
   const states = await getPostsByUrls([url]);
@@ -372,7 +375,15 @@ async function dropPost(
     console.warn(`[discovery-ingest] post id lookup failed while dropping ${url}`);
     return;
   }
-  await markDropped(postId, reason, now);
+  let finalReason: string = reason;
+  if (reason === "extraction_insufficient") {
+    if (failedConditions && failedConditions.length > 0) {
+      finalReason = `extraction_insufficient:${failedConditions.join(",")}`;
+    } else {
+      finalReason = "extraction_insufficient:unknown";
+    }
+  }
+  await markDropped(postId, finalReason as DropReason, now);
 }
 
 /** published として保存し、判定根拠（rationale）・公開記録も行う。 */
@@ -629,7 +640,17 @@ async function processUrl(
   if (containerHtml === null) {
     console.warn(`[discovery-ingest] container_not_found for ${url}`);
     if (retryCtx) await completeRetry(retryCtx.urlHash);
-    await dropPost(host, url, title, "extraction_insufficient", now);
+    await recordEvidenceObservation({
+      urlHash: retryCtx?.urlHash ?? hashUrl(url),
+      host,
+      textLength: 0,
+      linkDensity: 1.0,
+      paragraphCount: 0,
+      passedGate: false,
+      failedConditions: "container_not_found",
+      observedAt: now,
+    });
+    await dropPost(host, url, title, "extraction_insufficient", now, ["container_not_found"]);
     await setDiscoverySeenStatus(host, url, "fetched");
     stats.extractionInsufficientDropped++;
     stats.extractionFailedByContainer++;
@@ -671,7 +692,24 @@ async function processUrl(
       }
     }
     if (retryCtx) await completeRetry(retryCtx.urlHash);
-    await dropPost(host, url, originalTitle, "extraction_insufficient", now);
+    await recordEvidenceObservation({
+      urlHash: retryCtx?.urlHash ?? hashUrl(url),
+      host,
+      textLength: signals.textLength,
+      linkDensity: signals.linkDensity,
+      paragraphCount: signals.paragraphCount,
+      passedGate: false,
+      failedConditions: evidenceGate.failedConditions.join(","),
+      observedAt: now,
+    });
+    await dropPost(
+      host,
+      url,
+      originalTitle,
+      "extraction_insufficient",
+      now,
+      evidenceGate.failedConditions,
+    );
     await setDiscoverySeenStatus(host, url, "fetched");
     stats.extractionInsufficientDropped++;
     return { abortedByKillGate: false, abortedByBudget: false, abortedByRetryAfter: false };
@@ -746,12 +784,32 @@ async function processUrl(
   if (bodyHash === null) {
     // 到達しないはずだが、型上は string | null なので安全側で扱う。
     if (retryCtx) await completeRetry(retryCtx.urlHash);
-    await dropPost(host, url, originalTitle, "extraction_insufficient", now);
+    await recordEvidenceObservation({
+      urlHash: retryCtx?.urlHash ?? hashUrl(url),
+      host,
+      textLength: signals.textLength,
+      linkDensity: signals.linkDensity,
+      paragraphCount: signals.paragraphCount,
+      passedGate: false,
+      failedConditions: "body_hash_null",
+      observedAt: now,
+    });
+    await dropPost(host, url, originalTitle, "extraction_insufficient", now, []);
     await setDiscoverySeenStatus(host, url, "fetched");
     stats.extractionInsufficientDropped++;
     stats.extractionFailedByContainer++;
     return { abortedByKillGate: false, abortedByBudget: false, abortedByRetryAfter: false };
   }
+  await recordEvidenceObservation({
+    urlHash: retryCtx?.urlHash ?? hashUrl(url),
+    host,
+    textLength: signals.textLength,
+    linkDensity: signals.linkDensity,
+    paragraphCount: signals.paragraphCount,
+    passedGate: true,
+    failedConditions: null,
+    observedAt: now,
+  });
   const published = await publishPost(host, url, originalTitle, curation, bodyHash, now, signals);
   if (!published) {
     // markCurated/upsert 失敗は DB 側の一時的な問題として再試行に回す。
@@ -909,7 +967,12 @@ export async function ingestDiscoveredUrls(
       processed: stats.processed,
       published: stats.published,
       dropped: droppedTotal,
-      promotional: stats.titleFilterDropped,
+      // TODO(plan10-I4): promotional は LLM の判定結果（curation.promotional）から
+      // 計上すべきだが、現時点では stats に追跡されていない。正確な値が記録できる
+      // までは 0 として扱い、誤ったデータがベースラインに混入することを防ぐ。
+      promotional: 0,
+      // TODO(plan10-I4): authorPresent も post_publications.authors から
+      // 計上すべきだが、現時点では未追跡。
       authorPresent: 0,
     });
   }

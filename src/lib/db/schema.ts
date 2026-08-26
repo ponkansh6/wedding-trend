@@ -348,12 +348,6 @@ export const postRetryQueue = sqliteTable(
   }),
 );
 
-/**
- * plan 07 §6-Q2（K8 yield 崩壊検知）用の、ホスト×日単位の集計テレメトリ。
- * `discovery_run` が実行ラン単位の記録であるのに対し、こちらはホストの
- * ベースライン算出に使うため日次で粒度を固定し集約する。値は加算のみ
- * （`recordHostMetrics` の delta を既存値に足し込む）。
- */
 export const discoveryHostMetrics = sqliteTable(
   "discovery_host_metrics",
   {
@@ -368,5 +362,28 @@ export const discoveryHostMetrics = sqliteTable(
   },
   (table) => ({
     pk: primaryKey({ columns: [table.host, table.day] }),
+  }),
+);
+
+/**
+ * plan 10 I2: シャドウ記録（オブザーベーション・モード）用のエビデンスシグナル観測データ。
+ * 判定ゲートを通ったか否かに関わらず、すべての処理対象記事のシグナル値を保持する。
+ * 将来の閾値キャリブレーション・分布調査のための非破壊的記録用テーブル。
+ */
+export const evidenceSignalObservations = sqliteTable(
+  "evidence_signal_observations",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    urlHash: text("url_hash").notNull(),
+    host: text("host").notNull(),
+    textLength: integer("text_length").notNull(),
+    linkDensity: real("link_density").notNull(),
+    paragraphCount: integer("paragraph_count").notNull(),
+    passedGate: integer("passed_gate", { mode: "boolean" }).notNull(),
+    failedConditions: text("failed_conditions"),
+    observedAt: text("observed_at").notNull(),
+  },
+  (table) => ({
+    urlHashIdx: index("idx_evidence_signal_observations_url_hash").on(table.urlHash),
   }),
 );

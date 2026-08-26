@@ -454,16 +454,16 @@ describe("runIngest (src/lib/pipeline/ingest.ts)", () => {
   // が変わった場合にテストが自動追随せず落ちることが目的（AGENTS.md「ゲート
   // が緑であることと機能していることは別」）。
 
-  it("Q4: 日次公開上限は 10 件に固定されている（plan 07 §9 Stage 2: 監督付き自動運転の被害半径限定）", () => {
-    // 値を変えたい場合は shared_plan/07-unattended-operation.md と
-    // openspec/specs/wedding-trend/spec.md を更新したうえで、このテストの
+  it("Q4: 日次公開上限は 15 件に固定されている（plan 10 §2-S0: 目標供給量 15件/日に対応）", () => {
+    // 値を変えたい場合は openspec/specs/wedding-trend/spec.md §11.4 と
+    // shared_plan/10-publication-policy-review.md を更新したうえで、このテストの
     // リテラル値も合わせて更新すること。
-    expect(DAILY_PUBLISH_CAP).toBe(10);
+    expect(DAILY_PUBLISH_CAP).toBe(15);
   });
 
-  it("Q4: 境界値 — 当日 9 件公開済みから開始すると、同一ラン内でカウンタが加算され 2 件中ちょうど 1 件が公開・ちょうど 1 件が rate_capped になる（off-by-one固定、処理順には依存しない）", async () => {
-    // 9 件済み（リテラル 9）で開始。同一ラン内でローカルカウンタが加算される
-    // ため、2 件のうち 10 件目に当たる方は公開、11 件目に当たる方は
+  it("Q4: 境界値 — 当日 14 件公開済みから開始すると、同一ラン内でカウンタが加算され 2 件中ちょうど 1 件が公開・ちょうど 1 件が rate_capped になる（off-by-one固定、処理順には依存しない）", async () => {
+    // 14 件済み（リテラル 14）で開始。同一ラン内でローカルカウンタが加算される
+    // ため、2 件のうち 15 件目に当たる方は公開、16 件目に当たる方は
     // rate_capped になる。runIngest の処理順（フィクスチャの並び順やレーンの
     // 取り出し順）はテストが依存してよい保証ではないため、どちらの URL が
     // 先に処理されるかは固定せず、「ちょうど1件公開・ちょうど1件
@@ -475,7 +475,7 @@ describe("runIngest (src/lib/pipeline/ingest.ts)", () => {
     // status="published" で残る。実際にキュレーションが完了し公開面に出た
     // ことの信号として、getFeedCards() が実際に返すカードで判定する
     // （本番のフィード表示条件そのものに追随する、最も本番に近い検証）。
-    mockedCountPublishedSince.mockResolvedValue(9);
+    mockedCountPublishedSince.mockResolvedValue(14);
 
     const summary = await runIngest();
 
@@ -551,12 +551,12 @@ describe("runIngest (src/lib/pipeline/ingest.ts)", () => {
     expect(feedUrls).not.toContain("https://example.com/news1");
   });
 
-  it("Q4: ホストシェア上限は 5 件に固定されている（DAILY_PUBLISH_CAP=10 × HOST_DAILY_SHARE_MAX=0.5）。単一ホストが既に 5 件公開済みなら 6 件目は抑止される", async () => {
-    // blog1 / news1 は共に example.com ホスト。hostCounts をリテラル 5 に
-    // 固定し、hostShareCapCount() の実装（floor(10*0.5)=5）を式からではなく
+  it("Q4: ホストシェア上限は 7 件に固定されている（DAILY_PUBLISH_CAP=15 × HOST_DAILY_SHARE_MAX=0.5）。単一ホストが既に 7 件公開済みなら 8 件目は抑止される", async () => {
+    // blog1 / news1 は共に example.com ホスト。hostCounts をリテラル 7 に
+    // 固定し、hostShareCapCount() の実装（floor(15*0.5)=7）を式からではなく
     // 具体的な数値で検証する。
     mockedCountPublishedSince.mockResolvedValue(0);
-    mockedCountPublishedSinceByHost.mockResolvedValue({ "example.com": 5 });
+    mockedCountPublishedSinceByHost.mockResolvedValue({ "example.com": 7 });
 
     const summary = await runIngest();
 
