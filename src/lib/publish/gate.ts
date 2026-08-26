@@ -253,35 +253,35 @@ export interface RationaleTemplateInput {
  * 固定のラベル対応表。フラグ名 → 決定的な日本語ラベル。数字・固有の表現・
  * 原文からの引用は一切含めない（spec.md §10-3 を証明可能にするのが目的）。
  */
-const USEFULNESS_LABELS: Record<keyof RationaleUsefulnessFlags, string> = {
+const USEFULNESS_LABELS = {
   firsthand: "実際に挙式・披露宴を経験した立場からの記述である",
   ceremonyDecision: "挙式・披露宴の中身の意思決定に役立つ内容を含む",
   specific: "具体的な選択や工夫についての記述がある",
   tradeoff: "判断の理由や振り返りが述べられている",
-  promotional: "特定のサービス・会場への誘導を含む可能性がある",
   preDecisionOrPhotoShoot: "式場決定前の段階や前撮り・後撮りに関する話題が中心である",
-};
+} satisfies Partial<Record<keyof RationaleUsefulnessFlags, string>>;
 
-/** テンプレート内での出現順序（判定意図の一貫性のため固定）。 */
-const FLAG_ORDER: (keyof RationaleUsefulnessFlags)[] = [
+/** テンプレート内での出現順序（判定意図の一貫性のため固定）。
+ * `promotional` は spec.md §10-3（否定的評価を公開画面に一切出さない）に
+ * より根拠文のラベル対象から除外する。`RationaleUsefulnessFlags` には
+ * フィールドとして残るが、ここでは参照しない。 */
+const FLAG_ORDER: (keyof typeof USEFULNESS_LABELS)[] = [
   "firsthand",
   "ceremonyDecision",
   "specific",
   "tradeoff",
-  "promotional",
   "preDecisionOrPhotoShoot",
 ];
 
 /**
- * Q5: 構造化フィールド（`topicAnchor` + 6 boolean）から根拠文を決定的に
+ * Q5: 構造化フィールド（`topicAnchor` + ラベル対象の5 boolean）から根拠文を決定的に
  * 生成する。LLM の自由文は一切受け取らない。同一入力からは常に同一出力に
  * なる純粋関数。
  */
 export function renderRationaleText(input: RationaleTemplateInput): string {
-  const activeLabels = FLAG_ORDER.filter((flag) => {
-    const value = input.usefulness[flag];
-    return flag === "promotional" ? value === "heavy" : value === true;
-  }).map((flag) => USEFULNESS_LABELS[flag]);
+  const activeLabels = FLAG_ORDER.filter((flag) => input.usefulness[flag] === true).map(
+    (flag) => USEFULNESS_LABELS[flag],
+  );
 
   const anchorPhrase = `「${input.topicAnchor}」に関する記事`;
 

@@ -109,43 +109,40 @@ function Summary({ card, variant }: { card: FeedCardData; variant: FeedCardVaria
             {card.rationaleText}
           </p>
         )}
-        {card.usefulness && (
-          <div className="flex flex-wrap gap-1.5">
-            {card.usefulness.firsthand && (
-              <Badge variant="category" className="bg-[var(--color-background)]/50">
-                当事者本人
-              </Badge>
-            )}
-            {card.usefulness.ceremonyDecision && (
-              <Badge variant="category" className="bg-[var(--color-background)]/50">
-                意思決定に効く
-              </Badge>
-            )}
-            {card.usefulness.specific && (
-              <Badge variant="category" className="bg-[var(--color-background)]/50">
-                具体的
-              </Badge>
-            )}
-            {card.usefulness.tradeoff && (
-              <Badge variant="category" className="bg-[var(--color-background)]/50">
-                トレードオフ
-              </Badge>
-            )}
-            {card.usefulness.promotional === "heavy" && (
-              <Badge
-                variant="category"
-                className="border-[var(--color-warning)]/30 bg-[var(--color-warning)]/10 text-[var(--color-warning)]"
-              >
-                PR要素あり
-              </Badge>
-            )}
-            {card.usefulness.preDecisionOrPhotoShoot && (
-              <Badge variant="category" className="bg-[var(--color-muted)]/10">
-                式前・撮影段階
-              </Badge>
-            )}
-          </div>
-        )}
+        {card.usefulness &&
+          (card.usefulness.firsthand ||
+            card.usefulness.ceremonyDecision ||
+            card.usefulness.specific ||
+            card.usefulness.tradeoff ||
+            card.usefulness.preDecisionOrPhotoShoot) && (
+            <div className="flex flex-wrap gap-1.5">
+              {card.usefulness.firsthand && (
+                <Badge variant="category" className="bg-[var(--color-background)]/50">
+                  当事者本人
+                </Badge>
+              )}
+              {card.usefulness.ceremonyDecision && (
+                <Badge variant="category" className="bg-[var(--color-background)]/50">
+                  意思決定に効く
+                </Badge>
+              )}
+              {card.usefulness.specific && (
+                <Badge variant="category" className="bg-[var(--color-background)]/50">
+                  具体的
+                </Badge>
+              )}
+              {card.usefulness.tradeoff && (
+                <Badge variant="category" className="bg-[var(--color-background)]/50">
+                  トレードオフ
+                </Badge>
+              )}
+              {card.usefulness.preDecisionOrPhotoShoot && (
+                <Badge variant="category" className="bg-[var(--color-muted)]/10">
+                  式前・撮影段階
+                </Badge>
+              )}
+            </div>
+          )}
       </div>
     );
   }

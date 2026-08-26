@@ -203,6 +203,33 @@ describe("renderRationaleText (plan 07 §6-Q5: rationaleText のテンプレー�
     },
   };
 
+  it("never includes the negative promotional label, regardless of promotional level (spec.md §10-3: 否定的評価は公開画面に一切出さない)", () => {
+    const text = renderRationaleText({
+      ...baseInput,
+      usefulness: { ...baseInput.usefulness, promotional: "heavy" },
+    });
+    expect(text).not.toContain("特定のサービス・会場への誘導を含む可能性がある");
+    expect(text).not.toContain("PR");
+    expect(text).not.toContain("広告");
+  });
+
+  it("is invariant to the promotional level: output is identical across none/light/heavy for otherwise-identical input", () => {
+    const withNone = renderRationaleText({
+      ...baseInput,
+      usefulness: { ...baseInput.usefulness, promotional: "none" },
+    });
+    const withLight = renderRationaleText({
+      ...baseInput,
+      usefulness: { ...baseInput.usefulness, promotional: "light" },
+    });
+    const withHeavy = renderRationaleText({
+      ...baseInput,
+      usefulness: { ...baseInput.usefulness, promotional: "heavy" },
+    });
+    expect(withLight).toBe(withNone);
+    expect(withHeavy).toBe(withNone);
+  });
+
   it("is deterministic: the same input always produces the same output", () => {
     const first = renderRationaleText(baseInput);
     const second = renderRationaleText({
@@ -252,14 +279,15 @@ describe("renderRationaleText (plan 07 §6-Q5: rationaleText のテンプレー�
   });
 
   it("throws when the deterministically-assembled sentence exceeds the cap via an out-of-spec topicAnchor (fail-loud, not silent truncation)", () => {
-    // `topicAnchor` の zod 上限は40字（`CurationItemSchema`）。有用度6項目
-    // すべて true の状態で、その上限を超える50字のアンカー（意図的に不正な
-    // 入力）を与えると、構造的最大値（206字）をさらに超え、
+    // `topicAnchor` の zod 上限は40字（`CurationItemSchema`）。有用度5項目
+    // （`promotional` は spec.md § 10-3 によりラベル対象外）すべて true の
+    // 状態で、その上限を大きく超える80字のアンカー（意図的に不正な入力）を
+    // 与えると、構造的最大値（182字、40字アンカー時）をさらに超え、
     // RATIONALE_TEXT_MAX_CHARS（210字）も超過する。renderRationaleText()
     // は決定的テンプレートのため、これは実装バグまたはスキーマ制約破りを
-    // 意味する — 黙って切り詰めず例外を投げること。
+    // 意味する - 黙って切り詰めず例外を投げること。
     const overLongInput: RationaleTemplateInput = {
-      topicAnchor: "あ".repeat(50),
+      topicAnchor: "あ".repeat(80),
       usefulness: {
         firsthand: true,
         ceremonyDecision: true,
@@ -272,9 +300,10 @@ describe("renderRationaleText (plan 07 §6-Q5: rationaleText のテンプレー�
     expect(() => renderRationaleText(overLongInput)).toThrow();
   });
 
-  it("never exceeds RATIONALE_TEXT_MAX_CHARS at the structural maximum: topicAnchor at the zod cap (40 chars) with all 6 usefulness flags true", () => {
+  it("never exceeds RATIONALE_TEXT_MAX_CHARS at the structural maximum: topicAnchor at the zod cap (40 chars) with all 5 labeled usefulness flags true", () => {
     // これが今回欠けていた保護そのもの: RATIONALE_TEXT_MAX_CHARS が
-    // 構造的最大値（アンカー40字×フラグ6個）を常に上回ることを保証する。
+    // 構造的最大値（アンカー40字×ラベル対象フラグ5個。`promotional` は
+    // spec.md § 10-3 によりラベル対象外）を常に上回ることを保証する。
     // 将来テンプレートやラベル文言を増やして構造的最大値が伸びた場合、
     // このテストが落ちて気づけるようにする。
     const structuralMaxInput: RationaleTemplateInput = {
@@ -295,10 +324,12 @@ describe("renderRationaleText (plan 07 §6-Q5: rationaleText のテンプレー�
     expect(text.length).toBeLessThanOrEqual(RATIONALE_TEXT_MAX_CHARS);
   });
 
-  it("fixes the structural maximum output length (topicAnchor at the zod cap, all 6 flags true) as a literal (regression guard against silent template growth)", () => {
-    // 構造的最大値の実測: 206字。テンプレート文言やラベルを変更した際、
-    // この期待値がズレることで気づけるようにする。期待値は定数から導出せず
-    // リテラルで固定する。
+  it("fixes the structural maximum output length (topicAnchor at the zod cap, all 5 labeled flags true) as a literal (regression guard against silent template growth)", () => {
+    // 構造的最大値の実測: 182字（`promotional` は
+    // ラベル対象外のためフラグ5個分のみで計算される）。
+    // テンプレート文言やラベルを変更した際、
+    // この期待値がズレることで気づけるようにする。
+    // 期待値は定数から導出せずリテラルで固定する。
     const structuralMaxInput: RationaleTemplateInput = {
       topicAnchor: "あ".repeat(40),
       usefulness: {
@@ -311,14 +342,15 @@ describe("renderRationaleText (plan 07 §6-Q5: rationaleText のテンプレー�
       },
     };
     const text = renderRationaleText(structuralMaxInput);
-    expect(text.length).toBe(206);
+    expect(text.length).toBe(182);
   });
 
   it("fixes the actual output length for a 5-true-flag combination as a literal (regression guard against silent template growth)", () => {
-    // 実データ相当: 5項目 true（promotional のみ false）+ 実在ケースと同じ
-    // 桁数の topicAnchor。テンプレート文言を将来変更した際、この期待値が
-    // ズレることで気づけるようにする。期待値は定数から導出せずリテラルで
-    // 固定する。
+    // 実データ相当: ラベル対象5項目すべて true + 実在ケースと同じ
+    // 桁数の topicAnchor。`promotional` はラベル対象外のため値を変えても
+    // 出力に影響しない。テンプレート文言を将来変更した際、
+    // この期待値がズレることで気づけるようにする。
+    // 期待値は定数から導出せずリテラルで固定する。
     const fiveTrueInput: RationaleTemplateInput = {
       topicAnchor: "会場選びのコツ",
       usefulness: {
@@ -338,11 +370,10 @@ describe("renderRationaleText (plan 07 §6-Q5: rationaleText のテンプレー�
     expect(text.length).toBeLessThanOrEqual(RATIONALE_TEXT_MAX_CHARS);
   });
 
-  it("does not throw for a real-data-scale case: 29-char anchor with 5 true flags (166 chars, previously exceeded the old 150-char cap)", () => {
-    // shared_plan の実測（postId 235）相当: アンカー29字 × フラグ5個
-    // （preDecisionOrPhotoShoot のみ false）= 166字。旧上限150字では例外が
-    // 飛んでいたケースが、構造的最大値から引き直した上限で正しく通ることを
-    // 確認する。
+  it("does not throw for a real-data-scale case: 29-char anchor with 4 true labeled flags (142 chars, promotional excluded from labeling)", () => {
+    // shared_plan の実測（postId 235）相当: アンカー29字 ×
+    // ラベル対象フラグ4個（`preDecisionOrPhotoShoot` のみ false、
+    // `promotional` はラベル対象外）= 142字。
     const realDataScaleInput: RationaleTemplateInput = {
       topicAnchor: "あ".repeat(29),
       usefulness: {
@@ -358,16 +389,16 @@ describe("renderRationaleText (plan 07 §6-Q5: rationaleText のテンプレー�
     expect(() => {
       text = renderRationaleText(realDataScaleInput);
     }).not.toThrow();
-    expect(text.length).toBe(166);
+    expect(text.length).toBe(142);
   });
 
-  it("fixes the publish-reachable structural minimum output length (2-char topicAnchor — the shortest that survives checkAnchorGrounding — all 6 flags false) as a literal (regression guard against silent template shrinkage)", () => {
+  it("fixes the publish-reachable structural minimum output length (2-char topicAnchor — the shortest that survives checkAnchorGrounding — all usefulness flags false) as a literal (regression guard against silent template shrinkage)", () => {
     // 公開経路に実際に到達しうる構造的最小値: topicAnchor は zod の
     // min(1) ではなく、checkAnchorGrounding() の extractFeatureTerms() が
     // 特徴語として採用する最小長（2字）を使う——1字のアンカーは特徴語ゼロと
     // なり anchor_ungrounded で終端棄却され、公開経路に乗らない
     // （src/lib/pipeline/ingest.ts / evergreen.ts / discovery-ingest.ts は
-    // いずれも公開前に checkAnchorGrounding() を通す）。有用度6項目全 false
+    // いずれも公開前に checkAnchorGrounding() を通す）。有用度フラグ全 false
     // の投稿を止める公開ゲートは存在しない
     // （computeUsefulnessScore() はソート用スコアであり公開可否には使われ
     // ない）。期待値は定数から導出せずリテラルで固定する。
