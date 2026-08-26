@@ -61,7 +61,10 @@ while IFS= read -r ref; do
     continue
   fi
 
-  if [ -f "$ref" ] || [ -d "$ref" ]; then
+  # Strip line-number suffix (e.g., `file.ts:31-36` → `file.ts`) before existence check
+  file_ref="${ref%%:[0-9]*}"
+
+  if [ -f "$file_ref" ] || [ -d "$file_ref" ]; then
     continue
   fi
 
