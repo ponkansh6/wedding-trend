@@ -1,13 +1,16 @@
 name: Daily Discovery Crawler
 
 on:
-  # plan 07 Stage 0（必須統制 M1〜M6）が意図的破壊テストまで完了するまで、
-  # 自動スケジュールは有効化しない。統制が入る前に自動収集が走ると、
-  # M1（無検閲公開チャネルの閉鎖）と M4（客観トリガによる自動撤回）が
-  # 未実装の期間に外部由来の文字列が公開層へ到達しうるため。
-  # Stage 0 完了時に下記 schedule を復帰させること。
-  # schedule:
-  #   - cron: "0 18 * * *" # Every day at 18:00 UTC (03:00 JST)
+  # plan 07 Stage 0（必須統制 M1〜M6）の意図的破壊テストまで完了したため、
+  # 2026-08-26 に自動スケジュールを有効化した（完了判定は
+  # shared_plan/07-unattended-operation.md §11。M1・M3-K2・M4 は
+  # 「意図的に発火させて確認した」と記録済み）。
+  # なお §8 の較正（golden set）は §13-2 のオーナー判断で明示的に不実施であり、
+  # LLM 判定の誤り率が未知のまま運用することを引き受けている。
+  # 統制を外す変更を入れる場合は、先にこの schedule を止めること。
+  schedule:
+    - cron: "0 18 * * *" # Every day at 18:00 UTC (03:00 JST)
+  # 手動起動は Stage 0 期間から引き続き残す（障害時の再実行・単発消化用）。
   workflow_dispatch:
 
 permissions:
