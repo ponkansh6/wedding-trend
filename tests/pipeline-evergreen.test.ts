@@ -92,7 +92,7 @@ describe("curateEvergreenUrl (src/lib/pipeline/evergreen.ts)", () => {
         ceremonyDecision: false,
         specific: true,
         tradeoff: true,
-        promotional: false,
+        promotional: "none",
         preDecisionOrPhotoShoot: false,
         topicAnchor: input.title,
         rationaleText:
@@ -204,7 +204,7 @@ describe("curateEvergreenUrl (src/lib/pipeline/evergreen.ts)", () => {
       ceremonyDecision: false,
       specific: true,
       tradeoff: true,
-      promotional: false,
+      promotional: "none",
       preDecisionOrPhotoShoot: false,
       // BASE_META の title/description には一切現れない語（プロンプト
       // インジェクション/幻覚を模擬）。

@@ -35,13 +35,16 @@ const READER_PERSONA = `# 想定読者
  * なく、「衣装のみではない」のような二重否定のブール項目を LLM に判定させると
  * 最も不安定になる。
  */
-const USEFULNESS_CRITERIA_RULES = `# 有用度判定（6つのブール値。点数は絶対に出力しないこと）
-上の想定読者にとって役に立つ投稿かどうかを、以下の6項目それぞれについて true/false で判定すること。
+const USEFULNESS_CRITERIA_RULES = `# 有用度判定（5つのブール値 + promotional は3段階。点数は絶対に出力しないこと）
+上の想定読者にとって役に立つ投稿かどうかを、以下の項目それぞれについて判定すること。
 - firsthand: 書き手自身または近しい当事者が実際に挙式・披露宴を経験した立場から書かれている。新婦本人に限らず、新郎・両家家族、およびプランナー・司会者・カメラマン・装花担当など式に立ち会う職能者が実務経験に基づいて書いたものを含む。
 - ceremonyDecision: 挙式・披露宴の中身の意思決定に効く（進行・タイムライン・演出・席次・席札・余興・スピーチ・BGM・装花・料理・引出物・ペーパーアイテム・挙式当日の写真・映像（スナップ・記録映像・エンドロール）・ゲストの過ごしやすさ・当日段取り）。
 - specific: 具体を含む（固有の選択・数字・実際にやったこと / やらなかった理由）。心構えのみは false。
 - tradeoff: 判断の理由・後悔・「やってよかった / 要らなかった」の評価が述べられている。
-- promotional: 事業者による集客・自社サービスへの誘導が主目的なら true。職能者による記事でも、特定の自社サービス・自社会場・特定商品への誘導が主眼なら true とすること。判別基準は「読者が別の会場・別の業者で式を挙げる場合にも役立つか」。
+- promotional: 事業者による集客・自社サービスへの誘導の度合いを "none" / "light" / "heavy" の3段階で判定すること。判別基準は「読者が別の会場・別の業者で式を挙げる場合にも役立つか」。
+  - "none": 事業者の集客要素が実質的にない。
+  - "light": 自社サービスへの言及や導線はあるが、記事の主目的は情報提供であり、読者が別の会場・別の業者で式を挙げる場合にも役立つ。
+  - "heavy": 記事全体が自社サービスへの集客・誘導に支配されており、他社を選ぶ読者にはほとんど価値がない。
 - preDecisionOrPhotoShoot: 内容が次のいずれかに限られる場合に true とする。(a) フォトウェディング・前撮り・後撮りなど、挙式・披露宴とは別に行う撮影そのものの話題。(b) 式場探し・式場見学・見積もり比較・日取り決定など、挙式する会場や日程を決めるまでの段階の話題。挙式当日の写真・映像（スナップ撮影、記録映像、エンドロール）は (a) に含めない——これは挙式・披露宴の中身である。式が既に決まっている前提で書かれた記事、あるいはどちらとも判断できない記事は false とすること。
 
 「卒花」「花嫁レポ」「#プレ花嫁」等の語がタイトル・本文に含まれること自体は加点材料ではない。逆にこれらの語が一切無くても、実際の挙式・披露宴の経験に基づく知見であれば同等に扱うこと。
@@ -66,7 +69,8 @@ const SHARED_RULES = `# 制約（必ず守ること）
 - 推測で事実（金額・会場名・日付など）を補完しない。原文に無い情報は書かない。
 - カテゴリは以下の列挙から必ず1つ選ぶ: ${CATEGORIES_LIST}
 - tag は、新しい/流行りの演出・アイテムなら "trend"、長年支持される王道・定番なら "classic"。
-- firsthand / ceremonyDecision / specific / tradeoff / promotional / preDecisionOrPhotoShoot は必ず true/false の boolean で出力すること（数値・文字列は不可）。
+- firsthand / ceremonyDecision / specific / tradeoff / preDecisionOrPhotoShoot は必ず true/false の boolean で出力すること（数値・文字列は不可）。
+- promotional は必ず "none" / "light" / "heavy" のいずれかの文字列で出力すること（boolean・数値は不可）。
 - 出力は JSON のみ。マークダウン・前置き・説明文は一切含めない。`;
 
 function formatInput(input: CurationInput): string {
@@ -89,7 +93,7 @@ ${USEFULNESS_CRITERIA_RULES}
 ${RATIONALE_RULES}
 
 出力形式:
-{"title":"...","summary":"...","category":"...","tag":"trend","firsthand":false,"ceremonyDecision":false,"specific":false,"tradeoff":false,"promotional":false,"preDecisionOrPhotoShoot":false,"topicAnchor":"..."}
+{"title":"...","summary":"...","category":"...","tag":"trend","firsthand":false,"ceremonyDecision":false,"specific":false,"tradeoff":false,"promotional":"none","preDecisionOrPhotoShoot":false,"topicAnchor":"..."}
 `;
 }
 
@@ -113,6 +117,6 @@ ${USEFULNESS_CRITERIA_RULES}
 ${RATIONALE_RULES}
 
 出力形式:
-{"items":[{"index":1,"title":"...","summary":"...","category":"...","tag":"trend","firsthand":false,"ceremonyDecision":false,"specific":false,"tradeoff":false,"promotional":false,"preDecisionOrPhotoShoot":false,"topicAnchor":"..."}, ...]}
+{"items":[{"index":1,"title":"...","summary":"...","category":"...","tag":"trend","firsthand":false,"ceremonyDecision":false,"specific":false,"tradeoff":false,"promotional":"none","preDecisionOrPhotoShoot":false,"topicAnchor":"..."}, ...]}
 `;
 }

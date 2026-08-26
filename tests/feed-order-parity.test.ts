@@ -25,18 +25,24 @@ vi.mock("next/cache", () => ({
 
 const BASE_DATE = Date.UTC(2024, 0, 1);
 
+const PROMOTIONAL_LEVELS = ["none", "light", "heavy"] as const;
+
 /**
- * `mask` の下位ビットから 6 項目分のブール値を組み立てる。ビットの割り当て
- * 順序自体に意味は無い（0〜63 を全網羅することが目的）。
+ * `mask`（0〜95、全96通り）から6項目分の判定値を組み立てる。
+ * promotional は3値の enum になったため、下位の3進数1桁を promotional に、
+ * 残りの5ビットを他5項目のブール値に割り当てる（5ビット×3値=32×3=96通り）。
+ * ビット・桁の割り当て順序自体に意味は無く、全96通りを網羅することが目的。
  */
 function criteriaFromMask(mask: number): UsefulnessCriteria {
+  const promotionalIndex = mask % 3;
+  const boolBits = Math.floor(mask / 3);
   return {
-    firsthand: ((mask >> 0) & 1) === 1,
-    ceremonyDecision: ((mask >> 1) & 1) === 1,
-    specific: ((mask >> 2) & 1) === 1,
-    tradeoff: ((mask >> 3) & 1) === 1,
-    promotional: ((mask >> 4) & 1) === 1,
-    preDecisionOrPhotoShoot: ((mask >> 5) & 1) === 1,
+    firsthand: ((boolBits >> 0) & 1) === 1,
+    ceremonyDecision: ((boolBits >> 1) & 1) === 1,
+    specific: ((boolBits >> 2) & 1) === 1,
+    tradeoff: ((boolBits >> 3) & 1) === 1,
+    promotional: PROMOTIONAL_LEVELS[promotionalIndex],
+    preDecisionOrPhotoShoot: ((boolBits >> 4) & 1) === 1,
   };
 }
 
@@ -59,11 +65,11 @@ describe("SQL score (USEFULNESS_SCORE_SQL) matches computeUsefulnessScore()", ()
     await setupTestDb();
   });
 
-  it("all 64 combinations of the 6 boolean criteria: getFeedCards() order matches computeUsefulnessScore() order", async () => {
+  it("all 96 combinations of the 5 boolean criteria × 3-value promotional: getFeedCards() order matches computeUsefulnessScore() order", async () => {
     // publishedAt をすべて別の値にしておくことで、スコアが同点になった場合でも
     // 期待順序が publishedAt 降順で一意に決まるようにする（id タイブレークに
     // 依存しない）。
-    const combos = Array.from({ length: 64 }, (_, mask) => {
+    const combos = Array.from({ length: 96 }, (_, mask) => {
       const url = `https://example.com/parity/${mask}`;
       const publishedAt = new Date(BASE_DATE + mask * 60_000).toISOString();
       return { mask, url, publishedAt, criteria: criteriaFromMask(mask) };
@@ -134,7 +140,7 @@ describe("SQL score (USEFULNESS_SCORE_SQL) matches computeUsefulnessScore()", ()
             ceremonyDecision: true,
             specific: true,
             tradeoff: false,
-            promotional: false,
+            promotional: "none",
             preDecisionOrPhotoShoot: false,
           },
         },
@@ -155,7 +161,7 @@ describe("SQL score (USEFULNESS_SCORE_SQL) matches computeUsefulnessScore()", ()
             ceremonyDecision: true,
             specific: true,
             tradeoff: false,
-            promotional: false,
+            promotional: "none",
             preDecisionOrPhotoShoot: false,
           },
         },
@@ -174,7 +180,7 @@ describe("SQL score (USEFULNESS_SCORE_SQL) matches computeUsefulnessScore()", ()
           ceremonyDecision: true,
           specific: true,
           // tradeoff キーが存在しない
-          promotional: false,
+          promotional: "none",
           preDecisionOrPhotoShoot: false,
         }),
       })
@@ -229,7 +235,7 @@ describe("SQL score (USEFULNESS_SCORE_SQL) matches computeUsefulnessScore()", ()
             ceremonyDecision: true,
             specific: false,
             tradeoff: false,
-            promotional: false,
+            promotional: "none",
             preDecisionOrPhotoShoot: false,
           },
         },
@@ -288,7 +294,7 @@ describe("SQL score (USEFULNESS_SCORE_SQL) matches computeUsefulnessScore()", ()
         ceremonyDecision: true,
         specific: false,
         tradeoff: false,
-        promotional: false,
+        promotional: "none",
         preDecisionOrPhotoShoot: false,
       }),
       // ゲート不通過 → firsthand+specific+tradeoff = 7
@@ -297,7 +303,7 @@ describe("SQL score (USEFULNESS_SCORE_SQL) matches computeUsefulnessScore()", ()
         ceremonyDecision: false,
         specific: true,
         tradeoff: true,
-        promotional: false,
+        promotional: "none",
         preDecisionOrPhotoShoot: false,
       }),
       // criteria の中身はどうせ後で JSON ごと壊すので内容は不問（ここでは
@@ -308,7 +314,7 @@ describe("SQL score (USEFULNESS_SCORE_SQL) matches computeUsefulnessScore()", ()
         ceremonyDecision: true,
         specific: true,
         tradeoff: true,
-        promotional: false,
+        promotional: "none",
         preDecisionOrPhotoShoot: false,
       }),
       // score = 0（全 false）
@@ -317,7 +323,7 @@ describe("SQL score (USEFULNESS_SCORE_SQL) matches computeUsefulnessScore()", ()
         ceremonyDecision: false,
         specific: false,
         tradeoff: false,
-        promotional: false,
+        promotional: "none",
         preDecisionOrPhotoShoot: false,
       }),
     ]);
@@ -355,5 +361,102 @@ describe("SQL score (USEFULNESS_SCORE_SQL) matches computeUsefulnessScore()", ()
       "https://example.com/all-false",
     ]);
     void UNSCORED_USEFULNESS_SCORE; // 参照のみ（malformed と no-row が同点になる根拠）
+  });
+
+  it("backward compatibility: a criteria_json row still holding the legacy boolean promotional=true is not rejected by the type guard, scores as a normal row (not UNSCORED), and pays no promotional penalty", async () => {
+    // DB マイグレーションを行わない方針（normalizePromotional のコメント参照）
+    // のため、boolean 時代に書き込まれた criteria_json 行がそのまま残り続ける。
+    // この行が (a) 型ガードに弾かれて UNSCORED_USEFULNESS_SCORE に落ちない
+    // こと、(b) 旧 true = 減点解除という確定方針どおり promotional 減点が 0 に
+    // なることを固定する。
+    await upsertPosts([
+      blogPostInput("https://example.com/legacy-bool-true", "2024-01-01T00:00:00.000Z"),
+      blogPostInput("https://example.com/legacy-bool-false", "2024-01-02T00:00:00.000Z"),
+    ]);
+    const states = await getPostsByUrls([
+      "https://example.com/legacy-bool-true",
+      "https://example.com/legacy-bool-false",
+    ]);
+
+    const usefulnessFor = (url: string) => ({
+      url,
+      aiTitle: url,
+      aiSummary: "AI Summary text long enough for the fixture",
+      category: "その他" as const,
+      tag: "trend" as const,
+      contentHash: "hash",
+      curationSignature: "sig",
+      usefulness: {
+        postId: states.get(url)!.id,
+        modelId: "test-model",
+        // markCurated 経由では型上 PromotionalLevel しか書けないため、まず
+        // 妥当な enum 値で書き込んでから、下で criteria_json を旧 boolean に
+        // 直接書き換える。
+        criteria: {
+          firsthand: true,
+          ceremonyDecision: true,
+          specific: false,
+          tradeoff: false,
+          promotional: "none" as const,
+          preDecisionOrPhotoShoot: false,
+        },
+      },
+    });
+
+    await markCurated([
+      usefulnessFor("https://example.com/legacy-bool-true"),
+      usefulnessFor("https://example.com/legacy-bool-false"),
+    ]);
+
+    const legacyTruePostId = states.get("https://example.com/legacy-bool-true")!.id;
+    await db
+      .update(postUsefulnessCriteria)
+      .set({
+        criteriaJson: JSON.stringify({
+          firsthand: true,
+          ceremonyDecision: true,
+          specific: false,
+          tradeoff: false,
+          promotional: true, // レガシー boolean のまま
+          preDecisionOrPhotoShoot: false,
+        }),
+      })
+      .where(eq(postUsefulnessCriteria.postId, legacyTruePostId));
+
+    const legacyFalsePostId = states.get("https://example.com/legacy-bool-false")!.id;
+    await db
+      .update(postUsefulnessCriteria)
+      .set({
+        criteriaJson: JSON.stringify({
+          firsthand: true,
+          ceremonyDecision: true,
+          specific: false,
+          tradeoff: false,
+          promotional: false, // レガシー boolean のまま
+          preDecisionOrPhotoShoot: false,
+        }),
+      })
+      .where(eq(postUsefulnessCriteria.postId, legacyFalsePostId));
+
+    const feedCards = await getFeedCards({ sourceType: "blog", limit: 10 });
+    const trueCard = feedCards.find((c) => c.url === "https://example.com/legacy-bool-true");
+    const falseCard = feedCards.find((c) => c.url === "https://example.com/legacy-bool-false");
+
+    // 型ガードに弾かれていれば usefulness は null になる（UNSCORED 相当）。
+    expect(trueCard?.usefulness).not.toBeNull();
+    expect(falseCard?.usefulness).not.toBeNull();
+
+    // SQL 側: boolean true の行は json_extract(...) = 'heavy' に一致せず
+    // 減点 0（gate + firsthand のみのスコアで並ぶ）。同点なので publishedAt
+    // 降順で legacy-bool-false が先に来る。
+    expect(feedCards.map((c) => c.url)).toEqual([
+      "https://example.com/legacy-bool-false",
+      "https://example.com/legacy-bool-true",
+    ]);
+
+    // TS 側（normalizePromotional 経由）: 旧 true は "light" に正規化され、
+    // 旧 false は "none" に正規化される——いずれも減点対象ではない。
+    expect(trueCard?.usefulness?.promotional).toBe("light");
+    expect(falseCard?.usefulness?.promotional).toBe("none");
   });
 });

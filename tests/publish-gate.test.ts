@@ -198,7 +198,7 @@ describe("renderRationaleText (plan 07 §6-Q5: rationaleText のテンプレー�
       ceremonyDecision: true,
       specific: false,
       tradeoff: false,
-      promotional: false,
+      promotional: "none",
       preDecisionOrPhotoShoot: false,
     },
   };
@@ -234,7 +234,7 @@ describe("renderRationaleText (plan 07 §6-Q5: rationaleText のテンプレー�
         ceremonyDecision: false,
         specific: false,
         tradeoff: false,
-        promotional: false,
+        promotional: "none",
         preDecisionOrPhotoShoot: false,
       },
     };
@@ -265,7 +265,7 @@ describe("renderRationaleText (plan 07 §6-Q5: rationaleText のテンプレー�
         ceremonyDecision: true,
         specific: true,
         tradeoff: true,
-        promotional: true,
+        promotional: "heavy",
         preDecisionOrPhotoShoot: true,
       },
     };
@@ -284,7 +284,7 @@ describe("renderRationaleText (plan 07 §6-Q5: rationaleText のテンプレー�
         ceremonyDecision: true,
         specific: true,
         tradeoff: true,
-        promotional: true,
+        promotional: "heavy",
         preDecisionOrPhotoShoot: true,
       },
     };
@@ -306,7 +306,7 @@ describe("renderRationaleText (plan 07 §6-Q5: rationaleText のテンプレー�
         ceremonyDecision: true,
         specific: true,
         tradeoff: true,
-        promotional: true,
+        promotional: "heavy",
         preDecisionOrPhotoShoot: true,
       },
     };
@@ -326,7 +326,7 @@ describe("renderRationaleText (plan 07 §6-Q5: rationaleText のテンプレー�
         ceremonyDecision: true,
         specific: true,
         tradeoff: true,
-        promotional: false,
+        promotional: "none",
         preDecisionOrPhotoShoot: true,
       },
     };
@@ -350,7 +350,7 @@ describe("renderRationaleText (plan 07 §6-Q5: rationaleText のテンプレー�
         ceremonyDecision: true,
         specific: true,
         tradeoff: true,
-        promotional: true,
+        promotional: "heavy",
         preDecisionOrPhotoShoot: false,
       },
     };
@@ -378,7 +378,7 @@ describe("renderRationaleText (plan 07 §6-Q5: rationaleText のテンプレー�
         ceremonyDecision: false,
         specific: false,
         tradeoff: false,
-        promotional: false,
+        promotional: "none",
         preDecisionOrPhotoShoot: false,
       },
     };
@@ -404,7 +404,7 @@ describe("renderRationaleText (plan 07 §6-Q5: rationaleText のテンプレー�
         ceremonyDecision: false,
         specific: false,
         tradeoff: false,
-        promotional: false,
+        promotional: "none",
         preDecisionOrPhotoShoot: false,
       },
     };

@@ -14,6 +14,7 @@
  */
 
 import { RATIONALE_TEXT_MAX_CHARS, RATIONALE_TEXT_MIN_CHARS } from "@/lib/constants";
+import type { PromotionalLevel } from "@/lib/scoring/usefulness";
 import type { DropReason } from "@/lib/types";
 
 export type GateResult = { ok: true } | { ok: false; reason: DropReason; missingTerms?: string[] };
@@ -239,7 +240,7 @@ export interface RationaleUsefulnessFlags {
   ceremonyDecision: boolean;
   specific: boolean;
   tradeoff: boolean;
-  promotional: boolean;
+  promotional: PromotionalLevel;
   preDecisionOrPhotoShoot: boolean;
 }
 
@@ -277,9 +278,10 @@ const FLAG_ORDER: (keyof RationaleUsefulnessFlags)[] = [
  * なる純粋関数。
  */
 export function renderRationaleText(input: RationaleTemplateInput): string {
-  const activeLabels = FLAG_ORDER.filter((flag) => input.usefulness[flag]).map(
-    (flag) => USEFULNESS_LABELS[flag],
-  );
+  const activeLabels = FLAG_ORDER.filter((flag) => {
+    const value = input.usefulness[flag];
+    return flag === "promotional" ? value === "heavy" : value === true;
+  }).map((flag) => USEFULNESS_LABELS[flag]);
 
   const anchorPhrase = `「${input.topicAnchor}」に関する記事`;
 

@@ -11,7 +11,7 @@ import {
   USEFULNESS_WEIGHT_TRADEOFF,
   type RationaleDisplayPhase,
 } from "@/lib/constants";
-import { UNSCORED_USEFULNESS_SCORE } from "@/lib/scoring/usefulness";
+import { UNSCORED_USEFULNESS_SCORE, normalizePromotional } from "@/lib/scoring/usefulness";
 import type { Category, FeedCard, SourceType, TrendTag } from "@/lib/types";
 import type { UsefulnessCriteria } from "@/lib/scoring/usefulness";
 
@@ -96,7 +96,7 @@ const USEFULNESS_SCORE_SQL = sql<number>`CASE
   + ${USEFULNESS_WEIGHT_FIRSTHAND} * COALESCE(json_extract(${postUsefulnessCriteria.criteriaJson}, '$.firsthand'), 0)
   + ${USEFULNESS_WEIGHT_SPECIFIC} * COALESCE(json_extract(${postUsefulnessCriteria.criteriaJson}, '$.specific'), 0)
   + ${USEFULNESS_WEIGHT_TRADEOFF} * COALESCE(json_extract(${postUsefulnessCriteria.criteriaJson}, '$.tradeoff'), 0)
-  - ${USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY} * COALESCE(json_extract(${postUsefulnessCriteria.criteriaJson}, '$.promotional'), 0)
+  - ${USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY} * (CASE WHEN json_extract(${postUsefulnessCriteria.criteriaJson}, '$.promotional') = 'heavy' THEN 1 ELSE 0 END)
   - ${USEFULNESS_WEIGHT_PRE_DECISION_PENALTY} * COALESCE(json_extract(${postUsefulnessCriteria.criteriaJson}, '$.preDecisionOrPhotoShoot'), 0)
 END`;
 
@@ -190,10 +190,13 @@ export async function getFeedCards(params: {
             typeof parsed.ceremonyDecision === "boolean" &&
             typeof parsed.specific === "boolean" &&
             typeof parsed.tradeoff === "boolean" &&
-            typeof parsed.promotional === "boolean" &&
+            (typeof parsed.promotional === "boolean" || typeof parsed.promotional === "string") &&
             typeof parsed.preDecisionOrPhotoShoot === "boolean"
           ) {
-            parsedUsefulness = parsed as UsefulnessCriteria;
+            parsedUsefulness = {
+              ...parsed,
+              promotional: normalizePromotional(parsed.promotional),
+            } as UsefulnessCriteria;
           }
         } catch {
           parsedUsefulness = null;

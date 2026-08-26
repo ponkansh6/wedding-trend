@@ -131,7 +131,7 @@ function Summary({ card, variant }: { card: FeedCardData; variant: FeedCardVaria
                 トレードオフ
               </Badge>
             )}
-            {card.usefulness.promotional && (
+            {card.usefulness.promotional === "heavy" && (
               <Badge
                 variant="category"
                 className="border-[var(--color-warning)]/30 bg-[var(--color-warning)]/10 text-[var(--color-warning)]"

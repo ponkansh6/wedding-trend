@@ -9,17 +9,18 @@ import {
 } from "@/lib/constants";
 import {
   computeUsefulnessScore,
+  normalizePromotional,
   UNSCORED_USEFULNESS_SCORE,
   type UsefulnessCriteria,
 } from "@/lib/scoring/usefulness";
 
-/** 全項目 false のベースライン。個々のテストで必要な項目だけ true に上書きする。 */
+/** 全項目 false（promotional は "none"）のベースライン。個々のテストで必要な項目だけ上書きする。 */
 const ALL_FALSE: UsefulnessCriteria = {
   firsthand: false,
   ceremonyDecision: false,
   specific: false,
   tradeoff: false,
-  promotional: false,
+  promotional: "none",
   preDecisionOrPhotoShoot: false,
 };
 
@@ -32,7 +33,7 @@ describe("computeUsefulnessScore", () => {
       firsthand: true,
       specific: true,
       tradeoff: true,
-      promotional: true,
+      promotional: "heavy",
     });
     const shallowButOnTopic = computeUsefulnessScore({
       ...ALL_FALSE,
@@ -52,7 +53,7 @@ describe("computeUsefulnessScore", () => {
       ceremonyDecision: true,
       specific: true,
       tradeoff: true,
-      promotional: true,
+      promotional: "heavy",
       preDecisionOrPhotoShoot: true,
     };
     // preDecisionOrPhotoShoot: true によりゲート不通過となるため、ゲート分は 0。
@@ -86,10 +87,29 @@ describe("computeUsefulnessScore", () => {
     const gateAndPromotional = computeUsefulnessScore({
       ...ALL_FALSE,
       ceremonyDecision: true,
-      promotional: true,
+      promotional: "heavy",
     });
 
     expect(gateOnly - gateAndPromotional).toBe(USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY);
+  });
+
+  it('promotional: "light" and "none" incur no penalty (only "heavy" is penalized, per the 3-level enum)', () => {
+    // 今回の変更の核心: boolean→3段階 enum 化により、"light"（軽微な言及）は
+    // 減点対象から外れ、"heavy"（明確な宣伝）だけが減点される。
+    const gateOnly = computeUsefulnessScore({ ...ALL_FALSE, ceremonyDecision: true });
+    const gateAndNone = computeUsefulnessScore({
+      ...ALL_FALSE,
+      ceremonyDecision: true,
+      promotional: "none",
+    });
+    const gateAndLight = computeUsefulnessScore({
+      ...ALL_FALSE,
+      ceremonyDecision: true,
+      promotional: "light",
+    });
+
+    expect(gateAndNone).toBe(gateOnly);
+    expect(gateAndLight).toBe(gateOnly);
   });
 
   it("preDecisionOrPhotoShoot subtracts its own weight independently of ceremonyDecision", () => {
@@ -119,7 +139,7 @@ describe("computeUsefulnessScore", () => {
     const barelyQualifyingButPromotional = computeUsefulnessScore({
       ...ALL_FALSE,
       ceremonyDecision: true,
-      promotional: true,
+      promotional: "heavy",
     });
     const richestNonGatePassing = computeUsefulnessScore({
       ...ALL_FALSE,
@@ -195,7 +215,7 @@ describe("computeUsefulnessScore", () => {
     const promotional = computeUsefulnessScore({
       ...ALL_FALSE,
       ceremonyDecision: true,
-      promotional: true,
+      promotional: "heavy",
     }); // 12-4 = 8
     expect(preShoot).toBeLessThan(promotional);
   });
@@ -207,7 +227,7 @@ describe("computeUsefulnessScore", () => {
     const worstGatePassing = computeUsefulnessScore({
       ...ALL_FALSE,
       ceremonyDecision: true,
-      promotional: true,
+      promotional: "heavy",
     });
     const bestGateFailing = computeUsefulnessScore({
       ...ALL_FALSE,
@@ -220,5 +240,33 @@ describe("computeUsefulnessScore", () => {
     expect(USEFULNESS_GATE_BONUS - USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY).toBeGreaterThan(
       USEFULNESS_WEIGHT_FIRSTHAND + USEFULNESS_WEIGHT_SPECIFIC + USEFULNESS_WEIGHT_TRADEOFF,
     );
+  });
+});
+
+describe("normalizePromotional", () => {
+  it("passes through the three canonical enum values unchanged", () => {
+    expect(normalizePromotional("none")).toBe("none");
+    expect(normalizePromotional("light")).toBe("light");
+    expect(normalizePromotional("heavy")).toBe("heavy");
+  });
+
+  it('maps the legacy boolean true to "light" (not "heavy") for backward compatibility', () => {
+    // 確定方針: 旧 boolean true は「PRらしき言及があった」程度の弱いシグナル
+    // だったため、3段階化後の "light"（無罰則）に丸める。"heavy" 昇格はしない。
+    expect(normalizePromotional(true)).toBe("light");
+  });
+
+  it('maps the legacy boolean false to "none"', () => {
+    expect(normalizePromotional(false)).toBe("none");
+  });
+
+  it('falls back to "none" for undefined, null, numbers, and unrecognized strings', () => {
+    expect(normalizePromotional(undefined)).toBe("none");
+    expect(normalizePromotional(null)).toBe("none");
+    expect(normalizePromotional(0)).toBe("none");
+    expect(normalizePromotional(1)).toBe("none");
+    expect(normalizePromotional("")).toBe("none");
+    expect(normalizePromotional("yes")).toBe("none");
+    expect(normalizePromotional("HEAVY")).toBe("none");
   });
 });

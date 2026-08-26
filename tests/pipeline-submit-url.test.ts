@@ -87,7 +87,7 @@ describe("runSubmitUrl (src/lib/pipeline/submit-url.ts)", () => {
         ceremonyDecision: true,
         specific: true,
         tradeoff: false,
-        promotional: false,
+        promotional: "none",
         preDecisionOrPhotoShoot: false,
         topicAnchor: input.title,
         rationaleText:
@@ -175,7 +175,7 @@ describe("runSubmitUrl (src/lib/pipeline/submit-url.ts)", () => {
       ceremonyDecision: true,
       specific: true,
       tradeoff: false,
-      promotional: false,
+      promotional: "none",
       preDecisionOrPhotoShoot: false,
       // sourceTitle="IG Title" には一切現れない語（プロンプトインジェクション/
       // 幻覚を模擬）。

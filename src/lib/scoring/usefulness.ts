@@ -15,6 +15,22 @@ import {
  * 定義は `openspec/specs/wedding-trend/spec.md` の編集方針セクションを
  * 唯一の参照先とする（ここでは重複記載しない）。
  */
+export type PromotionalLevel = "none" | "light" | "heavy";
+
+/**
+ * `criteria_json` の `promotional` を正規化する。3 段階 enum を正として
+ * そのまま返し、旧レコードの boolean 値は読み取り時にここで吸収する
+ * （DB マイグレーションは行わない）。`true`（旧仕様の「宣伝要素あり」）は
+ * 新仕様では減点対象外の "light" に降格する —— 旧仕様は宣伝要素の有無で
+ * 一律 -4 していたが、新仕様は「多すぎる」記事だけを減点する方針のため、
+ * 旧 true を無条件で heavy 相当（減点継続）にはしない。
+ */
+export function normalizePromotional(value: unknown): PromotionalLevel {
+  if (value === "none" || value === "light" || value === "heavy") return value;
+  if (typeof value === "boolean") return value ? "light" : "none";
+  return "none";
+}
+
 export interface UsefulnessCriteria {
   /** 書き手自身または近しい当事者が実際に挙式・披露宴を経験した立場から書かれている。 */
   firsthand: boolean;
@@ -24,8 +40,8 @@ export interface UsefulnessCriteria {
   specific: boolean;
   /** 判断の理由・後悔・「やってよかった/要らなかった」の評価が述べられているか。 */
   tradeoff: boolean;
-  /** 事業者による集客・自社サービスへの誘導が主目的か（該当すれば減点）。 */
-  promotional: boolean;
+  /** 事業者による集客・自社サービスへの誘導の度合い（heavy のときのみ減点）。 */
+  promotional: PromotionalLevel;
   /** 内容がフォトウェディング・前撮り・式場探し等、式決定前/別撮影の話題に限られるか（true ならゲート不通過）。 */
   preDecisionOrPhotoShoot: boolean;
 }
@@ -98,7 +114,8 @@ export function computeUsefulnessScore(criteria: UsefulnessCriteria): number {
   const firsthand = criteria.firsthand ? USEFULNESS_WEIGHT_FIRSTHAND : 0;
   const specific = criteria.specific ? USEFULNESS_WEIGHT_SPECIFIC : 0;
   const tradeoff = criteria.tradeoff ? USEFULNESS_WEIGHT_TRADEOFF : 0;
-  const promotionalPenalty = criteria.promotional ? USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY : 0;
+  const promotionalPenalty =
+    criteria.promotional === "heavy" ? USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY : 0;
   const preDecisionPenalty = criteria.preDecisionOrPhotoShoot
     ? USEFULNESS_WEIGHT_PRE_DECISION_PENALTY
     : 0;

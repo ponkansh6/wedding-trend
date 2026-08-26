@@ -45,7 +45,7 @@ export const CurationItemSchema = z.object({
   ceremonyDecision: z.boolean(),
   specific: z.boolean(),
   tradeoff: z.boolean(),
-  promotional: z.boolean(),
+  promotional: z.enum(["none", "light", "heavy"]),
   preDecisionOrPhotoShoot: z.boolean(),
   /**
    * 記事の主題となるトピックのアンカー（40字以内）。

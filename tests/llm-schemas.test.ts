@@ -6,13 +6,13 @@ import { buildSingleCurationPrompt } from "@/lib/llm/prompts";
 const validSummary =
   "結婚式の準備における費用感や演出のポイントについて、実際の体験に基づいた内容がまとめられています。会場選びやゲスト対応など具体的な工夫点が紹介されています。";
 
-/** 有用度判定 6 項目（すべて必須のブール値）。テストのデフォルト値として使い回す。 */
+/** 有用度判定 6 項目（promotional のみ enum、他はブール値）。テストのデフォルト値として使い回す。 */
 const validUsefulness = {
   firsthand: true,
   ceremonyDecision: true,
   specific: true,
   tradeoff: false,
-  promotional: false,
+  promotional: "none",
   preDecisionOrPhotoShoot: false,
 };
 
@@ -105,7 +105,21 @@ describe("CurationItemSchema", () => {
     expect(result.success).toBe(false);
   });
 
-  it("rejects an item where a usefulness field is a string instead of a boolean", () => {
+  it("rejects an item where a boolean usefulness field is a string instead of a boolean", () => {
+    const result = CurationItemSchema.safeParse({
+      index: 1,
+      title: "テスト",
+      summary: validSummary,
+      category: "その他",
+      tag: "trend",
+      ...validUsefulness,
+      ...validRationaleFields,
+      tradeoff: "false",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects an item where promotional is not one of the enum values", () => {
     const result = CurationItemSchema.safeParse({
       index: 1,
       title: "テスト",
@@ -117,6 +131,22 @@ describe("CurationItemSchema", () => {
       promotional: "false",
     });
     expect(result.success).toBe(false);
+  });
+
+  it("accepts all three promotional enum values", () => {
+    for (const promotional of ["none", "light", "heavy"] as const) {
+      const result = CurationItemSchema.safeParse({
+        index: 1,
+        title: "テスト",
+        summary: validSummary,
+        category: "その他",
+        tag: "trend",
+        ...validUsefulness,
+        ...validRationaleFields,
+        promotional,
+      });
+      expect(result.success).toBe(true);
+    }
   });
 
   it("does not accept a numeric score in place of the boolean criteria", () => {

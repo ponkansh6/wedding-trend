@@ -52,7 +52,7 @@ vi.mock("@/lib/llm/batch", () => ({
         ceremonyDecision: true,
         specific: true,
         tradeoff: false,
-        promotional: false,
+        promotional: "none",
         preDecisionOrPhotoShoot: false,
         // M1-2 の語彙的接地（plan 07 D4）を通すため、topicAnchor は LLM への
         // 実入力（input.title）に逐語で含まれる語にする（固定値だと入力ごとに
@@ -334,7 +334,7 @@ describe("runIngest (src/lib/pipeline/ingest.ts)", () => {
                 ceremonyDecision: true,
                 specific: true,
                 tradeoff: false,
-                promotional: false,
+                promotional: "none",
                 preDecisionOrPhotoShoot: false,
                 topicAnchor: input.title,
                 rationaleText:
@@ -382,7 +382,7 @@ describe("runIngest (src/lib/pipeline/ingest.ts)", () => {
           ceremonyDecision: true,
           specific: true,
           tradeoff: false,
-          promotional: false,
+          promotional: "none",
           preDecisionOrPhotoShoot: false,
           // Blog Post 1 の入力（title="Blog Post 1", excerpt="Excerpt"）には
           // 一切現れない語（プロンプトインジェクション/幻覚を模擬）。

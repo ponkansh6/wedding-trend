@@ -49,7 +49,7 @@ vi.mock("@/lib/llm/batch", () => ({
         ceremonyDecision: true,
         specific: true,
         tradeoff: true,
-        promotional: false,
+        promotional: "none",
         preDecisionOrPhotoShoot: false,
         // M1-2 の語彙的接地（plan 07 D4）を通すため、LLM への実入力
         // （originalTitle = "Blog Post 1"）に逐語で含まれる語にする。

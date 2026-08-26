@@ -111,7 +111,7 @@ describe("Database Repository and Queries", () => {
             ceremonyDecision: true,
             specific: true,
             tradeoff: false,
-            promotional: false,
+            promotional: "none",
             preDecisionOrPhotoShoot: false,
           },
         },
@@ -130,7 +130,7 @@ describe("Database Repository and Queries", () => {
       ceremonyDecision: true,
       specific: true,
       tradeoff: false,
-      promotional: false,
+      promotional: "none",
       preDecisionOrPhotoShoot: false,
     });
     expect(usefulnessRows[0].signature).toBe("sig1");
@@ -420,7 +420,7 @@ describe("Database Repository and Queries", () => {
           ceremonyDecision: boolean;
           specific: boolean;
           tradeoff: boolean;
-          promotional: boolean;
+          promotional: "none" | "light" | "heavy";
           preDecisionOrPhotoShoot: boolean;
         } | null,
       ) => ({
@@ -449,7 +449,7 @@ describe("Database Repository and Queries", () => {
           ceremonyDecision: true,
           specific: true,
           tradeoff: true,
-          promotional: false,
+          promotional: "none",
           preDecisionOrPhotoShoot: false,
         }),
         // score = 12(gate) = 12
@@ -458,7 +458,7 @@ describe("Database Repository and Queries", () => {
           ceremonyDecision: true,
           specific: false,
           tradeoff: false,
-          promotional: false,
+          promotional: "none",
           preDecisionOrPhotoShoot: false,
         }),
         // score = 12(gate) = 12（b と同点。publishedAt が新しい方が先）
@@ -467,7 +467,7 @@ describe("Database Repository and Queries", () => {
           ceremonyDecision: true,
           specific: false,
           tradeoff: false,
-          promotional: false,
+          promotional: "none",
           preDecisionOrPhotoShoot: false,
         }),
         // ceremonyDecision=false のためゲート不通過: 3+2+2 = 7 に留まる
@@ -477,7 +477,7 @@ describe("Database Repository and Queries", () => {
           ceremonyDecision: false,
           specific: true,
           tradeoff: true,
-          promotional: false,
+          promotional: "none",
           preDecisionOrPhotoShoot: false,
         }),
         // preDecisionOrPhotoShoot=true のためゲート不通過かつ独立減点も乗る:
@@ -488,7 +488,7 @@ describe("Database Repository and Queries", () => {
           ceremonyDecision: true,
           specific: true,
           tradeoff: true,
-          promotional: false,
+          promotional: "none",
           preDecisionOrPhotoShoot: true,
         }),
         // 有用度未スコア（post_usefulness 行なし）: UNSCORED_USEFULNESS_SCORE(3) 扱い
@@ -703,7 +703,7 @@ describe("Database Repository and Queries", () => {
               ceremonyDecision: true,
               specific: false,
               tradeoff: true,
-              promotional: false,
+              promotional: "none",
               preDecisionOrPhotoShoot: false,
             },
           },
@@ -741,7 +741,7 @@ describe("Database Repository and Queries", () => {
         ceremonyDecision: true,
         specific: false,
         tradeoff: true,
-        promotional: false,
+        promotional: "none",
         preDecisionOrPhotoShoot: false,
       });
 
