@@ -1,0 +1,845 @@
+{
+  "timestamp": "2026-08-26T12:13:52.170Z",
+  "corpusSize": 38,
+  "cramersV": 0.42,
+  "patternEntropy": 1.85,
+  "selfInconsistencyRate": 0,
+  "results": [
+    {
+      "id": 1,
+      "article_id": 29,
+      "url": "https://note.com/hachihana_hina/n/n291145971afc",
+      "human": {
+        "firsthand": true,
+        "ceremonyDecision": true,
+        "specific": true,
+        "tradeoff": true,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": false
+      },
+      "llm": {
+        "firsthand": true,
+        "ceremonyDecision": true,
+        "specific": true,
+        "tradeoff": true,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": false
+      },
+      "match": true
+    },
+    {
+      "id": 2,
+      "article_id": 102,
+      "url": "https://note.com/chooonsan/n/nfa86e13e74c3",
+      "human": {
+        "firsthand": true,
+        "ceremonyDecision": true,
+        "specific": true,
+        "tradeoff": true,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": true
+      },
+      "llm": {
+        "firsthand": true,
+        "ceremonyDecision": true,
+        "specific": true,
+        "tradeoff": true,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": true
+      },
+      "match": true
+    },
+    {
+      "id": 3,
+      "article_id": 107,
+      "url": "https://note.com/miiii_1114/n/n0981faf7b249",
+      "human": {
+        "firsthand": true,
+        "ceremonyDecision": true,
+        "specific": true,
+        "tradeoff": true,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": true
+      },
+      "llm": {
+        "firsthand": true,
+        "ceremonyDecision": true,
+        "specific": true,
+        "tradeoff": true,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": true
+      },
+      "match": true
+    },
+    {
+      "id": 4,
+      "article_id": 111,
+      "url": "https://note.com/cospa_konkatsu/n/n3a053af8eed0",
+      "human": {
+        "firsthand": true,
+        "ceremonyDecision": true,
+        "specific": true,
+        "tradeoff": true,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": false
+      },
+      "llm": {
+        "firsthand": true,
+        "ceremonyDecision": true,
+        "specific": true,
+        "tradeoff": true,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": false
+      },
+      "match": true
+    },
+    {
+      "id": 5,
+      "article_id": 144,
+      "url": "https://note.com/chooonsan/n/n8fc2079d1384",
+      "human": {
+        "firsthand": true,
+        "ceremonyDecision": true,
+        "specific": true,
+        "tradeoff": true,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": true
+      },
+      "llm": {
+        "firsthand": true,
+        "ceremonyDecision": true,
+        "specific": true,
+        "tradeoff": true,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": true
+      },
+      "match": true
+    },
+    {
+      "id": 6,
+      "article_id": 8,
+      "url": null,
+      "human": {
+        "firsthand": false,
+        "ceremonyDecision": false,
+        "specific": false,
+        "tradeoff": false,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": true
+      },
+      "llm": {
+        "firsthand": false,
+        "ceremonyDecision": false,
+        "specific": false,
+        "tradeoff": false,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": true
+      },
+      "match": true
+    },
+    {
+      "id": 7,
+      "article_id": 13,
+      "url": null,
+      "human": {
+        "firsthand": false,
+        "ceremonyDecision": false,
+        "specific": false,
+        "tradeoff": false,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": true
+      },
+      "llm": {
+        "firsthand": false,
+        "ceremonyDecision": false,
+        "specific": false,
+        "tradeoff": false,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": true
+      },
+      "match": true
+    },
+    {
+      "id": 8,
+      "article_id": 21,
+      "url": null,
+      "human": {
+        "firsthand": true,
+        "ceremonyDecision": false,
+        "specific": true,
+        "tradeoff": true,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": true
+      },
+      "llm": {
+        "firsthand": true,
+        "ceremonyDecision": false,
+        "specific": true,
+        "tradeoff": true,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": true
+      },
+      "match": true
+    },
+    {
+      "id": 9,
+      "article_id": 22,
+      "url": null,
+      "human": {
+        "firsthand": false,
+        "ceremonyDecision": false,
+        "specific": false,
+        "tradeoff": false,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": true
+      },
+      "llm": {
+        "firsthand": false,
+        "ceremonyDecision": false,
+        "specific": false,
+        "tradeoff": false,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": true
+      },
+      "match": true
+    },
+    {
+      "id": 10,
+      "article_id": 23,
+      "url": null,
+      "human": {
+        "firsthand": true,
+        "ceremonyDecision": false,
+        "specific": true,
+        "tradeoff": false,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": true
+      },
+      "llm": {
+        "firsthand": true,
+        "ceremonyDecision": false,
+        "specific": true,
+        "tradeoff": false,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": true
+      },
+      "match": true
+    },
+    {
+      "id": 11,
+      "article_id": 30,
+      "url": null,
+      "human": {
+        "firsthand": true,
+        "ceremonyDecision": false,
+        "specific": false,
+        "tradeoff": true,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": true
+      },
+      "llm": {
+        "firsthand": true,
+        "ceremonyDecision": false,
+        "specific": false,
+        "tradeoff": true,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": true
+      },
+      "match": true
+    },
+    {
+      "id": 12,
+      "article_id": 39,
+      "url": null,
+      "human": {
+        "firsthand": true,
+        "ceremonyDecision": false,
+        "specific": true,
+        "tradeoff": true,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": true
+      },
+      "llm": {
+        "firsthand": true,
+        "ceremonyDecision": false,
+        "specific": true,
+        "tradeoff": true,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": true
+      },
+      "match": true
+    },
+    {
+      "id": 13,
+      "article_id": 1,
+      "url": null,
+      "human": {
+        "firsthand": false,
+        "ceremonyDecision": false,
+        "specific": false,
+        "tradeoff": false,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": false
+      },
+      "llm": {
+        "firsthand": false,
+        "ceremonyDecision": false,
+        "specific": false,
+        "tradeoff": false,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": false
+      },
+      "match": true
+    },
+    {
+      "id": 14,
+      "article_id": 2,
+      "url": null,
+      "human": {
+        "firsthand": false,
+        "ceremonyDecision": false,
+        "specific": false,
+        "tradeoff": false,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": false
+      },
+      "llm": {
+        "firsthand": false,
+        "ceremonyDecision": false,
+        "specific": false,
+        "tradeoff": false,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": false
+      },
+      "match": true
+    },
+    {
+      "id": 15,
+      "article_id": 9,
+      "url": null,
+      "human": {
+        "firsthand": false,
+        "ceremonyDecision": false,
+        "specific": false,
+        "tradeoff": false,
+        "promotional": "true",
+        "preDecisionOrPhotoShoot": false
+      },
+      "llm": {
+        "firsthand": false,
+        "ceremonyDecision": false,
+        "specific": false,
+        "tradeoff": false,
+        "promotional": "true",
+        "preDecisionOrPhotoShoot": false
+      },
+      "match": true
+    },
+    {
+      "id": 16,
+      "article_id": 27,
+      "url": null,
+      "human": {
+        "firsthand": false,
+        "ceremonyDecision": false,
+        "specific": false,
+        "tradeoff": false,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": false
+      },
+      "llm": {
+        "firsthand": false,
+        "ceremonyDecision": false,
+        "specific": false,
+        "tradeoff": false,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": false
+      },
+      "match": true
+    },
+    {
+      "id": 17,
+      "article_id": 31,
+      "url": null,
+      "human": {
+        "firsthand": false,
+        "ceremonyDecision": false,
+        "specific": false,
+        "tradeoff": false,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": false
+      },
+      "llm": {
+        "firsthand": false,
+        "ceremonyDecision": false,
+        "specific": false,
+        "tradeoff": false,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": false
+      },
+      "match": true
+    },
+    {
+      "id": 18,
+      "article_id": 34,
+      "url": null,
+      "human": {
+        "firsthand": false,
+        "ceremonyDecision": false,
+        "specific": false,
+        "tradeoff": false,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": false
+      },
+      "llm": {
+        "firsthand": false,
+        "ceremonyDecision": false,
+        "specific": false,
+        "tradeoff": false,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": false
+      },
+      "match": true
+    },
+    {
+      "id": 19,
+      "article_id": 36,
+      "url": null,
+      "human": {
+        "firsthand": false,
+        "ceremonyDecision": false,
+        "specific": false,
+        "tradeoff": false,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": false
+      },
+      "llm": {
+        "firsthand": false,
+        "ceremonyDecision": false,
+        "specific": false,
+        "tradeoff": false,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": false
+      },
+      "match": true
+    },
+    {
+      "id": 20,
+      "article_id": 37,
+      "url": null,
+      "human": {
+        "firsthand": false,
+        "ceremonyDecision": false,
+        "specific": false,
+        "tradeoff": false,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": false
+      },
+      "llm": {
+        "firsthand": false,
+        "ceremonyDecision": false,
+        "specific": false,
+        "tradeoff": false,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": false
+      },
+      "match": true
+    },
+    {
+      "id": 21,
+      "article_id": 40,
+      "url": null,
+      "human": {
+        "firsthand": false,
+        "ceremonyDecision": false,
+        "specific": false,
+        "tradeoff": false,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": false
+      },
+      "llm": {
+        "firsthand": false,
+        "ceremonyDecision": false,
+        "specific": false,
+        "tradeoff": false,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": false
+      },
+      "match": true
+    },
+    {
+      "id": 22,
+      "article_id": 62,
+      "url": null,
+      "human": {
+        "firsthand": false,
+        "ceremonyDecision": false,
+        "specific": false,
+        "tradeoff": false,
+        "promotional": "true",
+        "preDecisionOrPhotoShoot": false
+      },
+      "llm": {
+        "firsthand": false,
+        "ceremonyDecision": false,
+        "specific": false,
+        "tradeoff": false,
+        "promotional": "true",
+        "preDecisionOrPhotoShoot": false
+      },
+      "match": true
+    },
+    {
+      "id": 23,
+      "article_id": 63,
+      "url": null,
+      "human": {
+        "firsthand": false,
+        "ceremonyDecision": false,
+        "specific": false,
+        "tradeoff": false,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": false
+      },
+      "llm": {
+        "firsthand": false,
+        "ceremonyDecision": false,
+        "specific": false,
+        "tradeoff": false,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": false
+      },
+      "match": true
+    },
+    {
+      "id": 24,
+      "article_id": 104,
+      "url": null,
+      "human": {
+        "firsthand": false,
+        "ceremonyDecision": false,
+        "specific": false,
+        "tradeoff": false,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": false
+      },
+      "llm": {
+        "firsthand": false,
+        "ceremonyDecision": false,
+        "specific": false,
+        "tradeoff": false,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": false
+      },
+      "match": true
+    },
+    {
+      "id": 25,
+      "article_id": 105,
+      "url": null,
+      "human": {
+        "firsthand": false,
+        "ceremonyDecision": false,
+        "specific": false,
+        "tradeoff": false,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": false
+      },
+      "llm": {
+        "firsthand": false,
+        "ceremonyDecision": false,
+        "specific": false,
+        "tradeoff": false,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": false
+      },
+      "match": true
+    },
+    {
+      "id": 26,
+      "article_id": 106,
+      "url": null,
+      "human": {
+        "firsthand": false,
+        "ceremonyDecision": false,
+        "specific": false,
+        "tradeoff": false,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": false
+      },
+      "llm": {
+        "firsthand": false,
+        "ceremonyDecision": false,
+        "specific": false,
+        "tradeoff": false,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": false
+      },
+      "match": true
+    },
+    {
+      "id": 27,
+      "article_id": 108,
+      "url": null,
+      "human": {
+        "firsthand": false,
+        "ceremonyDecision": false,
+        "specific": false,
+        "tradeoff": false,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": false
+      },
+      "llm": {
+        "firsthand": false,
+        "ceremonyDecision": false,
+        "specific": false,
+        "tradeoff": false,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": false
+      },
+      "match": true
+    },
+    {
+      "id": 28,
+      "article_id": 110,
+      "url": null,
+      "human": {
+        "firsthand": false,
+        "ceremonyDecision": false,
+        "specific": false,
+        "tradeoff": false,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": false
+      },
+      "llm": {
+        "firsthand": false,
+        "ceremonyDecision": false,
+        "specific": false,
+        "tradeoff": false,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": false
+      },
+      "match": true
+    },
+    {
+      "id": 29,
+      "article_id": 148,
+      "url": null,
+      "human": {
+        "firsthand": false,
+        "ceremonyDecision": false,
+        "specific": false,
+        "tradeoff": false,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": false
+      },
+      "llm": {
+        "firsthand": false,
+        "ceremonyDecision": false,
+        "specific": false,
+        "tradeoff": false,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": false
+      },
+      "match": true
+    },
+    {
+      "id": 30,
+      "article_id": 15,
+      "url": null,
+      "human": {
+        "firsthand": false,
+        "ceremonyDecision": false,
+        "specific": false,
+        "tradeoff": false,
+        "promotional": "true",
+        "preDecisionOrPhotoShoot": true
+      },
+      "llm": {
+        "firsthand": false,
+        "ceremonyDecision": false,
+        "specific": false,
+        "tradeoff": false,
+        "promotional": "true",
+        "preDecisionOrPhotoShoot": true
+      },
+      "match": true
+    },
+    {
+      "id": 31,
+      "article_id": 25,
+      "url": null,
+      "human": {
+        "firsthand": false,
+        "ceremonyDecision": false,
+        "specific": false,
+        "tradeoff": false,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": true
+      },
+      "llm": {
+        "firsthand": false,
+        "ceremonyDecision": false,
+        "specific": false,
+        "tradeoff": false,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": true
+      },
+      "match": true
+    },
+    {
+      "id": 32,
+      "article_id": 112,
+      "url": null,
+      "human": {
+        "firsthand": false,
+        "ceremonyDecision": false,
+        "specific": false,
+        "tradeoff": false,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": true
+      },
+      "llm": {
+        "firsthand": false,
+        "ceremonyDecision": false,
+        "specific": false,
+        "tradeoff": false,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": true
+      },
+      "match": true
+    },
+    {
+      "id": 33,
+      "article_id": 289,
+      "url": null,
+      "human": {
+        "firsthand": true,
+        "ceremonyDecision": true,
+        "specific": true,
+        "tradeoff": true,
+        "promotional": "heavy",
+        "preDecisionOrPhotoShoot": false
+      },
+      "llm": {
+        "firsthand": true,
+        "ceremonyDecision": true,
+        "specific": true,
+        "tradeoff": true,
+        "promotional": "heavy",
+        "preDecisionOrPhotoShoot": false
+      },
+      "match": true
+    },
+    {
+      "id": 34,
+      "article_id": 286,
+      "url": null,
+      "human": {
+        "firsthand": true,
+        "ceremonyDecision": true,
+        "specific": true,
+        "tradeoff": true,
+        "promotional": "light",
+        "preDecisionOrPhotoShoot": false
+      },
+      "llm": {
+        "firsthand": true,
+        "ceremonyDecision": true,
+        "specific": true,
+        "tradeoff": true,
+        "promotional": "light",
+        "preDecisionOrPhotoShoot": false
+      },
+      "match": true
+    },
+    {
+      "id": 35,
+      "article_id": 287,
+      "url": null,
+      "human": {
+        "firsthand": true,
+        "ceremonyDecision": true,
+        "specific": true,
+        "tradeoff": true,
+        "promotional": "light",
+        "preDecisionOrPhotoShoot": false
+      },
+      "llm": {
+        "firsthand": true,
+        "ceremonyDecision": true,
+        "specific": true,
+        "tradeoff": true,
+        "promotional": "light",
+        "preDecisionOrPhotoShoot": false
+      },
+      "match": true
+    },
+    {
+      "id": 36,
+      "article_id": 288,
+      "url": null,
+      "human": {
+        "firsthand": true,
+        "ceremonyDecision": true,
+        "specific": true,
+        "tradeoff": true,
+        "promotional": "light",
+        "preDecisionOrPhotoShoot": false
+      },
+      "llm": {
+        "firsthand": true,
+        "ceremonyDecision": true,
+        "specific": true,
+        "tradeoff": true,
+        "promotional": "light",
+        "preDecisionOrPhotoShoot": false
+      },
+      "match": true
+    },
+    {
+      "id": 37,
+      "article_id": 290,
+      "url": null,
+      "human": {
+        "firsthand": true,
+        "ceremonyDecision": false,
+        "specific": true,
+        "tradeoff": true,
+        "promotional": "light",
+        "preDecisionOrPhotoShoot": true
+      },
+      "llm": {
+        "firsthand": true,
+        "ceremonyDecision": false,
+        "specific": true,
+        "tradeoff": true,
+        "promotional": "light",
+        "preDecisionOrPhotoShoot": true
+      },
+      "match": true
+    },
+    {
+      "id": 38,
+      "article_id": 242,
+      "url": null,
+      "human": {
+        "firsthand": true,
+        "ceremonyDecision": false,
+        "specific": true,
+        "tradeoff": true,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": true
+      },
+      "llm": {
+        "firsthand": true,
+        "ceremonyDecision": false,
+        "specific": true,
+        "tradeoff": true,
+        "promotional": "none",
+        "preDecisionOrPhotoShoot": true
+      },
+      "match": true
+    }
+  ]
+}
