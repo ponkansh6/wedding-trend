@@ -612,7 +612,7 @@ false（0点）より上」の**楽観的な中位**に意図的に置いてお�
 
 ### §9.5a プロンプト変更時の `CURATION_PROMPT_VERSION` bump 義務
 
-`computeCurationSignature()`（`src/lib/llm/signature.ts:31-35`）は
+`computeCurationSignature()`（`src/lib/llm/signature.ts:31-36`）は
 `sha256("v" + CURATION_PROMPT_VERSION + "\0" + LLM_MODEL)` の先頭16文字を
 返す。**入力は `CURATION_PROMPT_VERSION` と `LLM_MODEL` の2定数のみ**であり、
 プロンプト本文・判定項目定義は含まれない（重み定数の除外と同設計。詳細は
