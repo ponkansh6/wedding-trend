@@ -206,7 +206,7 @@ export interface CurationUpdate {
   rationale?: {
     postId: number;
     topicAnchor: string;
-    rationaleText: string;
+    rationaleText: string | null;
     evidenceSufficient: boolean;
     modelId: string;
     promptVersion: string;
@@ -298,7 +298,7 @@ export async function markCurated(
       );
     }
     const rationaleValues =
-      u.rationale && u.rationale.evidenceSufficient
+      u.rationale && u.rationale.evidenceSufficient && u.rationale.rationaleText !== null
         ? {
             postId: u.rationale.postId,
             topicAnchor: u.rationale.topicAnchor,

@@ -31,7 +31,7 @@ import { renderRationaleText } from "@/lib/publish/gate";
  * 廃止したため、この型からは削除されている
  * （破壊的変更。呼び出し元での結線は別レーンが行う。詳細はタスク完了報告を参照）。
  */
-export type CurationResult = Omit<CurationItem, "index"> & { rationaleText: string };
+export type CurationResult = Omit<CurationItem, "index"> & { rationaleText: string | null };
 
 /** `renderRationaleText()` に渡す 6 boolean を item から取り出すヘルパ。 */
 function usefulnessFlagsOf(item: Omit<CurationItem, "index" | "topicAnchor">) {
@@ -51,14 +51,26 @@ function usefulnessFlagsOf(item: Omit<CurationItem, "index" | "topicAnchor">) {
  */
 function attachRationale<T extends Omit<CurationItem, "index">>(
   item: T,
-): T & { rationaleText: string } {
-  return {
-    ...item,
-    rationaleText: renderRationaleText({
+): T & { rationaleText: string | null } {
+  try {
+    const rationaleText = renderRationaleText({
       topicAnchor: item.topicAnchor,
       usefulness: usefulnessFlagsOf(item),
-    }),
-  };
+    });
+    return {
+      ...item,
+      rationaleText,
+    };
+  } catch (err) {
+    console.warn(
+      `[llm] failed to render rationale for item (topicAnchor length: ${item.topicAnchor?.length}):`,
+      err,
+    );
+    return {
+      ...item,
+      rationaleText: null,
+    };
+  }
 }
 
 /**
