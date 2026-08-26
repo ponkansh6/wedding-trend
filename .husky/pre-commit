@@ -19,6 +19,8 @@ if [ -n "$(git diff --name-only -- src)" ]; then
   printf '\n[warn] src/ に未ステージの変更があります。コミット漏れに注意してください。\n\n'
 fi
 
+bash scripts/check-prompt-version-bump.sh
+
 STAGED=$(git diff --cached --name-only --diff-filter=ACM)
 HAS_PKG=0
 HAS_LOCK=0

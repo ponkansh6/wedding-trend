@@ -610,6 +610,28 @@ false（0点）より上」の**楽観的な中位**に意図的に置いてお�
 `post_usefulness_criteria.signature` が `posts.curation_signature` と
 不一致になった投稿として再スコア対象に検出され、自然に正しい位置へ移動する。
 
+### §9.5a プロンプト変更時の `CURATION_PROMPT_VERSION` bump 義務
+
+`computeCurationSignature()`（`src/lib/llm/signature.ts:31-35`）は
+`sha256("v" + CURATION_PROMPT_VERSION + "\0" + LLM_MODEL)` の先頭16文字を
+返す。**入力は `CURATION_PROMPT_VERSION` と `LLM_MODEL` の2定数のみ**であり、
+プロンプト本文・判定項目定義は含まれない（重み定数の除外と同設計。詳細は
+`signature.ts:21-29` のコメント参照）。
+
+したがって、`src/lib/llm/prompts.ts` のプロンプト本文や判定項目定義を
+変更した場合、**必ず** `src/lib/constants.ts` の `CURATION_PROMPT_VERSION` を
+bump しなければならない。bump がないと `getStaleCurationCandidates()` が
+対象0件を返し、再スコアが走らない。
+
+- **pre-commit チェック**: `scripts/check-prompt-version-bump.sh` が
+  `prompts.ts` が staged なのに `CURATION_PROMPT_VERSION` が変更されていない
+  場合に警告する（advisory・非ブロッキング）。
+- **履歴**: v2 で有用度判定5項目追加、v3 で `preDecisionOrPhotoShoot` 追加、
+  v4 で「5つのブール値」→「6項目」の見出し修正。v4 以前の
+  `prompts.ts` 変更（PR要素のenum化、コミット `a8d4f0f`）では
+  version bump が見落とされ、87件全件の再スコアが未実施だった
+  （`shared_plan/11` §4 参照）。
+
 ### §9.6 掲載順の決定規則
 
 - **体験談レーン**（`sourceType: "blog"`）: 有用度スコア（§9.3）降順 →
