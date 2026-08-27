@@ -86,7 +86,7 @@ describe("runSubmitUrl (src/lib/pipeline/submit-url.ts)", () => {
         firsthand: true,
         ceremonyDecision: true,
         specific: true,
-        tradeoff: false,
+        weddingDayContent: false,
         promotional: "none",
         preDecisionOrPhotoShoot: false,
         topicAnchor: input.title,
@@ -174,7 +174,7 @@ describe("runSubmitUrl (src/lib/pipeline/submit-url.ts)", () => {
       firsthand: true,
       ceremonyDecision: true,
       specific: true,
-      tradeoff: false,
+      weddingDayContent: false,
       promotional: "none",
       preDecisionOrPhotoShoot: false,
       // sourceTitle="IG Title" には一切現れない語（プロンプトインジェクション/

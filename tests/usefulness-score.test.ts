@@ -5,7 +5,7 @@ import {
   USEFULNESS_WEIGHT_PRE_DECISION_PENALTY,
   USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY,
   USEFULNESS_WEIGHT_SPECIFIC,
-  USEFULNESS_WEIGHT_TRADEOFF,
+  USEFULNESS_WEIGHT_WEDDING_DAY,
 } from "@/lib/constants";
 import {
   computeUsefulnessScore,
@@ -19,20 +19,20 @@ const ALL_FALSE: UsefulnessCriteria = {
   firsthand: false,
   ceremonyDecision: false,
   specific: false,
-  tradeoff: false,
+  weddingDayContent: false,
   promotional: "none",
   preDecisionOrPhotoShoot: false,
 };
 
 describe("computeUsefulnessScore", () => {
   it("gates on ceremonyDecision: failing the gate outscored by nothing, even with all other criteria true", () => {
-    // オーナーの意図の核心: 「衣装だけの記事だが実体験・具体的・トレードオフ
+    // オーナーの意図の核心: 「衣装だけの記事だが実体験・具体的・weddingDayContent
     // あり」が「式の中身に触れているが浅い記事」を上回ってはならない。
     const richButOffTopic = computeUsefulnessScore({
       ...ALL_FALSE,
       firsthand: true,
       specific: true,
-      tradeoff: true,
+      weddingDayContent: true,
       promotional: "heavy",
     });
     const shallowButOnTopic = computeUsefulnessScore({
@@ -52,17 +52,17 @@ describe("computeUsefulnessScore", () => {
       firsthand: true,
       ceremonyDecision: true,
       specific: true,
-      tradeoff: true,
+      weddingDayContent: true,
       promotional: "heavy",
       preDecisionOrPhotoShoot: true,
     };
     // preDecisionOrPhotoShoot: true によりゲート不通過となるため、ゲート分は 0。
-    // 残りは firsthand(3) + specific(2) + tradeoff(2) - promotional(4) -
+    // 残りは firsthand(3) + specific(2) + weddingDayContent(2) - promotional(4) -
     // preDecisionPenalty(3) = 0。定数から組み立てて検証する。
     const expected =
       USEFULNESS_WEIGHT_FIRSTHAND +
       USEFULNESS_WEIGHT_SPECIFIC +
-      USEFULNESS_WEIGHT_TRADEOFF -
+      USEFULNESS_WEIGHT_WEDDING_DAY -
       USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY -
       USEFULNESS_WEIGHT_PRE_DECISION_PENALTY;
     expect(computeUsefulnessScore(allTrue)).toBe(expected);
@@ -78,8 +78,9 @@ describe("computeUsefulnessScore", () => {
       computeUsefulnessScore({ ...ALL_FALSE, ceremonyDecision: true, specific: true }) - gateOnly,
     ).toBe(USEFULNESS_WEIGHT_SPECIFIC);
     expect(
-      computeUsefulnessScore({ ...ALL_FALSE, ceremonyDecision: true, tradeoff: true }) - gateOnly,
-    ).toBe(USEFULNESS_WEIGHT_TRADEOFF);
+      computeUsefulnessScore({ ...ALL_FALSE, ceremonyDecision: true, weddingDayContent: true }) -
+        gateOnly,
+    ).toBe(USEFULNESS_WEIGHT_WEDDING_DAY);
   });
 
   it("promotional subtracts its own weight independently, regardless of the other criteria", () => {
@@ -145,7 +146,7 @@ describe("computeUsefulnessScore", () => {
       ...ALL_FALSE,
       firsthand: true,
       specific: true,
-      tradeoff: true,
+      weddingDayContent: true,
     });
 
     expect(barelyQualifyingButPromotional).toBeGreaterThan(richestNonGatePassing);
@@ -166,14 +167,14 @@ describe("computeUsefulnessScore", () => {
       preDecisionOrPhotoShoot: true,
       firsthand: true,
       specific: true,
-      tradeoff: true,
+      weddingDayContent: true,
     });
-    // ゲート不通過 → firsthand(3)+specific(2)+tradeoff(2) - preDecisionPenalty(3)。
+    // ゲート不通過 → firsthand(3)+specific(2)+weddingDayContent(2) - preDecisionPenalty(3)。
     // ceremonyDecision のみの USEFULNESS_GATE_BONUS より下。
     const expected =
       USEFULNESS_WEIGHT_FIRSTHAND +
       USEFULNESS_WEIGHT_SPECIFIC +
-      USEFULNESS_WEIGHT_TRADEOFF -
+      USEFULNESS_WEIGHT_WEDDING_DAY -
       USEFULNESS_WEIGHT_PRE_DECISION_PENALTY;
     expect(photoShoot).toBe(expected);
     expect(photoShoot).toBeLessThan(
@@ -187,7 +188,7 @@ describe("computeUsefulnessScore", () => {
       firsthand: true,
       ceremonyDecision: true,
       specific: true,
-      tradeoff: true,
+      weddingDayContent: true,
       preDecisionOrPhotoShoot: true,
     }); // ゲート不通過 → 3+2+2-3(preDecisionPenalty) = 4
     const canvaDiy = computeUsefulnessScore({
@@ -209,7 +210,7 @@ describe("computeUsefulnessScore", () => {
       firsthand: true,
       ceremonyDecision: true,
       specific: true,
-      tradeoff: true,
+      weddingDayContent: true,
       preDecisionOrPhotoShoot: true,
     }); // 3+2+2-3 = 4
     const promotional = computeUsefulnessScore({
@@ -233,12 +234,12 @@ describe("computeUsefulnessScore", () => {
       ...ALL_FALSE,
       firsthand: true,
       specific: true,
-      tradeoff: true,
+      weddingDayContent: true,
     });
 
     expect(worstGatePassing).toBeGreaterThan(bestGateFailing);
     expect(USEFULNESS_GATE_BONUS - USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY).toBeGreaterThan(
-      USEFULNESS_WEIGHT_FIRSTHAND + USEFULNESS_WEIGHT_SPECIFIC + USEFULNESS_WEIGHT_TRADEOFF,
+      USEFULNESS_WEIGHT_FIRSTHAND + USEFULNESS_WEIGHT_SPECIFIC + USEFULNESS_WEIGHT_WEDDING_DAY,
     );
   });
 });

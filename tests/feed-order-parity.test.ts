@@ -40,7 +40,7 @@ function criteriaFromMask(mask: number): UsefulnessCriteria {
     firsthand: ((boolBits >> 0) & 1) === 1,
     ceremonyDecision: ((boolBits >> 1) & 1) === 1,
     specific: ((boolBits >> 2) & 1) === 1,
-    tradeoff: ((boolBits >> 3) & 1) === 1,
+    weddingDayContent: ((boolBits >> 3) & 1) === 1,
     promotional: PROMOTIONAL_LEVELS[promotionalIndex],
     preDecisionOrPhotoShoot: ((boolBits >> 4) & 1) === 1,
   };
@@ -134,12 +134,12 @@ describe("SQL score (USEFULNESS_SCORE_SQL) matches computeUsefulnessScore()", ()
           postId: states.get("https://example.com/missing-key")!.id,
           modelId: "test-model",
           // markCurated 経由だと UsefulnessCriteria 型で全 6 キーが強制される
-          // ため、まず全 false で書き込んでから下で tradeoff キーを欠落させる。
+          // ため、まず全 false で書き込んでから下で weddingDayContent キーを欠落させる。
           criteria: {
             firsthand: true,
             ceremonyDecision: true,
             specific: true,
-            tradeoff: false,
+            weddingDayContent: false,
             promotional: "none",
             preDecisionOrPhotoShoot: false,
           },
@@ -160,7 +160,7 @@ describe("SQL score (USEFULNESS_SCORE_SQL) matches computeUsefulnessScore()", ()
             firsthand: true,
             ceremonyDecision: true,
             specific: true,
-            tradeoff: false,
+            weddingDayContent: false,
             promotional: "none",
             preDecisionOrPhotoShoot: false,
           },
@@ -168,7 +168,7 @@ describe("SQL score (USEFULNESS_SCORE_SQL) matches computeUsefulnessScore()", ()
       },
     ]);
 
-    // markCurated が書いた JSON から tradeoff キーを手動で欠落させる
+    // markCurated が書いた JSON から weddingDayContent キーを手動で欠落させる
     // （実運用では旧バックフィル分の行や、将来判定項目を追加したときの
     // 古い行で発生しうる状態を模擬する）。
     const missingKeyPostId = states.get("https://example.com/missing-key")!.id;
@@ -179,7 +179,7 @@ describe("SQL score (USEFULNESS_SCORE_SQL) matches computeUsefulnessScore()", ()
           firsthand: true,
           ceremonyDecision: true,
           specific: true,
-          // tradeoff キーが存在しない
+          // weddingDayContent キーが存在しない
           promotional: "none",
           preDecisionOrPhotoShoot: false,
         }),
@@ -194,7 +194,7 @@ describe("SQL score (USEFULNESS_SCORE_SQL) matches computeUsefulnessScore()", ()
 
     // 欠落キーが NULL 伝播でクエリ全体を壊す（あるいはその行だけ最下位に
     // 沈む）のではなく、「未知の判定項目は false 扱い」という COALESCE の
-    // 意味論どおりに、tradeoff=false を明示した行と同点で並ぶことを確認する。
+    // 意味論どおりに、weddingDayContent=false を明示した行と同点で並ぶことを確認する。
     expect(missingKeyIndex).toBeGreaterThanOrEqual(0);
     expect(explicitFalseIndex).toBeGreaterThanOrEqual(0);
     // 同点（publishedAt も同一）なので、posts.id 降順タイブレークで順序が
@@ -234,7 +234,7 @@ describe("SQL score (USEFULNESS_SCORE_SQL) matches computeUsefulnessScore()", ()
             firsthand: false,
             ceremonyDecision: true,
             specific: false,
-            tradeoff: false,
+            weddingDayContent: false,
             promotional: "none",
             preDecisionOrPhotoShoot: false,
           },
@@ -293,16 +293,16 @@ describe("SQL score (USEFULNESS_SCORE_SQL) matches computeUsefulnessScore()", ()
         firsthand: false,
         ceremonyDecision: true,
         specific: false,
-        tradeoff: false,
+        weddingDayContent: false,
         promotional: "none",
         preDecisionOrPhotoShoot: false,
       }),
-      // ゲート不通過 → firsthand+specific+tradeoff = 7
+      // ゲート不通過 → firsthand+specific+weddingDayContent = 7
       usefulnessFor("https://example.com/rich-non-gate", {
         firsthand: true,
         ceremonyDecision: false,
         specific: true,
-        tradeoff: true,
+        weddingDayContent: true,
         promotional: "none",
         preDecisionOrPhotoShoot: false,
       }),
@@ -313,7 +313,7 @@ describe("SQL score (USEFULNESS_SCORE_SQL) matches computeUsefulnessScore()", ()
         firsthand: true,
         ceremonyDecision: true,
         specific: true,
-        tradeoff: true,
+        weddingDayContent: true,
         promotional: "none",
         preDecisionOrPhotoShoot: false,
       }),
@@ -322,7 +322,7 @@ describe("SQL score (USEFULNESS_SCORE_SQL) matches computeUsefulnessScore()", ()
         firsthand: false,
         ceremonyDecision: false,
         specific: false,
-        tradeoff: false,
+        weddingDayContent: false,
         promotional: "none",
         preDecisionOrPhotoShoot: false,
       }),
@@ -396,7 +396,7 @@ describe("SQL score (USEFULNESS_SCORE_SQL) matches computeUsefulnessScore()", ()
           firsthand: true,
           ceremonyDecision: true,
           specific: false,
-          tradeoff: false,
+          weddingDayContent: false,
           promotional: "none" as const,
           preDecisionOrPhotoShoot: false,
         },
@@ -416,7 +416,7 @@ describe("SQL score (USEFULNESS_SCORE_SQL) matches computeUsefulnessScore()", ()
           firsthand: true,
           ceremonyDecision: true,
           specific: false,
-          tradeoff: false,
+          weddingDayContent: false,
           promotional: true, // レガシー boolean のまま
           preDecisionOrPhotoShoot: false,
         }),
@@ -431,7 +431,7 @@ describe("SQL score (USEFULNESS_SCORE_SQL) matches computeUsefulnessScore()", ()
           firsthand: true,
           ceremonyDecision: true,
           specific: false,
-          tradeoff: false,
+          weddingDayContent: false,
           promotional: false, // レガシー boolean のまま
           preDecisionOrPhotoShoot: false,
         }),

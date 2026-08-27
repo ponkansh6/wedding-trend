@@ -10,7 +10,7 @@ export const LLM_MODEL = "gemini-3.1-flash-lite";
  * 生成温度。0（このSDKでの最小値）に固定している。
  *
  * すべてのキュレーション呼び出しは要約・タイトル生成と同時に有用度判定
- * （firsthand / ceremonyDecision / specific / tradeoff / promotional /
+ * （firsthand / ceremonyDecision / specific / weddingDayContent / promotional /
  * preDecisionOrPhotoShoot の6つのブール値。`src/lib/scoring/usefulness.ts`
  * 参照）を1コールで行う設計のため、
  * 温度を上げるとこのブール判定がブレて体験談レーンの掲載順が実行のたびに
@@ -41,7 +41,7 @@ export const LLM_SINGLE_MAX_TOKENS = 800;
 /**
  * プロンプト本文を変更したら bump する（curationSignature に反映）。
  *
- * v2: 有用度判定5項目（firsthand / ceremonyDecision / specific / tradeoff /
+ * v2: 有用度判定5項目（firsthand / ceremonyDecision / specific / weddingDayContent /
  * promotional）の判定指示を追加し、想定読者ペルソナをプロンプトに載せた
  * （openspec/specs/wedding-trend/spec.md §9 編集方針）。bump により全投稿の
  * curationSignature が不一致になり、次回以降の ingest で段階的に、または
@@ -57,7 +57,7 @@ export const LLM_SINGLE_MAX_TOKENS = 800;
  * `computeCurationSignature` の対象であるプロンプトそのものの変更であり、
  * bump により全投稿の curationSignature が不一致になり再キュレーションされる）。
  */
-export const CURATION_PROMPT_VERSION = 6;
+export const CURATION_PROMPT_VERSION = 7;
 export const RATIONALE_PROMPT_VERSION = "rationale-v1";
 /** フィード表示条件のフェーズ。phase1: 移行期（レガシー対 OR 根拠存在）/ phase2: 根拠のみ。 */
 export const RATIONALE_DISPLAY_PHASE = "phase1" as const;
@@ -352,13 +352,13 @@ export const INGEST_LEASE_TTL_MS = 2 * 60 * 1000;
  * `ceremonyDecision`（挙式・披露宴の中身に関する記事か）を満たした場合にのみ
  * 加算するゲート分。
  *
- * 単に他の加点項目の合計（firsthand + specific + tradeoff = 3+2+2=7）を
+ * 単に他の加点項目の合計（firsthand + specific + weddingDayContent = 3+2+2=7）を
  * 上回るだけでは不十分（オーナー判断で 10→12 に引き上げ）。ゲートを通過した
  * が `promotional` 判定を受けた記事（GATE - PROMOTIONAL_PENALTY）が、ゲート
  * 不通過だが他の加点項目を総取りした記事（7）に負けてはならない。つまり
  * `USEFULNESS_GATE_BONUS - USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY` が
  * `USEFULNESS_WEIGHT_FIRSTHAND + USEFULNESS_WEIGHT_SPECIFIC +
- * USEFULNESS_WEIGHT_TRADEOFF`（= 7）を上回っている必要がある。10 だと
+ * USEFULNESS_WEIGHT_WEDDING_DAY`（= 7）を上回っている必要がある。10 だと
  * 10-4=6 < 7 で逆転してしまうため、7 に 4 を足した 11 を超える 12 とした。
  * 「挙式・披露宴の中身の記事は、どれだけ質が高い的外れ記事にも常に勝つ」
  * という強支配（strong domination）を保証するための値。この不変条件は
@@ -372,8 +372,12 @@ export const USEFULNESS_WEIGHT_FIRSTHAND = 3;
 /** 具体（固有の選択・数字・実際の行動）を含むことの加点。本文中盤以降でないと判定しにくいため firsthand より軽め。 */
 export const USEFULNESS_WEIGHT_SPECIFIC = 2;
 
-/** 判断理由・後悔・評価が述べられていることの加点。specific と同様の理由で軽め。 */
-export const USEFULNESS_WEIGHT_TRADEOFF = 2;
+/** 結婚式当日の実施内容（進行・演出・料理・装花・BGM・ゲスト体験・当日のトラブル対応等）が具体的に描写されていることの加点。
+ * 旧 `tradeoff`（判断理由・後悔の評価）軸を置換。重みは 2 のまま据え置く。
+ * この重み 2 は「当日内容軸の重要度」ではなく、強支配不変条件
+ * `USEFULNESS_GATE_BONUS - USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY > USEFULNESS_WEIGHT_FIRSTHAND + USEFULNESS_WEIGHT_SPECIFIC + USEFULNESS_WEIGHT_WEDDING_DAY`（= 3+2+2=7）
+ * を維持するために必然的に 2 でなければならない。3 以上にすると `12-4=8 > 8` が偽となり強支配が崩れる。 */
+export const USEFULNESS_WEIGHT_WEDDING_DAY = 2;
 
 /** 事業者による集客が主目的の記事に対する減点。ゲート通過後でも上位に出さない編集方針の強さを反映し、他の加点より大きい。 */
 export const USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY = 4;

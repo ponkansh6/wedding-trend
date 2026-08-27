@@ -37,10 +37,11 @@ const READER_PERSONA = `# 想定読者
  */
 const USEFULNESS_CRITERIA_RULES = `# 有用度判定（5つのブール値 + promotional は3段階。点数は絶対に出力しないこと）
 上の想定読者にとって役に立つ投稿かどうかを、以下の項目それぞれについて判定すること。
+※ weddingDayContent は ceremonyDecision と別軸です：ceremonyDecision は「その話題が式の意思決定に役立つか（トピック適合）」、weddingDayContent は「当日の実施事実が具体的に描写されているか（実況の深度）」を判定します。
 - firsthand: 書き手自身または近しい当事者が実際に挙式・披露宴を経験した立場から書かれている。新婦本人に限らず、新郎・両家家族、およびプランナー・司会者・カメラマン・装花担当など式に立ち会う職能者が実務経験に基づいて書いたものを含む。
 - ceremonyDecision: 挙式・披露宴の中身の意思決定に効く（進行・タイムライン・演出・席次・席札・余興・スピーチ・BGM・装花・料理・引出物・ペーパーアイテム・挙式当日の写真・映像（スナップ・記録映像・エンドロール）・ゲストの過ごしやすさ・当日段取り）。
 - specific: 具体を含む（固有の選択・数字・実際にやったこと / やらなかった理由）。心構えのみは false。
-- tradeoff: 判断の理由・後悔・「やってよかった / 要らなかった」の評価が述べられている。
+- weddingDayContent: 記事が結婚式当日の**実施内容・実況・当日の展開**を具体的に記述しているか。進行タイムライン・演出の実際の様子・余興の実施内容・料理の提供状況・装花・衣装の着用感・BGMの選曲意図と当日の流れ・ゲストの反応・当日発生したトラブルとその対応など、**「当日に何が起きたか・どう進んだか・現場でどう感じたか」**が読み取れるかを問う。準備段階（業者選定・見積り・スケジュール調整・式場探し・規模や形式の合意形成）のみで、当日の実施描写に至らない記事は false。**「当日」「進行」等の単語の有無ではなく、当日の実施事実が描写されている実質で判定すること。**
 - promotional: 事業者による集客・自社サービスへの誘導の度合いを "none" / "light" / "heavy" の3段階で判定すること。判別基準は「読者が別の会場・別の業者で式を挙げる場合にも役立つか」。
   - "none": 事業者の集客要素が実質的にない。
   - "light": 自社サービスへの言及や導線はあるが、記事の主目的は情報提供であり、読者が別の会場・別の業者で式を挙げる場合にも役立つ。特定の式場・事業者の実例紹介であっても、過剰な誘導がなく他式場でも活用できる情報（予算感・演出のアイデア等）を含むなら "light" とし、"heavy" は安易に付けないこと。
@@ -69,7 +70,7 @@ const SHARED_RULES = `# 制約（必ず守ること）
 - 推測で事実（金額・会場名・日付など）を補完しない。原文に無い情報は書かない。
 - カテゴリは以下の列挙から必ず1つ選ぶ: ${CATEGORIES_LIST}
 - tag は、新しい/流行りの演出・アイテムなら "trend"、長年支持される王道・定番なら "classic"。
-- firsthand / ceremonyDecision / specific / tradeoff / preDecisionOrPhotoShoot は必ず true/false の boolean で出力すること（数値・文字列は不可）。
+- firsthand / ceremonyDecision / specific / weddingDayContent / preDecisionOrPhotoShoot は必ず true/false の boolean で出力すること（数値・文字列は不可）。
 - promotional は必ず "none" / "light" / "heavy" のいずれかの文字列で出力すること（boolean・数値は不可）。
 - 出力は JSON のみ。マークダウン・前置き・説明文は一切含めない。`;
 
@@ -93,7 +94,7 @@ ${USEFULNESS_CRITERIA_RULES}
 ${RATIONALE_RULES}
 
 出力形式:
-{"title":"...","summary":"...","category":"...","tag":"trend","firsthand":false,"ceremonyDecision":false,"specific":false,"tradeoff":false,"promotional":"none","preDecisionOrPhotoShoot":false,"topicAnchor":"..."}
+{"title":"...","summary":"...","category":"...","tag":"trend","firsthand":false,"ceremonyDecision":false,"specific":false,"weddingDayContent":false,"promotional":"none","preDecisionOrPhotoShoot":false,"topicAnchor":"..."}
 `;
 }
 
@@ -117,6 +118,6 @@ ${USEFULNESS_CRITERIA_RULES}
 ${RATIONALE_RULES}
 
 出力形式:
-{"items":[{"index":1,"title":"...","summary":"...","category":"...","tag":"trend","firsthand":false,"ceremonyDecision":false,"specific":false,"tradeoff":false,"promotional":"none","preDecisionOrPhotoShoot":false,"topicAnchor":"..."}, ...]}
+{"items":[{"index":1,"title":"...","summary":"...","category":"...","tag":"trend","firsthand":false,"ceremonyDecision":false,"specific":false,"weddingDayContent":false,"promotional":"none","preDecisionOrPhotoShoot":false,"topicAnchor":"..."}, ...]}
 `;
 }

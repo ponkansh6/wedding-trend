@@ -136,7 +136,7 @@ Next.js 16 (App Router), React 19, TypeScript strict, Tailwind CSS v4, Drizzle O
 - `post_id`: `posts.id` と同じ型（Integer）の主キー。採点対象の投稿。
 - `criteria_json`: 6つの判定項目（`UsefulnessCriteria` 型。5つはブール値、`promotional`
   のみ `"none" | "light" | "heavy"` の3段階 enum）のオブジェクトを
-  `JSON.stringify()` したテキスト（`firsthand`, `ceremonyDecision`, `specific`, `tradeoff`, `promotional`, `preDecisionOrPhotoShoot`）。
+  `JSON.stringify()` したテキスト（`firsthand`, `ceremonyDecision`, `specific`, `weddingDayContent`, `promotional`, `preDecisionOrPhotoShoot`）。
 - `signature`: 採点時点の `computeCurationSignature()`（`src/lib/llm/signature.ts`）
   の値。`posts.curation_signature` と比較し、プロンプト/モデルが変わった
   記事を再スコア対象として検出する。
@@ -506,7 +506,7 @@ LLM には次の 5 つのブール値と 1 つの 3 段階 enum（`promotional`�
 | `ceremonyDecision`        | 挙式・披露宴の**中身**の意思決定に効く（進行・タイムライン・演出・席次・席札・余興・スピーチ・BGM・装花・料理・引出物・ペーパーアイテム・挙式当日の写真・映像、ゲストの過ごしやすさ・当日段取り）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `preDecisionOrPhotoShoot` | 内容が次のいずれかに限られるか（true ならゲート不通過）。(a) フォトウェディング・前撮り・後撮りなどの別撮影、(b) 式場探し・見積もり比較・日取り決定までの段階、(c) 挙式するか否か・どのような規模や形式で行うかを決めるまでの段階（メタ判断に限る。挙式の中身の検討は含まない）。挙式当日の写真・映像は含めない。記事の中心的なテーマが挙式・披露宴の中身の判断材料に関する場合は false とする。**この属性は対象読者フェーズ外（out-of-scope phase）を意味する。キー名は歴史的経緯によるもの**。                                                                                                                                                                                                                                                                                                                                                     |
 | `specific`                | 具体を含む（固有の選択・数字・実際にやったこと / やらなかった理由）。心構えのみは false                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `tradeoff`                | 判断の理由・後悔・「やってよかった / 要らなかった」の評価が述べられている                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `weddingDayContent`       | 結婚式当日の実施内容（進行・演出・余興・料理・装花・衣装・BGM・ゲスト体験・当日のトラブルと対応など）が具体的に描写されているか。準備プロセス（業者選定・見積り・スケジュール調整）や式場探し・規模・形式の合意形成のみで当日の実施描写に至らない記事は false（`ceremonyDecision` は「意思決定に役立つか」というトピック適合を問う別軸）。語彙（「当日」「進行」等）の有無ではなく内容の実質で判定する                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `promotional`             | 事業者の集客・自社サービスへの誘導の度合いを表す 3 段階 enum（`"none" \| "light" \| "heavy"`。型定義は `src/lib/scoring/usefulness.ts` の `PromotionalLevel`）。`none`: 集客要素が実質的にない。`light`: 自社サービスへの言及や導線はあるが記事の主目的は情報提供であり、読者が別の会場・別の業者で式を挙げる場合にも役立つ——**減点なし**。`heavy`: 文章中で過剰に、かつ明確に自社サービス・特定の式場等への誘導を行っているもののみ——**減点対象**。単なる事例・実例の紹介や、自社への言及があっても誘導が過剰でなければ heavy にせず、主目的が情報提供であれば light とする。light と heavy の判別基準は旧仕様から維持している「読者が別の会場・別の業者で式を挙げる場合にも役立つか」であり、この判別はリンク密度等の機械的シグナルではなく LLM が行う。ただし heavy の付与は「過剰かつ明確な誘導」に限り、実例紹介等は安易に heavy としないこと。 |
 
 スコア計算式（`USEFULNESS_GATE_BONUS` 等の重み定数は `src/lib/constants.ts`
@@ -520,7 +520,7 @@ gate  = (ceremonyDecision && !preDecisionOrPhotoShoot) ? USEFULNESS_GATE_BONUS(1
 score = gate
       + USEFULNESS_WEIGHT_FIRSTHAND(3)   * firsthand
       + USEFULNESS_WEIGHT_SPECIFIC(2)    * specific
-      + USEFULNESS_WEIGHT_TRADEOFF(2)    * tradeoff
+      + USEFULNESS_WEIGHT_WEDDING_DAY(2)    * weddingDayContent
       - USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY(4) * (promotional === "heavy")
       - USEFULNESS_WEIGHT_PRE_DECISION_PENALTY(3) * preDecisionOrPhotoShoot
 ```
@@ -547,7 +547,7 @@ boolean から 3 段階 enum へ変更するにあたり、既存レコードの
 検出され直す。
 
 `ceremonyDecision` と `preDecisionOrPhotoShoot` によるゲート条件（`ceremonyDecision && !preDecisionOrPhotoShoot`）は加算項の一つではなく**ゲート**である。単純な加算項に
-すると、「衣装だけの記事だが実体験・具体的・トレードオフあり」（3+2+2=7）が
+すると、「衣装だけの記事だが実体験・具体的・weddingDayContent あり」（3+2+2=7）が
 「式の中身に触れているが浅い記事」（12）を上回ってしまい、「これから式の
 中身を決める読者に効く記事を優先する」という編集方針そのものが反転する。
 挙式・披露宴の中身に関する記事であり、かつフォトウェディング・前撮りや式場探し等の事前検討に偏っていないことを他の加点の前提条件にすることで、この逆転を構造的に防ぐ。
@@ -555,10 +555,10 @@ boolean から 3 段階 enum へ変更するにあたり、既存レコードの
 **強支配（strong domination）不変条件**: 「挙式・披露宴の中身の記事は、
 ゲート不通過の記事に常に優先する」——ゲートを通過した記事は、たとえ
 `promotional = "heavy"` の減点を受けていても、ゲート不通過帯の中でどれだけ質が高い
-記事（`firsthand`/`specific`/`tradeoff` を総取り）にも常に勝つ。式で書くと
+記事（`firsthand`/`specific`/`weddingDayContent` を総取り）にも常に勝つ。式で書くと
 `USEFULNESS_GATE_BONUS - USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY >
 USEFULNESS_WEIGHT_FIRSTHAND + USEFULNESS_WEIGHT_SPECIFIC +
-USEFULNESS_WEIGHT_TRADEOFF`（12-4=8 > 7）。`USEFULNESS_GATE_BONUS` を
+USEFULNESS_WEIGHT_WEDDING_DAY`（12-4=8 > 7）。`USEFULNESS_GATE_BONUS` を
 10→12 に引き上げたのは、10 だとこの不変条件が破れていた（10-4=6 < 7）ため。
 この不変条件は `tests/usefulness-score.test.ts` で定数から式を組み立てて
 固定している（数値をテストに直書きしない。定数を変更したときにテストが
@@ -584,9 +584,8 @@ USEFULNESS_WEIGHT_TRADEOFF`（12-4=8 > 7）。`USEFULNESS_GATE_BONUS` を
 
 重みは、抜粋（記事冒頭）から LLM が判定できる確信度に比例させている。話題
 （`ceremonyDecision` / `preDecisionOrPhotoShoot`）・書き手の立場（`firsthand`）・宣伝性（`promotional`）
-は記事冒頭からでも判定しやすい一方、具体性（`specific`）やトレードオフ
-（`tradeoff`）は本文中盤以降にしか現れないことが多く、抜粋だけからの判定は
-確信度が落ちる。そのため `firsthand`（3）を `specific`/`tradeoff`（各 2）
+は記事冒頭からでも判定しやすい一方、具体性（`specific`）や当日内容（weddingDayContent）は本文中盤以降にしか現れないことが多く、抜粋だけからの判定は
+確信度が落ちる。そのため `firsthand`（3）を `specific`/`weddingDayContent`（各 2）
 より重くしている。`promotional = "heavy"` の減点（4）を他の加点より大きく
 しているのは、ゲートを通過した記事であっても集客・誘導に支配された記事を
 上位に出さないという編集方針の強さを反映したものである。
@@ -736,7 +735,7 @@ THEN 1 ELSE 0 END` で判定している。`json_extract` は文字列値をク�
      - **改定の経緯（2026-08-25 当初）**: 当初の要件は 60〜90字だったが、コンテナ抽出導入後に初めて公開された5件（id 233〜237）はいずれも実測146字で、要件に違反していた。原因は `src/lib/publish/gate.ts` の `renderRationaleText()` が、`topicAnchor` と有用度6 boolean のうち true のラベルを `「{anchor}」に関する記事で、{ラベル1}、{ラベル2}…という特徴が自動判定されました。` の形で機械的に連結する**決定的テンプレート**であり、true になったフラグ数に比例して文字数が伸びる構造だったこと。今回の5件は5項目すべてが true だったため、構造的に90字を超過した。これは LLM の応答ブレではなく、テンプレート設計そのものが90字上限を満たせない構造的欠陥だった。公開が0件で続いていたため、この乖離は長期間露見しなかった。
      - **1回目の対応方針（150字。撤回済み・下記参照）**: `renderRationaleText()` の出力を短縮する実装変更ではなく、要件側の上限を150字に緩和する方針を採用した。しかしこの150字は**実測1点（id 233 の146字）のみを根拠に決めた値**であり、`topicAnchor` の長さが9〜29字とばらつくこと（true フラグ数が同じでも `topicAnchor` が長いほど出力全体も伸びる）を勘定に入れていなかった。結果として、150字への改定と同時に公開済み5件のうち3件（id 234=155字、id 235=166字、id 237=158字）が**改定直後の時点で既に上限超過**という状態になっていた（id 233=146字、id 236=146字の2件は非超過）。単一サンプルから閾値を決めると分布の裾で破綻するという教訓であり、同種の失敗は本 spec 内の他の閾値でも起きている——`boilerplateLineRatio`（閾値0.5、観測最小値0.501の直下という際どい校正）や `MAX_LINK_DENSITY`（閾値0.35、観測分布のほぼ中央に置かれた未校正の暫定値。§10-11 参照）も、実測分布の広がりを十分に見ずに数値を固定した点で同じ性質の問題を抱えている。
      - **2回目の対応方針（210字。今回・恒久対応）**: 150字も実測ベースの暫定値である以上、同じ失敗を繰り返しかねない。そこで**実測値からではなく、構造的最大値から上限を決め直した**。`renderRationaleText()` の出力を決める変数は `topicAnchor`（`CurationItemSchema` の zod 上限 40字）と、有用度ラベルのうち true になったものの列挙の2つのみであり、当時の6ラベル構成での理論上到達しうる最大値は206字だった。**210字はこの構造的最大値（206字）を上回るように決めた値であり、実測分布から帰納した値ではない。** テンプレートが変わらない限り出力は原理的に210字を超えることがなく、`RATIONALE_TEXT_MAX_CHARS` 超過時に発生する `renderRationaleText()` の例外（fail-loud）は「実際に起こりうる異常の検知」ではなく**「起こり得ないことのアサーション」**として機能する。**テンプレート文言や有用度ラベルの文言・個数を変更した場合は、構造的最大値を必ず測り直す必要がある。** この回帰は `tests/publish-gate.test.ts` にテンプレート変更時の構造的最大値検証として固定してあり、構造的最大値が210字を超えた場合はテストが失敗する。
-     - **ラベル 6→5 への削減（2026-08-26。`promotional` を根拠文の対象外化）**: 下記「既知の乖離の解消」で述べる経緯により、`src/lib/publish/gate.ts` の `USEFULNESS_LABELS` / `FLAG_ORDER` から `promotional` のラベルを削除した。これにより根拠文を構成しうるラベルは `firsthand` / `ceremonyDecision` / `specific` / `tradeoff` / `preDecisionOrPhotoShoot` の5つになった。構造的最大値（`topicAnchor` 40字・全ラベル true）を測り直すと182字であり、削減前の206字より縮む。**`RATIONALE_TEXT_MAX_CHARS = 210` は182字を依然として上回るため変更していない。** 構造的最小値（下限38字。`preDecisionOrPhotoShoot`）はラベル削減の影響を受けず変化しない。この構造的最大値の再計測もテンプレート変更（ラベル文言・個数の変更）に該当するため、`tests/publish-gate.test.ts` のリテラル固定値を追随させる必要がある。
+     - **ラベル 6→5 への削減（2026-08-26。`promotional` を根拠文の対象外化）**: 下記「既知の乖離の解消」で述べる経緯により、`src/lib/publish/gate.ts` の `USEFULNESS_LABELS` / `FLAG_ORDER` から `promotional` のラベルを削除した。これにより根拠文を構成しうるラベルは `firsthand` / `ceremonyDecision` / `specific` / `weddingDayContent` / `preDecisionOrPhotoShoot` の5つになった。構造的最大値（`topicAnchor` 40字・全ラベル true）を測り直すと182字であり、削減前の206字より縮む。**`RATIONALE_TEXT_MAX_CHARS = 210` は182字を依然として上回るため変更していない。** 構造的最小値（下限38字。`preDecisionOrPhotoShoot`）はラベル削減の影響を受けず変化しない。この構造的最大値の再計測もテンプレート変更（ラベル文言・個数の変更）に該当するため、`tests/publish-gate.test.ts` のリテラル固定値を追随させる必要がある。
      - **この緩和で維持される制約（上限の撤廃ではない）**:
        - 数字（半角・全角）の禁止は維持する。`CurationItemSchema` の zod `refine` による機械的拒否は変更しない。
        - 原文からの引用・原文固有の表現を含めないという性質は維持する。

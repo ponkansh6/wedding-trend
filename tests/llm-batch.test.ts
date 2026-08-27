@@ -25,7 +25,7 @@ const USEFULNESS_FIELDS = {
   firsthand: true,
   ceremonyDecision: true,
   specific: false,
-  tradeoff: false,
+  weddingDayContent: false,
   promotional: "none",
   preDecisionOrPhotoShoot: false,
 };

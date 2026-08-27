@@ -113,7 +113,7 @@ function Summary({ card, variant }: { card: FeedCardData; variant: FeedCardVaria
           (card.usefulness.firsthand ||
             card.usefulness.ceremonyDecision ||
             card.usefulness.specific ||
-            card.usefulness.tradeoff ||
+            card.usefulness.weddingDayContent ||
             card.usefulness.preDecisionOrPhotoShoot) && (
             <div className="flex flex-wrap gap-1.5">
               {card.usefulness.firsthand && (
@@ -131,9 +131,9 @@ function Summary({ card, variant }: { card: FeedCardData; variant: FeedCardVaria
                   具体的
                 </Badge>
               )}
-              {card.usefulness.tradeoff && (
+              {card.usefulness.weddingDayContent && (
                 <Badge variant="category" className="bg-[var(--color-background)]/50">
-                  トレードオフ
+                  結婚式当日の内容
                 </Badge>
               )}
               {card.usefulness.preDecisionOrPhotoShoot && (

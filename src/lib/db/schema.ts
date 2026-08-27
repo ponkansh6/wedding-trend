@@ -122,7 +122,7 @@ export const config = sqliteTable("config", {
  * `src/lib/scoring/usefulness.ts` の純関数 `computeUsefulnessScore()` が
  * コード側で行う（表示時に毎回計算）。`criteria_json` のキーは
  * `UsefulnessCriteria` のプロパティ名（`firsthand` / `ceremonyDecision` /
- * `specific` / `tradeoff` / `promotional` / `preDecisionOrPhotoShoot`）と一致する。
+ * `specific` / `weddingDayContent` / `promotional` / `preDecisionOrPhotoShoot`）と一致する。
  *
  * - `postId`: `posts.id`（採点対象の投稿）。
  * - `criteria_json`: 判定項目の JSON 文字列（SQLite に boolean 型が無いため

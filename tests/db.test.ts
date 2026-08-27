@@ -110,7 +110,7 @@ describe("Database Repository and Queries", () => {
             firsthand: true,
             ceremonyDecision: true,
             specific: true,
-            tradeoff: false,
+            weddingDayContent: false,
             promotional: "none",
             preDecisionOrPhotoShoot: false,
           },
@@ -129,7 +129,7 @@ describe("Database Repository and Queries", () => {
       firsthand: true,
       ceremonyDecision: true,
       specific: true,
-      tradeoff: false,
+      weddingDayContent: false,
       promotional: "none",
       preDecisionOrPhotoShoot: false,
     });
@@ -419,7 +419,7 @@ describe("Database Repository and Queries", () => {
           firsthand: boolean;
           ceremonyDecision: boolean;
           specific: boolean;
-          tradeoff: boolean;
+          weddingDayContent: boolean;
           promotional: "none" | "light" | "heavy";
           preDecisionOrPhotoShoot: boolean;
         } | null,
@@ -443,12 +443,12 @@ describe("Database Repository and Queries", () => {
       });
 
       await markCurated([
-        // score = 12(gate) + 3(firsthand) + 2(specific) + 2(tradeoff) = 19
+        // score = 12(gate) + 3(firsthand) + 2(specific) + 2(weddingDayContent) = 19
         buildUpdate("https://example.com/a", {
           firsthand: true,
           ceremonyDecision: true,
           specific: true,
-          tradeoff: true,
+          weddingDayContent: true,
           promotional: "none",
           preDecisionOrPhotoShoot: false,
         }),
@@ -457,7 +457,7 @@ describe("Database Repository and Queries", () => {
           firsthand: false,
           ceremonyDecision: true,
           specific: false,
-          tradeoff: false,
+          weddingDayContent: false,
           promotional: "none",
           preDecisionOrPhotoShoot: false,
         }),
@@ -466,7 +466,7 @@ describe("Database Repository and Queries", () => {
           firsthand: false,
           ceremonyDecision: true,
           specific: false,
-          tradeoff: false,
+          weddingDayContent: false,
           promotional: "none",
           preDecisionOrPhotoShoot: false,
         }),
@@ -476,7 +476,7 @@ describe("Database Repository and Queries", () => {
           firsthand: true,
           ceremonyDecision: false,
           specific: true,
-          tradeoff: true,
+          weddingDayContent: true,
           promotional: "none",
           preDecisionOrPhotoShoot: false,
         }),
@@ -487,7 +487,7 @@ describe("Database Repository and Queries", () => {
           firsthand: true,
           ceremonyDecision: true,
           specific: true,
-          tradeoff: true,
+          weddingDayContent: true,
           promotional: "none",
           preDecisionOrPhotoShoot: true,
         }),
@@ -702,7 +702,7 @@ describe("Database Repository and Queries", () => {
               firsthand: true,
               ceremonyDecision: true,
               specific: false,
-              tradeoff: true,
+              weddingDayContent: true,
               promotional: "none",
               preDecisionOrPhotoShoot: false,
             },
@@ -740,7 +740,7 @@ describe("Database Repository and Queries", () => {
         firsthand: true,
         ceremonyDecision: true,
         specific: false,
-        tradeoff: true,
+        weddingDayContent: true,
         promotional: "none",
         preDecisionOrPhotoShoot: false,
       });

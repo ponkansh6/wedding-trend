@@ -239,7 +239,7 @@ export interface RationaleUsefulnessFlags {
   firsthand: boolean;
   ceremonyDecision: boolean;
   specific: boolean;
-  tradeoff: boolean;
+  weddingDayContent: boolean;
   promotional: PromotionalLevel;
   preDecisionOrPhotoShoot: boolean;
 }
@@ -257,7 +257,7 @@ const USEFULNESS_LABELS = {
   firsthand: "実際に挙式・披露宴を経験した立場からの記述である",
   ceremonyDecision: "挙式・披露宴の中身の意思決定に役立つ内容を含む",
   specific: "具体的な選択や工夫についての記述がある",
-  tradeoff: "判断の理由や振り返りが述べられている",
+  weddingDayContent: "結婚式当日の内容（進行・演出など）に具体的に触れている",
   preDecisionOrPhotoShoot: "式場決定前の段階や前撮り・後撮りに関する話題が中心である",
 } satisfies Partial<Record<keyof RationaleUsefulnessFlags, string>>;
 
@@ -269,7 +269,7 @@ const FLAG_ORDER: (keyof typeof USEFULNESS_LABELS)[] = [
   "firsthand",
   "ceremonyDecision",
   "specific",
-  "tradeoff",
+  "weddingDayContent",
   "preDecisionOrPhotoShoot",
 ];
 

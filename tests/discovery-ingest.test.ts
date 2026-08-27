@@ -68,7 +68,7 @@ function sufficientCuration(overrides: Partial<CurationResult> = {}): CurationRe
     firsthand: true,
     ceremonyDecision: true,
     specific: true,
-    tradeoff: true,
+    weddingDayContent: true,
     promotional: "none",
     preDecisionOrPhotoShoot: false,
     topicAnchor: "演出の予算配分",

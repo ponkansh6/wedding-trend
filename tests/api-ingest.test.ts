@@ -48,7 +48,7 @@ vi.mock("@/lib/llm/batch", () => ({
         firsthand: true,
         ceremonyDecision: true,
         specific: true,
-        tradeoff: true,
+        weddingDayContent: true,
         promotional: "none",
         preDecisionOrPhotoShoot: false,
         // M1-2 の語彙的接地（plan 07 D4）を通すため、LLM への実入力

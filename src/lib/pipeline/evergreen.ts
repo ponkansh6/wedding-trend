@@ -275,7 +275,7 @@ async function publishEvergreen(
           firsthand: curation.firsthand,
           ceremonyDecision: curation.ceremonyDecision,
           specific: curation.specific,
-          tradeoff: curation.tradeoff,
+          weddingDayContent: curation.weddingDayContent,
           promotional: curation.promotional,
           preDecisionOrPhotoShoot: curation.preDecisionOrPhotoShoot,
         },

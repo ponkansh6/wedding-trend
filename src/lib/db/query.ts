@@ -8,7 +8,7 @@ import {
   USEFULNESS_WEIGHT_PRE_DECISION_PENALTY,
   USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY,
   USEFULNESS_WEIGHT_SPECIFIC,
-  USEFULNESS_WEIGHT_TRADEOFF,
+  USEFULNESS_WEIGHT_WEDDING_DAY,
   type RationaleDisplayPhase,
 } from "@/lib/constants";
 import { UNSCORED_USEFULNESS_SCORE, normalizePromotional } from "@/lib/scoring/usefulness";
@@ -95,7 +95,7 @@ const USEFULNESS_SCORE_SQL = sql<number>`CASE
   (CASE WHEN COALESCE(json_extract(${postUsefulnessCriteria.criteriaJson}, '$.ceremonyDecision'), 0) = 1 AND COALESCE(json_extract(${postUsefulnessCriteria.criteriaJson}, '$.preDecisionOrPhotoShoot'), 0) = 0 THEN ${USEFULNESS_GATE_BONUS} ELSE 0 END)
   + ${USEFULNESS_WEIGHT_FIRSTHAND} * COALESCE(json_extract(${postUsefulnessCriteria.criteriaJson}, '$.firsthand'), 0)
   + ${USEFULNESS_WEIGHT_SPECIFIC} * COALESCE(json_extract(${postUsefulnessCriteria.criteriaJson}, '$.specific'), 0)
-  + ${USEFULNESS_WEIGHT_TRADEOFF} * COALESCE(json_extract(${postUsefulnessCriteria.criteriaJson}, '$.tradeoff'), 0)
+  + ${USEFULNESS_WEIGHT_WEDDING_DAY} * COALESCE(json_extract(${postUsefulnessCriteria.criteriaJson}, '$.weddingDayContent'), 0)
   - ${USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY} * (CASE WHEN json_extract(${postUsefulnessCriteria.criteriaJson}, '$.promotional') = 'heavy' THEN 1 ELSE 0 END)
   - ${USEFULNESS_WEIGHT_PRE_DECISION_PENALTY} * COALESCE(json_extract(${postUsefulnessCriteria.criteriaJson}, '$.preDecisionOrPhotoShoot'), 0)
 END`;
@@ -189,7 +189,7 @@ export async function getFeedCards(params: {
             typeof parsed.firsthand === "boolean" &&
             typeof parsed.ceremonyDecision === "boolean" &&
             typeof parsed.specific === "boolean" &&
-            typeof parsed.tradeoff === "boolean" &&
+            typeof parsed.weddingDayContent === "boolean" &&
             (typeof parsed.promotional === "boolean" || typeof parsed.promotional === "string") &&
             typeof parsed.preDecisionOrPhotoShoot === "boolean"
           ) {

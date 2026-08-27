@@ -1,7 +1,7 @@
 import {
   USEFULNESS_WEIGHT_FIRSTHAND,
   USEFULNESS_WEIGHT_SPECIFIC,
-  USEFULNESS_WEIGHT_TRADEOFF,
+  USEFULNESS_WEIGHT_WEDDING_DAY,
   USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY,
   USEFULNESS_WEIGHT_PRE_DECISION_PENALTY,
   USEFULNESS_GATE_BONUS,
@@ -38,8 +38,8 @@ export interface UsefulnessCriteria {
   ceremonyDecision: boolean;
   /** 具体（固有の選択・数字・実際にやったこと/やらなかった理由）を含むか。 */
   specific: boolean;
-  /** 判断の理由・後悔・「やってよかった/要らなかった」の評価が述べられているか。 */
-  tradeoff: boolean;
+  /** 結婚式当日の実施内容（進行・演出・料理・装花・BGM・ゲスト体験・当日のトラブル対応等）が具体的に描写されているか。 */
+  weddingDayContent: boolean;
   /** 事業者による集客・自社サービスへの誘導の度合い（heavy のときのみ減点）。 */
   promotional: PromotionalLevel;
   /** 内容がフォトウェディング・前撮り・式場探し等、式決定前/別撮影の話題に限られるか（true ならゲート不通過）。 */
@@ -67,20 +67,20 @@ export const UNSCORED_USEFULNESS_SCORE = 3;
  * score = (ceremonyDecision && !preDecisionOrPhotoShoot ? USEFULNESS_GATE_BONUS : 0)
  *       + USEFULNESS_WEIGHT_FIRSTHAND   * firsthand
  *       + USEFULNESS_WEIGHT_SPECIFIC    * specific
- *       + USEFULNESS_WEIGHT_TRADEOFF    * tradeoff
+ *       + USEFULNESS_WEIGHT_WEDDING_DAY    * weddingDayContent
  *       - USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY * promotional
  *       - USEFULNESS_WEIGHT_PRE_DECISION_PENALTY * preDecisionOrPhotoShoot
  * ```
  *
  * `ceremonyDecision` と `preDecisionOrPhotoShoot` は加点項の一つではなく**ゲート**として働く。もし単純な
- * 加点項にすると、「衣装だけの記事だが実体験・具体的・トレードオフあり」
+ * 加点項にすると、「衣装だけの記事だが実体験・具体的・weddingDayContent あり」
  * （3+2+2=7）が「式の中身に触れているが浅い記事」（12）を上回ってしまい、
  * 「これから式の中身を決める読者に効く記事を優先する」というオーナーの
  * 意図が反転する。挙式・披露宴の中身に関する記事であることを他の加点の
  * 前提条件にしつつ、フォト婚・前撮り・式場探し等の話題（`preDecisionOrPhotoShoot === true`）はゲート不通過（0点）とすることで、この逆転を構造的に防ぐ。
  * この強支配（「ゲート通過帯は常にゲート不通過帯に優先する」）が
  * `promotional` 減点を足しても崩れないことは
- * `USEFULNESS_GATE_BONUS - USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY > firsthand+specific+tradeoff の合計`
+ * `USEFULNESS_GATE_BONUS - USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY > firsthand+specific+weddingDayContent の合計`
  * という不変条件として `src/lib/constants.ts` の `USEFULNESS_GATE_BONUS` の
  * JSDoc に明記し、`tests/usefulness-score.test.ts` で定数から式を組み立てて
  * 固定している。
@@ -101,9 +101,9 @@ export const UNSCORED_USEFULNESS_SCORE = 3;
  * 各項目の重みは、抜粋（記事冒頭）から LLM が判定できる確信度に比例させて
  * いる。話題（ceremonyDecision）・書き手の立場（firsthand）・宣伝性
  * （promotional）は記事冒頭からでも判定しやすい一方、具体性（specific）や
- * トレードオフ（tradeoff）は本文中盤以降にしか現れないことが多く、抜粋だけ
+ * 当日内容（weddingDayContent）は本文中盤以降にしか現れないことが多く、抜粋だけ
  * からの判定は firsthand/promotional より確信度が落ちる。そのため
- * firsthand（3）> specific/tradeoff（各 2）という重みにしている。
+ * firsthand（3）> specific/weddingDayContent（各 2）という重みにしている。
  * promotional の減点（4）を他の加点より大きくしているのは、ゲートを通過した
  * 記事であっても宣伝目的の記事を上位に出さないという編集方針の強さを反映
  * したもの（詳細は spec.md の編集方針セクションを参照）。
@@ -113,12 +113,12 @@ export function computeUsefulnessScore(criteria: UsefulnessCriteria): number {
     criteria.ceremonyDecision && !criteria.preDecisionOrPhotoShoot ? USEFULNESS_GATE_BONUS : 0;
   const firsthand = criteria.firsthand ? USEFULNESS_WEIGHT_FIRSTHAND : 0;
   const specific = criteria.specific ? USEFULNESS_WEIGHT_SPECIFIC : 0;
-  const tradeoff = criteria.tradeoff ? USEFULNESS_WEIGHT_TRADEOFF : 0;
+  const weddingDayContent = criteria.weddingDayContent ? USEFULNESS_WEIGHT_WEDDING_DAY : 0;
   const promotionalPenalty =
     criteria.promotional === "heavy" ? USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY : 0;
   const preDecisionPenalty = criteria.preDecisionOrPhotoShoot
     ? USEFULNESS_WEIGHT_PRE_DECISION_PENALTY
     : 0;
 
-  return gate + firsthand + specific + tradeoff - promotionalPenalty - preDecisionPenalty;
+  return gate + firsthand + specific + weddingDayContent - promotionalPenalty - preDecisionPenalty;
 }

@@ -11,7 +11,7 @@ const validUsefulness = {
   firsthand: true,
   ceremonyDecision: true,
   specific: true,
-  tradeoff: false,
+  weddingDayContent: false,
   promotional: "none",
   preDecisionOrPhotoShoot: false,
 };
@@ -92,7 +92,7 @@ describe("CurationItemSchema", () => {
   });
 
   it("rejects an item missing one of the usefulness boolean fields", () => {
-    const { tradeoff: _tradeoff, ...rest } = validUsefulness;
+    const { weddingDayContent: _weddingDayContent, ...rest } = validUsefulness;
     const result = CurationItemSchema.safeParse({
       index: 1,
       title: "テスト",
@@ -114,7 +114,7 @@ describe("CurationItemSchema", () => {
       tag: "trend",
       ...validUsefulness,
       ...validRationaleFields,
-      tradeoff: "false",
+      weddingDayContent: "false",
     });
     expect(result.success).toBe(false);
   });

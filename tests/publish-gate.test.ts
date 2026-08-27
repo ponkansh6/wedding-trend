@@ -197,7 +197,7 @@ describe("renderRationaleText (plan 07 §6-Q5: rationaleText のテンプレー�
       firsthand: true,
       ceremonyDecision: true,
       specific: false,
-      tradeoff: false,
+      weddingDayContent: false,
       promotional: "none",
       preDecisionOrPhotoShoot: false,
     },
@@ -245,12 +245,12 @@ describe("renderRationaleText (plan 07 §6-Q5: rationaleText のテンプレー�
   });
 
   it("changes output when a usefulness flag changes (not a constant string)", () => {
-    const withTradeoff = renderRationaleText({
+    const withWeddingDayContent = renderRationaleText({
       ...baseInput,
-      usefulness: { ...baseInput.usefulness, tradeoff: true },
+      usefulness: { ...baseInput.usefulness, weddingDayContent: true },
     });
     const without = renderRationaleText(baseInput);
-    expect(withTradeoff).not.toBe(without);
+    expect(withWeddingDayContent).not.toBe(without);
   });
 
   it("produces a fixed fallback sentence when all usefulness flags are false", () => {
@@ -260,7 +260,7 @@ describe("renderRationaleText (plan 07 §6-Q5: rationaleText のテンプレー�
         firsthand: false,
         ceremonyDecision: false,
         specific: false,
-        tradeoff: false,
+        weddingDayContent: false,
         promotional: "none",
         preDecisionOrPhotoShoot: false,
       },
@@ -292,7 +292,7 @@ describe("renderRationaleText (plan 07 §6-Q5: rationaleText のテンプレー�
         firsthand: true,
         ceremonyDecision: true,
         specific: true,
-        tradeoff: true,
+        weddingDayContent: true,
         promotional: "heavy",
         preDecisionOrPhotoShoot: true,
       },
@@ -312,7 +312,7 @@ describe("renderRationaleText (plan 07 §6-Q5: rationaleText のテンプレー�
         firsthand: true,
         ceremonyDecision: true,
         specific: true,
-        tradeoff: true,
+        weddingDayContent: true,
         promotional: "heavy",
         preDecisionOrPhotoShoot: true,
       },
@@ -336,13 +336,13 @@ describe("renderRationaleText (plan 07 §6-Q5: rationaleText のテンプレー�
         firsthand: true,
         ceremonyDecision: true,
         specific: true,
-        tradeoff: true,
+        weddingDayContent: true,
         promotional: "heavy",
         preDecisionOrPhotoShoot: true,
       },
     };
     const text = renderRationaleText(structuralMaxInput);
-    expect(text.length).toBe(182);
+    expect(text.length).toBe(191);
   });
 
   it("fixes the actual output length for a 5-true-flag combination as a literal (regression guard against silent template growth)", () => {
@@ -357,16 +357,16 @@ describe("renderRationaleText (plan 07 §6-Q5: rationaleText のテンプレー�
         firsthand: true,
         ceremonyDecision: true,
         specific: true,
-        tradeoff: true,
+        weddingDayContent: true,
         promotional: "none",
         preDecisionOrPhotoShoot: true,
       },
     };
     const text = renderRationaleText(fiveTrueInput);
     expect(text).toBe(
-      "「会場選びのコツ」に関する記事で、実際に挙式・披露宴を経験した立場からの記述である、挙式・披露宴の中身の意思決定に役立つ内容を含む、具体的な選択や工夫についての記述がある、判断の理由や振り返りが述べられている、式場決定前の段階や前撮り・後撮りに関する話題が中心であるという特徴が自動判定されました。",
+      "「会場選びのコツ」に関する記事で、実際に挙式・披露宴を経験した立場からの記述である、挙式・披露宴の中身の意思決定に役立つ内容を含む、具体的な選択や工夫についての記述がある、結婚式当日の内容（進行・演出など）に具体的に触れている、式場決定前の段階や前撮り・後撮りに関する話題が中心であるという特徴が自動判定されました。",
     );
-    expect(text.length).toBe(149);
+    expect(text.length).toBe(158);
     expect(text.length).toBeLessThanOrEqual(RATIONALE_TEXT_MAX_CHARS);
   });
 
@@ -380,7 +380,7 @@ describe("renderRationaleText (plan 07 §6-Q5: rationaleText のテンプレー�
         firsthand: true,
         ceremonyDecision: true,
         specific: true,
-        tradeoff: true,
+        weddingDayContent: true,
         promotional: "heavy",
         preDecisionOrPhotoShoot: false,
       },
@@ -389,7 +389,7 @@ describe("renderRationaleText (plan 07 §6-Q5: rationaleText のテンプレー�
     expect(() => {
       text = renderRationaleText(realDataScaleInput);
     }).not.toThrow();
-    expect(text.length).toBe(142);
+    expect(text.length).toBe(151);
   });
 
   it("fixes the publish-reachable structural minimum output length (2-char topicAnchor — the shortest that survives checkAnchorGrounding — all usefulness flags false) as a literal (regression guard against silent template shrinkage)", () => {
@@ -408,7 +408,7 @@ describe("renderRationaleText (plan 07 §6-Q5: rationaleText のテンプレー�
         firsthand: false,
         ceremonyDecision: false,
         specific: false,
-        tradeoff: false,
+        weddingDayContent: false,
         promotional: "none",
         preDecisionOrPhotoShoot: false,
       },
@@ -434,7 +434,7 @@ describe("renderRationaleText (plan 07 §6-Q5: rationaleText のテンプレー�
         firsthand: false,
         ceremonyDecision: false,
         specific: false,
-        tradeoff: false,
+        weddingDayContent: false,
         promotional: "none",
         preDecisionOrPhotoShoot: false,
       },

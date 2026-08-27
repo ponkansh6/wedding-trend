@@ -39,7 +39,7 @@ function usefulnessFlagsOf(item: Omit<CurationItem, "index" | "topicAnchor">) {
     firsthand: item.firsthand,
     ceremonyDecision: item.ceremonyDecision,
     specific: item.specific,
-    tradeoff: item.tradeoff,
+    weddingDayContent: item.weddingDayContent,
     promotional: item.promotional,
     preDecisionOrPhotoShoot: item.preDecisionOrPhotoShoot,
   };
@@ -202,7 +202,7 @@ export async function curateBatch(
       firsthand: item.firsthand,
       ceremonyDecision: item.ceremonyDecision,
       specific: item.specific,
-      tradeoff: item.tradeoff,
+      weddingDayContent: item.weddingDayContent,
       promotional: item.promotional,
       preDecisionOrPhotoShoot: item.preDecisionOrPhotoShoot,
     });

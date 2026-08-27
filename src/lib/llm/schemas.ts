@@ -44,7 +44,7 @@ export const CurationItemSchema = z.object({
   firsthand: z.boolean(),
   ceremonyDecision: z.boolean(),
   specific: z.boolean(),
-  tradeoff: z.boolean(),
+  weddingDayContent: z.boolean(),
   promotional: z.enum(["none", "light", "heavy"]),
   preDecisionOrPhotoShoot: z.boolean(),
   /**

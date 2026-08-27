@@ -91,7 +91,7 @@ describe("curateEvergreenUrl (src/lib/pipeline/evergreen.ts)", () => {
         firsthand: true,
         ceremonyDecision: false,
         specific: true,
-        tradeoff: true,
+        weddingDayContent: true,
         promotional: "none",
         preDecisionOrPhotoShoot: false,
         topicAnchor: input.title,
@@ -173,7 +173,7 @@ describe("curateEvergreenUrl (src/lib/pipeline/evergreen.ts)", () => {
           modelId: LLM_MODEL,
           criteria: expect.objectContaining({
             firsthand: true,
-            tradeoff: true,
+            weddingDayContent: true,
           }),
         }),
         rationale: expect.objectContaining({
@@ -203,7 +203,7 @@ describe("curateEvergreenUrl (src/lib/pipeline/evergreen.ts)", () => {
       firsthand: true,
       ceremonyDecision: false,
       specific: true,
-      tradeoff: true,
+      weddingDayContent: true,
       promotional: "none",
       preDecisionOrPhotoShoot: false,
       // BASE_META の title/description には一切現れない語（プロンプト
