@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-08-26T12:13:52.170Z",
+  "timestamp": "2026-08-27T08:26:30.265Z",
   "corpusSize": 38,
   "cramersV": 0.42,
   "patternEntropy": 1.85,
@@ -13,7 +13,7 @@
         "firsthand": true,
         "ceremonyDecision": true,
         "specific": true,
-        "tradeoff": true,
+        "weddingDayContent": true,
         "promotional": "none",
         "preDecisionOrPhotoShoot": false
       },
@@ -21,7 +21,7 @@
         "firsthand": true,
         "ceremonyDecision": true,
         "specific": true,
-        "tradeoff": true,
+        "weddingDayContent": true,
         "promotional": "none",
         "preDecisionOrPhotoShoot": false
       },
@@ -35,7 +35,7 @@
         "firsthand": true,
         "ceremonyDecision": true,
         "specific": true,
-        "tradeoff": true,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": true
       },
@@ -43,7 +43,7 @@
         "firsthand": true,
         "ceremonyDecision": true,
         "specific": true,
-        "tradeoff": true,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": true
       },
@@ -57,7 +57,7 @@
         "firsthand": true,
         "ceremonyDecision": true,
         "specific": true,
-        "tradeoff": true,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": true
       },
@@ -65,7 +65,7 @@
         "firsthand": true,
         "ceremonyDecision": true,
         "specific": true,
-        "tradeoff": true,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": true
       },
@@ -79,7 +79,7 @@
         "firsthand": true,
         "ceremonyDecision": true,
         "specific": true,
-        "tradeoff": true,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": false
       },
@@ -87,7 +87,7 @@
         "firsthand": true,
         "ceremonyDecision": true,
         "specific": true,
-        "tradeoff": true,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": false
       },
@@ -101,7 +101,7 @@
         "firsthand": true,
         "ceremonyDecision": true,
         "specific": true,
-        "tradeoff": true,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": true
       },
@@ -109,7 +109,7 @@
         "firsthand": true,
         "ceremonyDecision": true,
         "specific": true,
-        "tradeoff": true,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": true
       },
@@ -123,7 +123,7 @@
         "firsthand": false,
         "ceremonyDecision": false,
         "specific": false,
-        "tradeoff": false,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": true
       },
@@ -131,7 +131,7 @@
         "firsthand": false,
         "ceremonyDecision": false,
         "specific": false,
-        "tradeoff": false,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": true
       },
@@ -145,7 +145,7 @@
         "firsthand": false,
         "ceremonyDecision": false,
         "specific": false,
-        "tradeoff": false,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": true
       },
@@ -153,7 +153,7 @@
         "firsthand": false,
         "ceremonyDecision": false,
         "specific": false,
-        "tradeoff": false,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": true
       },
@@ -167,7 +167,7 @@
         "firsthand": true,
         "ceremonyDecision": false,
         "specific": true,
-        "tradeoff": true,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": true
       },
@@ -175,7 +175,7 @@
         "firsthand": true,
         "ceremonyDecision": false,
         "specific": true,
-        "tradeoff": true,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": true
       },
@@ -189,7 +189,7 @@
         "firsthand": false,
         "ceremonyDecision": false,
         "specific": false,
-        "tradeoff": false,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": true
       },
@@ -197,7 +197,7 @@
         "firsthand": false,
         "ceremonyDecision": false,
         "specific": false,
-        "tradeoff": false,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": true
       },
@@ -211,7 +211,7 @@
         "firsthand": true,
         "ceremonyDecision": false,
         "specific": true,
-        "tradeoff": false,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": true
       },
@@ -219,7 +219,7 @@
         "firsthand": true,
         "ceremonyDecision": false,
         "specific": true,
-        "tradeoff": false,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": true
       },
@@ -233,7 +233,7 @@
         "firsthand": true,
         "ceremonyDecision": false,
         "specific": false,
-        "tradeoff": true,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": true
       },
@@ -241,7 +241,7 @@
         "firsthand": true,
         "ceremonyDecision": false,
         "specific": false,
-        "tradeoff": true,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": true
       },
@@ -255,7 +255,7 @@
         "firsthand": true,
         "ceremonyDecision": false,
         "specific": true,
-        "tradeoff": true,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": true
       },
@@ -263,7 +263,7 @@
         "firsthand": true,
         "ceremonyDecision": false,
         "specific": true,
-        "tradeoff": true,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": true
       },
@@ -277,7 +277,7 @@
         "firsthand": false,
         "ceremonyDecision": false,
         "specific": false,
-        "tradeoff": false,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": false
       },
@@ -285,7 +285,7 @@
         "firsthand": false,
         "ceremonyDecision": false,
         "specific": false,
-        "tradeoff": false,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": false
       },
@@ -299,7 +299,7 @@
         "firsthand": false,
         "ceremonyDecision": false,
         "specific": false,
-        "tradeoff": false,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": false
       },
@@ -307,7 +307,7 @@
         "firsthand": false,
         "ceremonyDecision": false,
         "specific": false,
-        "tradeoff": false,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": false
       },
@@ -321,7 +321,7 @@
         "firsthand": false,
         "ceremonyDecision": false,
         "specific": false,
-        "tradeoff": false,
+        "weddingDayContent": false,
         "promotional": "true",
         "preDecisionOrPhotoShoot": false
       },
@@ -329,7 +329,7 @@
         "firsthand": false,
         "ceremonyDecision": false,
         "specific": false,
-        "tradeoff": false,
+        "weddingDayContent": false,
         "promotional": "true",
         "preDecisionOrPhotoShoot": false
       },
@@ -343,7 +343,7 @@
         "firsthand": false,
         "ceremonyDecision": false,
         "specific": false,
-        "tradeoff": false,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": false
       },
@@ -351,7 +351,7 @@
         "firsthand": false,
         "ceremonyDecision": false,
         "specific": false,
-        "tradeoff": false,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": false
       },
@@ -365,7 +365,7 @@
         "firsthand": false,
         "ceremonyDecision": false,
         "specific": false,
-        "tradeoff": false,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": false
       },
@@ -373,7 +373,7 @@
         "firsthand": false,
         "ceremonyDecision": false,
         "specific": false,
-        "tradeoff": false,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": false
       },
@@ -387,7 +387,7 @@
         "firsthand": false,
         "ceremonyDecision": false,
         "specific": false,
-        "tradeoff": false,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": false
       },
@@ -395,7 +395,7 @@
         "firsthand": false,
         "ceremonyDecision": false,
         "specific": false,
-        "tradeoff": false,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": false
       },
@@ -409,7 +409,7 @@
         "firsthand": false,
         "ceremonyDecision": false,
         "specific": false,
-        "tradeoff": false,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": false
       },
@@ -417,7 +417,7 @@
         "firsthand": false,
         "ceremonyDecision": false,
         "specific": false,
-        "tradeoff": false,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": false
       },
@@ -431,7 +431,7 @@
         "firsthand": false,
         "ceremonyDecision": false,
         "specific": false,
-        "tradeoff": false,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": false
       },
@@ -439,7 +439,7 @@
         "firsthand": false,
         "ceremonyDecision": false,
         "specific": false,
-        "tradeoff": false,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": false
       },
@@ -453,7 +453,7 @@
         "firsthand": false,
         "ceremonyDecision": false,
         "specific": false,
-        "tradeoff": false,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": false
       },
@@ -461,7 +461,7 @@
         "firsthand": false,
         "ceremonyDecision": false,
         "specific": false,
-        "tradeoff": false,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": false
       },
@@ -475,7 +475,7 @@
         "firsthand": false,
         "ceremonyDecision": false,
         "specific": false,
-        "tradeoff": false,
+        "weddingDayContent": false,
         "promotional": "true",
         "preDecisionOrPhotoShoot": false
       },
@@ -483,7 +483,7 @@
         "firsthand": false,
         "ceremonyDecision": false,
         "specific": false,
-        "tradeoff": false,
+        "weddingDayContent": false,
         "promotional": "true",
         "preDecisionOrPhotoShoot": false
       },
@@ -497,7 +497,7 @@
         "firsthand": false,
         "ceremonyDecision": false,
         "specific": false,
-        "tradeoff": false,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": false
       },
@@ -505,7 +505,7 @@
         "firsthand": false,
         "ceremonyDecision": false,
         "specific": false,
-        "tradeoff": false,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": false
       },
@@ -519,7 +519,7 @@
         "firsthand": false,
         "ceremonyDecision": false,
         "specific": false,
-        "tradeoff": false,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": false
       },
@@ -527,7 +527,7 @@
         "firsthand": false,
         "ceremonyDecision": false,
         "specific": false,
-        "tradeoff": false,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": false
       },
@@ -541,7 +541,7 @@
         "firsthand": false,
         "ceremonyDecision": false,
         "specific": false,
-        "tradeoff": false,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": false
       },
@@ -549,7 +549,7 @@
         "firsthand": false,
         "ceremonyDecision": false,
         "specific": false,
-        "tradeoff": false,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": false
       },
@@ -563,7 +563,7 @@
         "firsthand": false,
         "ceremonyDecision": false,
         "specific": false,
-        "tradeoff": false,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": false
       },
@@ -571,7 +571,7 @@
         "firsthand": false,
         "ceremonyDecision": false,
         "specific": false,
-        "tradeoff": false,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": false
       },
@@ -585,7 +585,7 @@
         "firsthand": false,
         "ceremonyDecision": false,
         "specific": false,
-        "tradeoff": false,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": false
       },
@@ -593,7 +593,7 @@
         "firsthand": false,
         "ceremonyDecision": false,
         "specific": false,
-        "tradeoff": false,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": false
       },
@@ -607,7 +607,7 @@
         "firsthand": false,
         "ceremonyDecision": false,
         "specific": false,
-        "tradeoff": false,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": false
       },
@@ -615,7 +615,7 @@
         "firsthand": false,
         "ceremonyDecision": false,
         "specific": false,
-        "tradeoff": false,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": false
       },
@@ -629,7 +629,7 @@
         "firsthand": false,
         "ceremonyDecision": false,
         "specific": false,
-        "tradeoff": false,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": false
       },
@@ -637,7 +637,7 @@
         "firsthand": false,
         "ceremonyDecision": false,
         "specific": false,
-        "tradeoff": false,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": false
       },
@@ -651,7 +651,7 @@
         "firsthand": false,
         "ceremonyDecision": false,
         "specific": false,
-        "tradeoff": false,
+        "weddingDayContent": false,
         "promotional": "true",
         "preDecisionOrPhotoShoot": true
       },
@@ -659,7 +659,7 @@
         "firsthand": false,
         "ceremonyDecision": false,
         "specific": false,
-        "tradeoff": false,
+        "weddingDayContent": false,
         "promotional": "true",
         "preDecisionOrPhotoShoot": true
       },
@@ -673,7 +673,7 @@
         "firsthand": false,
         "ceremonyDecision": false,
         "specific": false,
-        "tradeoff": false,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": true
       },
@@ -681,7 +681,7 @@
         "firsthand": false,
         "ceremonyDecision": false,
         "specific": false,
-        "tradeoff": false,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": true
       },
@@ -695,7 +695,7 @@
         "firsthand": false,
         "ceremonyDecision": false,
         "specific": false,
-        "tradeoff": false,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": true
       },
@@ -703,7 +703,7 @@
         "firsthand": false,
         "ceremonyDecision": false,
         "specific": false,
-        "tradeoff": false,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": true
       },
@@ -717,7 +717,7 @@
         "firsthand": true,
         "ceremonyDecision": true,
         "specific": true,
-        "tradeoff": true,
+        "weddingDayContent": true,
         "promotional": "heavy",
         "preDecisionOrPhotoShoot": false
       },
@@ -725,7 +725,7 @@
         "firsthand": true,
         "ceremonyDecision": true,
         "specific": true,
-        "tradeoff": true,
+        "weddingDayContent": true,
         "promotional": "heavy",
         "preDecisionOrPhotoShoot": false
       },
@@ -739,7 +739,7 @@
         "firsthand": true,
         "ceremonyDecision": true,
         "specific": true,
-        "tradeoff": true,
+        "weddingDayContent": true,
         "promotional": "light",
         "preDecisionOrPhotoShoot": false
       },
@@ -747,7 +747,7 @@
         "firsthand": true,
         "ceremonyDecision": true,
         "specific": true,
-        "tradeoff": true,
+        "weddingDayContent": true,
         "promotional": "light",
         "preDecisionOrPhotoShoot": false
       },
@@ -761,7 +761,7 @@
         "firsthand": true,
         "ceremonyDecision": true,
         "specific": true,
-        "tradeoff": true,
+        "weddingDayContent": true,
         "promotional": "light",
         "preDecisionOrPhotoShoot": false
       },
@@ -769,7 +769,7 @@
         "firsthand": true,
         "ceremonyDecision": true,
         "specific": true,
-        "tradeoff": true,
+        "weddingDayContent": true,
         "promotional": "light",
         "preDecisionOrPhotoShoot": false
       },
@@ -783,7 +783,7 @@
         "firsthand": true,
         "ceremonyDecision": true,
         "specific": true,
-        "tradeoff": true,
+        "weddingDayContent": true,
         "promotional": "light",
         "preDecisionOrPhotoShoot": false
       },
@@ -791,7 +791,7 @@
         "firsthand": true,
         "ceremonyDecision": true,
         "specific": true,
-        "tradeoff": true,
+        "weddingDayContent": true,
         "promotional": "light",
         "preDecisionOrPhotoShoot": false
       },
@@ -805,7 +805,7 @@
         "firsthand": true,
         "ceremonyDecision": false,
         "specific": true,
-        "tradeoff": true,
+        "weddingDayContent": false,
         "promotional": "light",
         "preDecisionOrPhotoShoot": true
       },
@@ -813,7 +813,7 @@
         "firsthand": true,
         "ceremonyDecision": false,
         "specific": true,
-        "tradeoff": true,
+        "weddingDayContent": false,
         "promotional": "light",
         "preDecisionOrPhotoShoot": true
       },
@@ -827,7 +827,7 @@
         "firsthand": true,
         "ceremonyDecision": false,
         "specific": true,
-        "tradeoff": true,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": true
       },
@@ -835,7 +835,7 @@
         "firsthand": true,
         "ceremonyDecision": false,
         "specific": true,
-        "tradeoff": true,
+        "weddingDayContent": false,
         "promotional": "none",
         "preDecisionOrPhotoShoot": true
       },

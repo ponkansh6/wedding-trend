@@ -8,13 +8,13 @@
     "firsthand": true,
     "ceremonyDecision": true,
     "specific": true,
-    "tradeoff": true,
     "promotional": "none",
     "preDecisionOrPhotoShoot": false,
-    "annotator_notes": "BGM選びのリアル。式中BGMの選曲経験を執筆。挙式の中身の意思決定に直結。",
+    "annotator_notes": "BGM選びのリアル。式中BGMの選曲経験を執筆。挙式の中身の意思決定に直結。 ／ [relabel 2026-08-27] weddingDayContent=true: BGMを場面別（入場・乾杯・ケーキ入刀・中座・再入場・手紙・退場）に選曲する記述があり、当日の演出・進行に具体的に触れている",
     "excerpt_length": 434,
     "annotated_by": "orchestrator",
-    "annotated_at": "2026-08-26"
+    "annotated_at": "2026-08-26",
+    "weddingDayContent": true
   },
   {
     "id": 2,
@@ -25,13 +25,13 @@
     "firsthand": true,
     "ceremonyDecision": true,
     "specific": true,
-    "tradeoff": true,
     "promotional": "none",
     "preDecisionOrPhotoShoot": true,
-    "annotator_notes": "ハワイ挙式から家族のみ神前式へ変更した理由。規模・形式の変更判断が主軸。会場名・金額なし。",
+    "annotator_notes": "ハワイ挙式から家族のみ神前式へ変更した理由。規模・形式の変更判断が主軸。会場名・金額なし。 ／ [relabel 2026-08-27] weddingDayContent=false: ハワイ挙式→家族のみ神前式への変更という形式・意思決定の理由が主軸。当日の進行・演出の記述なし",
     "excerpt_length": 64,
     "annotated_by": "orchestrator",
-    "annotated_at": "2026-08-26"
+    "annotated_at": "2026-08-26",
+    "weddingDayContent": false
   },
   {
     "id": 3,
@@ -42,13 +42,13 @@
     "firsthand": true,
     "ceremonyDecision": true,
     "specific": true,
-    "tradeoff": true,
     "promotional": "none",
     "preDecisionOrPhotoShoot": true,
-    "annotator_notes": "親族と友人を分けて2回結婚式を行った理由。規模・形式の判断が主軸。軽井沢親族婚+東京友人披露宴。",
+    "annotator_notes": "親族と友人を分けて2回結婚式を行った理由。規模・形式の判断が主軸。軽井沢親族婚+東京友人披露宴。 ／ [relabel 2026-08-27] weddingDayContent=false: 親族婚と友人披露宴を分けた理由（意思決定）が主軸。当日の進行・演出の具体的記述なし",
     "excerpt_length": 396,
     "annotated_by": "orchestrator",
-    "annotated_at": "2026-08-26"
+    "annotated_at": "2026-08-26",
+    "weddingDayContent": false
   },
   {
     "id": 4,
@@ -59,13 +59,13 @@
     "firsthand": true,
     "ceremonyDecision": true,
     "specific": true,
-    "tradeoff": true,
     "promotional": "none",
     "preDecisionOrPhotoShoot": false,
-    "annotator_notes": "費用総額と持ち出し額のリアル。料理・引き出物・曜日選択の費用詳細。式の中身の判断材料。",
+    "annotator_notes": "費用総額と持ち出し額のリアル。料理・引き出物・曜日選択の費用詳細。式の中身の判断材料。 ／ [relabel 2026-08-27] weddingDayContent=false: 費用・持ち出し額と削った箇所の解説が主軸。当日の進行・演出の記述なし",
     "excerpt_length": 107,
     "annotated_by": "orchestrator",
-    "annotated_at": "2026-08-26"
+    "annotated_at": "2026-08-26",
+    "weddingDayContent": false
   },
   {
     "id": 5,
@@ -76,13 +76,13 @@
     "firsthand": true,
     "ceremonyDecision": true,
     "specific": true,
-    "tradeoff": true,
     "promotional": "none",
     "preDecisionOrPhotoShoot": true,
-    "annotator_notes": "家族婚と友人中心の式を分けた理由。id=102同一筆者。形式・規模の判断が主軸。会場名・金額なし。",
+    "annotator_notes": "家族婚と友人中心の式を分けた理由。id=102同一筆者。形式・規模の判断が主軸。会場名・金額なし。 ／ [relabel 2026-08-27] weddingDayContent=false: 友人中心の結婚式を追加した理由（意思決定）が主軸。当日の進行・演出の記述なし",
     "excerpt_length": 40,
     "annotated_by": "orchestrator",
-    "annotated_at": "2026-08-26"
+    "annotated_at": "2026-08-26",
+    "weddingDayContent": false
   },
   {
     "id": 6,
@@ -93,13 +93,13 @@
     "firsthand": false,
     "ceremonyDecision": false,
     "specific": false,
-    "tradeoff": false,
     "promotional": "none",
     "preDecisionOrPhotoShoot": true,
-    "annotator_notes": "全false+preDecisionOrPhotoShoot=true。フォト婚・式場探し系記事。",
+    "annotator_notes": "全false+preDecisionOrPhotoShoot=true。フォト婚・式場探し系記事。 ／ [relabel 2026-08-27] weddingDayContent=false: 式場価格の事前開示をする企業の業界ニュース。当日の進行・演出の記述なし",
     "excerpt_length": 0,
     "annotated_by": "orchestrator",
-    "annotated_at": "2026-08-26"
+    "annotated_at": "2026-08-26",
+    "weddingDayContent": false
   },
   {
     "id": 7,
@@ -110,13 +110,13 @@
     "firsthand": false,
     "ceremonyDecision": false,
     "specific": false,
-    "tradeoff": false,
     "promotional": "none",
     "preDecisionOrPhotoShoot": true,
-    "annotator_notes": "全false+preDecisionOrPhotoShoot=true。フォト婚・式場探し系記事。",
+    "annotator_notes": "全false+preDecisionOrPhotoShoot=true。フォト婚・式場探し系記事。 ／ [relabel 2026-08-27] weddingDayContent=false: Save the Date のトレンド紹介記事。当日の進行・演出の記述なし",
     "excerpt_length": 0,
     "annotated_by": "orchestrator",
-    "annotated_at": "2026-08-26"
+    "annotated_at": "2026-08-26",
+    "weddingDayContent": false
   },
   {
     "id": 8,
@@ -127,13 +127,13 @@
     "firsthand": true,
     "ceremonyDecision": false,
     "specific": true,
-    "tradeoff": true,
     "promotional": "none",
     "preDecisionOrPhotoShoot": true,
-    "annotator_notes": "firsthand+specific+tradeoff+preDecisionOrPhotoShoot。式場探し・前撮り系の体験談。",
+    "annotator_notes": "firsthand+specific+weddingDayContent+preDecisionOrPhotoShoot。式場探し・前撮り系の体験談。 ／ [relabel 2026-08-27] weddingDayContent=false: フォトウェディング（前撮り）の体験記。式当日の進行・演出ではなく撮影の話",
     "excerpt_length": 0,
     "annotated_by": "orchestrator",
-    "annotated_at": "2026-08-26"
+    "annotated_at": "2026-08-26",
+    "weddingDayContent": false
   },
   {
     "id": 9,
@@ -144,13 +144,13 @@
     "firsthand": false,
     "ceremonyDecision": false,
     "specific": false,
-    "tradeoff": false,
     "promotional": "none",
     "preDecisionOrPhotoShoot": true,
-    "annotator_notes": "全false+preDecisionOrPhotoShoot=true。スコア-3。",
+    "annotator_notes": "全false+preDecisionOrPhotoShoot=true。スコア-3。 ／ [relabel 2026-08-27] weddingDayContent=false: 女性同士の結婚式を挙げるためのファーストステップ（準備）。当日の進行・演出の記述なし",
     "excerpt_length": 0,
     "annotated_by": "orchestrator",
-    "annotated_at": "2026-08-26"
+    "annotated_at": "2026-08-26",
+    "weddingDayContent": false
   },
   {
     "id": 10,
@@ -161,13 +161,13 @@
     "firsthand": true,
     "ceremonyDecision": false,
     "specific": true,
-    "tradeoff": false,
     "promotional": "none",
     "preDecisionOrPhotoShoot": true,
-    "annotator_notes": "firsthand+specific+preDecisionOrPhotoShoot。スコア2。",
+    "annotator_notes": "firsthand+specific+preDecisionOrPhotoShoot。スコア2。 ／ [relabel 2026-08-27] weddingDayContent=false: 前撮り用の「夫」「妻」の毛筆小物作成。当日の進行・演出ではなく前撮り小物",
     "excerpt_length": 0,
     "annotated_by": "orchestrator",
-    "annotated_at": "2026-08-26"
+    "annotated_at": "2026-08-26",
+    "weddingDayContent": false
   },
   {
     "id": 11,
@@ -178,13 +178,13 @@
     "firsthand": true,
     "ceremonyDecision": false,
     "specific": false,
-    "tradeoff": true,
     "promotional": "none",
     "preDecisionOrPhotoShoot": true,
-    "annotator_notes": "firsthand+tradeoff+preDecisionOrPhotoShoot。スコア2。",
+    "annotator_notes": "firsthand+weddingDayContent+preDecisionOrPhotoShoot。スコア2。 ／ [relabel 2026-08-27] weddingDayContent=false: 式場見学を2件で決めた理由（式場選び）。当日の進行・演出の記述なし",
     "excerpt_length": 0,
     "annotated_by": "orchestrator",
-    "annotated_at": "2026-08-26"
+    "annotated_at": "2026-08-26",
+    "weddingDayContent": false
   },
   {
     "id": 12,
@@ -195,13 +195,13 @@
     "firsthand": true,
     "ceremonyDecision": false,
     "specific": true,
-    "tradeoff": true,
     "promotional": "none",
     "preDecisionOrPhotoShoot": true,
-    "annotator_notes": "firsthand+specific+tradeoff+preDecisionOrPhotoShoot。スコア4。",
+    "annotator_notes": "firsthand+specific+weddingDayContent+preDecisionOrPhotoShoot。スコア4。 ／ [relabel 2026-08-27] weddingDayContent=false: 契約前の式場攻略作戦（見積もり交渉）。当日の進行・演出の記述なし",
     "excerpt_length": 0,
     "annotated_by": "orchestrator",
-    "annotated_at": "2026-08-26"
+    "annotated_at": "2026-08-26",
+    "weddingDayContent": false
   },
   {
     "id": 13,
@@ -212,13 +212,13 @@
     "firsthand": false,
     "ceremonyDecision": false,
     "specific": false,
-    "tradeoff": false,
     "promotional": "none",
     "preDecisionOrPhotoShoot": false,
-    "annotator_notes": "全false。0点。記事品質が低いnews記事。",
+    "annotator_notes": "全false。0点。記事品質が低いnews記事。 ／ [relabel 2026-08-27] weddingDayContent=false: テイラー・スウィフトのドレス公開を待つ業界ニュース。当日の進行・演出の記述なし",
     "excerpt_length": 0,
     "annotated_by": "orchestrator",
-    "annotated_at": "2026-08-26"
+    "annotated_at": "2026-08-26",
+    "weddingDayContent": false
   },
   {
     "id": 14,
@@ -229,13 +229,13 @@
     "firsthand": false,
     "ceremonyDecision": false,
     "specific": false,
-    "tradeoff": false,
     "promotional": "none",
     "preDecisionOrPhotoShoot": false,
-    "annotator_notes": "全false。0点。news記事。",
+    "annotator_notes": "全false。0点。news記事。 ／ [relabel 2026-08-27] weddingDayContent=false: 2026年の結婚式トレンド発表。当日の進行・演出の記述なし",
     "excerpt_length": 0,
     "annotated_by": "orchestrator",
-    "annotated_at": "2026-08-26"
+    "annotated_at": "2026-08-26",
+    "weddingDayContent": false
   },
   {
     "id": 15,
@@ -246,13 +246,13 @@
     "firsthand": false,
     "ceremonyDecision": false,
     "specific": false,
-    "tradeoff": false,
     "promotional": "true",
     "preDecisionOrPhotoShoot": false,
-    "annotator_notes": "全false+promotional=true。0点。ドレスデザイン特集。",
+    "annotator_notes": "全false+promotional=true。0点。ドレスデザイン特集。 ／ [relabel 2026-08-27] weddingDayContent=false: ドレス特集（プロモーション）。当日の進行・演出の記述なし",
     "excerpt_length": 0,
     "annotated_by": "orchestrator",
-    "annotated_at": "2026-08-26"
+    "annotated_at": "2026-08-26",
+    "weddingDayContent": false
   },
   {
     "id": 16,
@@ -263,13 +263,13 @@
     "firsthand": false,
     "ceremonyDecision": false,
     "specific": false,
-    "tradeoff": false,
     "promotional": "none",
     "preDecisionOrPhotoShoot": false,
-    "annotator_notes": "全false。0点。ブライダル美容記事。",
+    "annotator_notes": "全false。0点。ブライダル美容記事。 ／ [relabel 2026-08-27] weddingDayContent=false: ブライダル美容・肌管理（準備）。当日の進行・演出の記述なし",
     "excerpt_length": 0,
     "annotated_by": "orchestrator",
-    "annotated_at": "2026-08-26"
+    "annotated_at": "2026-08-26",
+    "weddingDayContent": false
   },
   {
     "id": 17,
@@ -280,13 +280,13 @@
     "firsthand": false,
     "ceremonyDecision": false,
     "specific": false,
-    "tradeoff": false,
     "promotional": "none",
     "preDecisionOrPhotoShoot": false,
-    "annotator_notes": "全false。0点。受付の作法と準備。",
+    "annotator_notes": "全false。0点。受付の作法と準備。 ／ [relabel 2026-08-27] weddingDayContent=false: ご祝儀・受付・記帳のゲスト側マナー。当日の進行・演出の記述なし",
     "excerpt_length": 0,
     "annotated_by": "orchestrator",
-    "annotated_at": "2026-08-26"
+    "annotated_at": "2026-08-26",
+    "weddingDayContent": false
   },
   {
     "id": 18,
@@ -297,13 +297,13 @@
     "firsthand": false,
     "ceremonyDecision": false,
     "specific": false,
-    "tradeoff": false,
     "promotional": "none",
     "preDecisionOrPhotoShoot": false,
-    "annotator_notes": "全false。0点。祝儀袋の中袋への記入方法。",
+    "annotator_notes": "全false。0点。祝儀袋の中袋への記入方法。 ／ [relabel 2026-08-27] weddingDayContent=false: 祝儀袋中袋の記入方法。当日の進行・演出の記述なし",
     "excerpt_length": 0,
     "annotated_by": "orchestrator",
-    "annotated_at": "2026-08-26"
+    "annotated_at": "2026-08-26",
+    "weddingDayContent": false
   },
   {
     "id": 19,
@@ -314,13 +314,13 @@
     "firsthand": false,
     "ceremonyDecision": false,
     "specific": false,
-    "tradeoff": false,
     "promotional": "none",
     "preDecisionOrPhotoShoot": false,
-    "annotator_notes": "全false。0点。祝儀袋の選び方とマナー。",
+    "annotator_notes": "全false。0点。祝儀袋の選び方とマナー。 ／ [relabel 2026-08-27] weddingDayContent=false: 祝儀袋の選び方。当日の進行・演出の記述なし",
     "excerpt_length": 0,
     "annotated_by": "orchestrator",
-    "annotated_at": "2026-08-26"
+    "annotated_at": "2026-08-26",
+    "weddingDayContent": false
   },
   {
     "id": 20,
@@ -331,13 +331,13 @@
     "firsthand": false,
     "ceremonyDecision": false,
     "specific": false,
-    "tradeoff": false,
     "promotional": "none",
     "preDecisionOrPhotoShoot": false,
-    "annotator_notes": "全false。0点。結婚式の受付依頼への返答法。",
+    "annotator_notes": "全false。0点。結婚式の受付依頼への返答法。 ／ [relabel 2026-08-27] weddingDayContent=false: 受付を頼まれた時の返事（冒頭の返答のみ）。本文に「当日の動き方は範囲外」と明記。当日の進行・演出の記述なし",
     "excerpt_length": 0,
     "annotated_by": "orchestrator",
-    "annotated_at": "2026-08-26"
+    "annotated_at": "2026-08-26",
+    "weddingDayContent": false
   },
   {
     "id": 21,
@@ -348,13 +348,13 @@
     "firsthand": false,
     "ceremonyDecision": false,
     "specific": false,
-    "tradeoff": false,
     "promotional": "none",
     "preDecisionOrPhotoShoot": false,
-    "annotator_notes": "全false。0点。ご祝儀の金額とマナー。",
+    "annotator_notes": "全false。0点。ご祝儀の金額とマナー。 ／ [relabel 2026-08-27] weddingDayContent=false: ご祝儀の金額・マナー。当日の進行・演出の記述なし",
     "excerpt_length": 0,
     "annotated_by": "orchestrator",
-    "annotated_at": "2026-08-26"
+    "annotated_at": "2026-08-26",
+    "weddingDayContent": false
   },
   {
     "id": 22,
@@ -365,13 +365,13 @@
     "firsthand": false,
     "ceremonyDecision": false,
     "specific": false,
-    "tradeoff": false,
     "promotional": "true",
     "preDecisionOrPhotoShoot": false,
-    "annotator_notes": "全false+promotional=true。0点。ブランド特集。",
+    "annotator_notes": "全false+promotional=true。0点。ブランド特集。 ／ [relabel 2026-08-27] weddingDayContent=false: ドレスブランド特集（プロモーション）。当日の進行・演出の記述なし",
     "excerpt_length": 0,
     "annotated_by": "orchestrator",
-    "annotated_at": "2026-08-26"
+    "annotated_at": "2026-08-26",
+    "weddingDayContent": false
   },
   {
     "id": 23,
@@ -382,13 +382,13 @@
     "firsthand": false,
     "ceremonyDecision": false,
     "specific": false,
-    "tradeoff": false,
     "promotional": "none",
     "preDecisionOrPhotoShoot": false,
-    "annotator_notes": "全false。0点。準備の比較と心構え。",
+    "annotator_notes": "全false。0点。準備の比較と心構え。 ／ [relabel 2026-08-27] weddingDayContent=false: 迎えたいシーンを先に思い描く（マインドセット）。当日の進行・演出の記述なし",
     "excerpt_length": 0,
     "annotated_by": "orchestrator",
-    "annotated_at": "2026-08-26"
+    "annotated_at": "2026-08-26",
+    "weddingDayContent": false
   },
   {
     "id": 24,
@@ -399,13 +399,13 @@
     "firsthand": false,
     "ceremonyDecision": false,
     "specific": false,
-    "tradeoff": false,
     "promotional": "none",
     "preDecisionOrPhotoShoot": false,
-    "annotator_notes": "全false。0点。ゲストの心得と当日の流れ。",
+    "annotator_notes": "全false。0点。ゲストの心得と当日の流れ。 ／ [relabel 2026-08-27] weddingDayContent=false: 初めて結婚式に招かれる人向けのご祝儀・服装・持ち物・受付ガイド。ゲスト側準備であり式当日の進行・演出の具体的記述なし",
     "excerpt_length": 0,
     "annotated_by": "orchestrator",
-    "annotated_at": "2026-08-26"
+    "annotated_at": "2026-08-26",
+    "weddingDayContent": false
   },
   {
     "id": 25,
@@ -416,13 +416,13 @@
     "firsthand": false,
     "ceremonyDecision": false,
     "specific": false,
-    "tradeoff": false,
     "promotional": "none",
     "preDecisionOrPhotoShoot": false,
-    "annotator_notes": "全false。0点。イヤリング選びと準備タイミング。",
+    "annotator_notes": "全false。0点。イヤリング選びと準備タイミング。 ／ [relabel 2026-08-27] weddingDayContent=false: イヤリングをいつ決めるか（小物合わせ・前撮りから逆算）。当日の進行・演出の記述なし",
     "excerpt_length": 0,
     "annotated_by": "orchestrator",
-    "annotated_at": "2026-08-26"
+    "annotated_at": "2026-08-26",
+    "weddingDayContent": false
   },
   {
     "id": 26,
@@ -433,13 +433,13 @@
     "firsthand": false,
     "ceremonyDecision": false,
     "specific": false,
-    "tradeoff": false,
     "promotional": "none",
     "preDecisionOrPhotoShoot": false,
-    "annotator_notes": "全false。0点。キャンセル料と契約書の法的解釈。",
+    "annotator_notes": "全false。0点。キャンセル料と契約書の法的解釈。 ／ [relabel 2026-08-27] weddingDayContent=false: キャンセル料の法的解釈。当日の進行・演出の記述なし",
     "excerpt_length": 0,
     "annotated_by": "orchestrator",
-    "annotated_at": "2026-08-26"
+    "annotated_at": "2026-08-26",
+    "weddingDayContent": false
   },
   {
     "id": 27,
@@ -450,13 +450,13 @@
     "firsthand": false,
     "ceremonyDecision": false,
     "specific": false,
-    "tradeoff": false,
     "promotional": "none",
     "preDecisionOrPhotoShoot": false,
-    "annotator_notes": "全false。0点。体と肌のケア方法。",
+    "annotator_notes": "全false。0点。体と肌のケア方法。 ／ [relabel 2026-08-27] weddingDayContent=false: ブライダル美容・体のケア（準備）。当日の進行・演出の記述なし",
     "excerpt_length": 0,
     "annotated_by": "orchestrator",
-    "annotated_at": "2026-08-26"
+    "annotated_at": "2026-08-26",
+    "weddingDayContent": false
   },
   {
     "id": 28,
@@ -467,13 +467,13 @@
     "firsthand": false,
     "ceremonyDecision": false,
     "specific": false,
-    "tradeoff": false,
     "promotional": "none",
     "preDecisionOrPhotoShoot": false,
-    "annotator_notes": "全false。0点。準備の時期別やることリスト。",
+    "annotator_notes": "全false。0点。準備の時期別やることリスト。 ／ [relabel 2026-08-27] weddingDayContent=false: 準備のやることリスト（12ヶ月前〜前日）。当日の進行・演出の記述なし",
     "excerpt_length": 0,
     "annotated_by": "orchestrator",
-    "annotated_at": "2026-08-26"
+    "annotated_at": "2026-08-26",
+    "weddingDayContent": false
   },
   {
     "id": 29,
@@ -484,13 +484,13 @@
     "firsthand": false,
     "ceremonyDecision": false,
     "specific": false,
-    "tradeoff": false,
     "promotional": "none",
     "preDecisionOrPhotoShoot": false,
-    "annotator_notes": "全false。0点。性格タイプ別の準備の進め方。",
+    "annotator_notes": "全false。0点。性格タイプ別の準備の進め方。 ／ [relabel 2026-08-27] weddingDayContent=false: 性格タイプの話。結婚式当日の進行・演出の記述なし",
     "excerpt_length": 0,
     "annotated_by": "orchestrator",
-    "annotated_at": "2026-08-26"
+    "annotated_at": "2026-08-26",
+    "weddingDayContent": false
   },
   {
     "id": 30,
@@ -501,13 +501,13 @@
     "firsthand": false,
     "ceremonyDecision": false,
     "specific": false,
-    "tradeoff": false,
     "promotional": "true",
     "preDecisionOrPhotoShoot": true,
-    "annotator_notes": "preDecisionOrPhotoShoot=true+promotional=true。スコア-4。",
+    "annotator_notes": "preDecisionOrPhotoShoot=true+promotional=true。スコア-4。 ／ [relabel 2026-08-27] weddingDayContent=false: ハワイ結婚式の最前線（プロモーション）。当日の進行・演出の記述なし",
     "excerpt_length": 0,
     "annotated_by": "orchestrator",
-    "annotated_at": "2026-08-26"
+    "annotated_at": "2026-08-26",
+    "weddingDayContent": false
   },
   {
     "id": 31,
@@ -518,13 +518,13 @@
     "firsthand": false,
     "ceremonyDecision": false,
     "specific": false,
-    "tradeoff": false,
     "promotional": "none",
     "preDecisionOrPhotoShoot": true,
-    "annotator_notes": "全false+preDecisionOrPhotoShoot=true。スコア-3。",
+    "annotator_notes": "全false+preDecisionOrPhotoShoot=true。スコア-3。 ／ [relabel 2026-08-27] weddingDayContent=false: 女性同士の結婚式ができるか式場に聞く（事前問い合わせ）。当日の進行・演出の記述なし",
     "excerpt_length": 0,
     "annotated_by": "orchestrator",
-    "annotated_at": "2026-08-26"
+    "annotated_at": "2026-08-26",
+    "weddingDayContent": false
   },
   {
     "id": 32,
@@ -535,13 +535,13 @@
     "firsthand": false,
     "ceremonyDecision": false,
     "specific": false,
-    "tradeoff": false,
     "promotional": "none",
     "preDecisionOrPhotoShoot": true,
-    "annotator_notes": "全false+preDecisionOrPhotoShoot=true。スコア-3。",
+    "annotator_notes": "全false+preDecisionOrPhotoShoot=true。スコア-3。 ／ [relabel 2026-08-27] weddingDayContent=false: リゾート婚の「前撮り」トレンド。式当日の進行・演出ではなく前撮りの話",
     "excerpt_length": 0,
     "annotated_by": "orchestrator",
-    "annotated_at": "2026-08-26"
+    "annotated_at": "2026-08-26",
+    "weddingDayContent": false
   },
   {
     "id": 33,
@@ -552,13 +552,13 @@
     "firsthand": true,
     "ceremonyDecision": true,
     "specific": true,
-    "tradeoff": true,
     "promotional": "heavy",
     "preDecisionOrPhotoShoot": false,
-    "annotator_notes": "heavy唯一のmwed.jp記事。19点。全true+heavy=-4=15点。体験談レーン非公開。",
+    "annotator_notes": "heavy唯一のmwed.jp記事。19点。全true+heavy=-4=15点。体験談レーン非公開。 ／ [relabel 2026-08-27] weddingDayContent=true: リゾートウェディングの体験（家族の仲が縮まるアットホームな式）を紹介。当日の雰囲気・進行に触れている",
     "excerpt_length": 0,
     "annotated_by": "orchestrator",
-    "annotated_at": "2026-08-26"
+    "annotated_at": "2026-08-26",
+    "weddingDayContent": true
   },
   {
     "id": 34,
@@ -569,13 +569,13 @@
     "firsthand": true,
     "ceremonyDecision": true,
     "specific": true,
-    "tradeoff": true,
     "promotional": "light",
     "preDecisionOrPhotoShoot": false,
-    "annotator_notes": "light mwed.jp記事。19点-1=18点。体験談レーン非公開。",
+    "annotator_notes": "light mwed.jp記事。19点-1=18点。体験談レーン非公開。 ／ [relabel 2026-08-27] weddingDayContent=true: 「縁」をテーマにゲスト全員参加の演出で感謝を伝える——当日の演出に具体的に触れている",
     "excerpt_length": 0,
     "annotated_by": "orchestrator",
-    "annotated_at": "2026-08-26"
+    "annotated_at": "2026-08-26",
+    "weddingDayContent": true
   },
   {
     "id": 35,
@@ -586,13 +586,13 @@
     "firsthand": true,
     "ceremonyDecision": true,
     "specific": true,
-    "tradeoff": true,
     "promotional": "light",
     "preDecisionOrPhotoShoot": false,
-    "annotator_notes": "light mwed.jp記事。18点。体験談レーン非公開。",
+    "annotator_notes": "light mwed.jp記事。18点。体験談レーン非公開。 ／ [relabel 2026-08-27] weddingDayContent=true: 二部制ウェディングの体験紹介。当日の進行・構成に触れている",
     "excerpt_length": 0,
     "annotated_by": "orchestrator",
-    "annotated_at": "2026-08-26"
+    "annotated_at": "2026-08-26",
+    "weddingDayContent": true
   },
   {
     "id": 36,
@@ -603,13 +603,13 @@
     "firsthand": true,
     "ceremonyDecision": true,
     "specific": true,
-    "tradeoff": true,
     "promotional": "light",
     "preDecisionOrPhotoShoot": false,
-    "annotator_notes": "light mwed.jp記事。18点。体験談レーン非公開。",
+    "annotator_notes": "light mwed.jp記事。18点。体験談レーン非公開。 ／ [relabel 2026-08-27] weddingDayContent=true: ゲストと盛大に楽しむウェディングの体験紹介。当日の進行・演出に触れている",
     "excerpt_length": 0,
     "annotated_by": "orchestrator",
-    "annotated_at": "2026-08-26"
+    "annotated_at": "2026-08-26",
+    "weddingDayContent": true
   },
   {
     "id": 37,
@@ -620,13 +620,13 @@
     "firsthand": true,
     "ceremonyDecision": false,
     "specific": true,
-    "tradeoff": true,
     "promotional": "light",
     "preDecisionOrPhotoShoot": true,
-    "annotator_notes": "light+preDecisionOrPhotoShoot。firsthand+specific+tradeoff=7-1+(-3)=3点。mwed.jp体験談レーン非公開。",
+    "annotator_notes": "light+preDecisionOrPhotoShoot。firsthand+specific+weddingDayContent=7-1+(-3)=3点。mwed.jp体験談レーン非公開。 ／ [relabel 2026-08-27] weddingDayContent=false: 廃線での撮影（フォトシューティング）の話。式当日の進行・演出ではなく撮影の話",
     "excerpt_length": 0,
     "annotated_by": "orchestrator",
-    "annotated_at": "2026-08-26"
+    "annotated_at": "2026-08-26",
+    "weddingDayContent": false
   },
   {
     "id": 38,
@@ -637,12 +637,12 @@
     "firsthand": true,
     "ceremonyDecision": false,
     "specific": true,
-    "tradeoff": true,
     "promotional": "none",
     "preDecisionOrPhotoShoot": true,
-    "annotator_notes": "preDecisionOrPhotoShoot=true。firsthand+specific+tradeoff=7+(-3)=4点。mwed.jp。",
+    "annotator_notes": "preDecisionOrPhotoShoot=true。firsthand+specific+weddingDayContent=7+(-3)=4点。mwed.jp。 ／ [relabel 2026-08-27] weddingDayContent=false: こだわりの式場でのフォトウェディングの話。式当日の進行・演出ではなく撮影の話",
     "excerpt_length": 0,
     "annotated_by": "orchestrator",
-    "annotated_at": "2026-08-26"
+    "annotated_at": "2026-08-26",
+    "weddingDayContent": false
   }
 ]

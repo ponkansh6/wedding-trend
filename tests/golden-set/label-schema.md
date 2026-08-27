@@ -24,9 +24,10 @@ Each article is evaluated against six binary or ternary criteria, mirroring the 
    - `true`: Contains concrete numbers, specific vendor/venue naming details, actual costs, or actionable timelines.
    - `false`: Vague impressions or abstract advice without concrete details.
 
-4. **`tradeoff` (Boolean)**
-   - `true`: Discusses tangible trade-offs (e.g., cost vs. quality, guest convenience vs. budget, DIY vs. outsourced).
-   - `false`: Purely one-sided praise or uncritical recommendations.
+4. **`weddingDayContent` (Boolean)**
+   - `true`: Specifically touches on the actual wedding-day content — ceremony proceedings, production/direction (演出), run-of-show, or what literally happened on the day (e.g., BGM chosen per scene, guest-participation performances, two-part wedding structure, resort-wedding experience narration).
+   - `false`: Focuses on pre-decision planning, format/venue choices, budget, preparation (beauty/etiquette), industry trends, or photo-shoot-only content — without narrating the day's actual proceedings.
+   - NOTE: Distinct from `ceremonyDecision`. `ceremonyDecision` = the article is _about a decision_ concerning the ceremony (venue/dress/form). `weddingDayContent` = the article _describes the day's actual content/proceedings_. An article can be `ceremonyDecision:true` yet `weddingDayContent:false` (e.g., "why we split into two weddings"). Photo-shoot / 前撮り / フォトウェディング content is `weddingDayContent:false`.
 
 5. **`promotional` (Ternary: `"none"` | `"light"` | `"heavy"` )**
    - `"none"`: Completely independent user experience or neutral discussion.
@@ -62,7 +63,7 @@ Each entry in `corpus.json` requires:
 - `firsthand`: Boolean.
 - `ceremonyDecision`: Boolean.
 - `specific`: Boolean.
-- `tradeoff`: Boolean.
+- `weddingDayContent`: Boolean.
 - `promotional`: `"none"` | `"light"` | `"heavy"`.
 - `preDecisionOrPhotoShoot`: Boolean.
 - `annotator_notes`: Brief, non-creative justification for the labels (strictly complying with spec.md §10).
