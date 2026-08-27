@@ -16,10 +16,13 @@
  * 使い方（pnpm 経由。npx/npm は使わない）:
  *   pnpm exec tsx scripts/backfill-usefulness.mjs          # dry-run（対象件数のみ表示）
  *   pnpm exec tsx scripts/backfill-usefulness.mjs --apply  # 実際に実行（Gemini 課金が発生する）
+ *   pnpm exec tsx scripts/backfill-usefulness.mjs --apply --force
+ *     # 署名に関わらず全ブログ投稿を再スコア（キュレーション結果の修正・検証用）
  */
 import { existsSync, readFileSync } from "node:fs";
 
 const APPLY = process.argv.includes("--apply");
+const FORCE = process.argv.includes("--force");
 
 // .env.local の簡易パーサ（scripts/apply-migrations-remote.mjs と同じ作法）。
 if (existsSync(".env.local")) {
@@ -67,8 +70,9 @@ console.log(`対象シグネチャ: ${currentSignature} / モデル: ${LLM_MODEL
 const candidates = await getStaleCurationCandidates({
   currentSignature,
   limit: BACKFILL_LIMIT,
+  force: FORCE,
 });
-console.log(`バックフィル対象: ${candidates.length} 件`);
+console.log(`バックフィル対象: ${candidates.length} 件${FORCE ? "（--force: 署名無視）" : ""}`);
 
 if (!APPLY) {
   console.log(
@@ -107,7 +111,7 @@ const updates = candidates
                 firsthand: result.firsthand,
                 ceremonyDecision: result.ceremonyDecision,
                 specific: result.specific,
-                tradeoff: result.tradeoff,
+                weddingDayContent: result.weddingDayContent,
                 promotional: result.promotional,
                 preDecisionOrPhotoShoot: result.preDecisionOrPhotoShoot,
               },

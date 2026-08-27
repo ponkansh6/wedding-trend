@@ -394,9 +394,20 @@ export interface CurationCandidate {
 export async function getStaleCurationCandidates(params: {
   currentSignature: string;
   limit: number;
+  /**
+   * 署名に関わらず全ブログ投稿を再スコア対象にする（バックフィル修復用）。
+   * 通常運用（ingest のバックフィル）では渡さない。
+   */
+  force?: boolean;
 }): Promise<CurationCandidate[]> {
   if (params.limit <= 0) return [];
   try {
+    const whereClause = params.force
+      ? eq(posts.sourceType, "blog")
+      : and(
+          eq(posts.sourceType, "blog"),
+          or(isNull(posts.curationSignature), ne(posts.curationSignature, params.currentSignature)),
+        );
     const rows = await db
       .select({
         id: posts.id,
@@ -406,12 +417,7 @@ export async function getStaleCurationCandidates(params: {
         publishedAt: posts.publishedAt,
       })
       .from(posts)
-      .where(
-        and(
-          eq(posts.sourceType, "blog"),
-          or(isNull(posts.curationSignature), ne(posts.curationSignature, params.currentSignature)),
-        ),
-      )
+      .where(whereClause)
       .orderBy(desc(posts.publishedAt))
       .limit(params.limit);
     return rows;
