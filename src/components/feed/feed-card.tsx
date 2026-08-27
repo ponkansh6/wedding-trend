@@ -82,7 +82,7 @@ function Title({ card, variant }: { card: FeedCardData; variant: FeedCardVariant
   return (
     <h3
       className={cn(
-        "font-display leading-jp-heading tracking-jp-heading text-balance text-[var(--color-foreground)]",
+        "font-display leading-jp-heading tracking-jp-heading text-pretty text-[var(--color-foreground)]",
         variant === "visual" ? "text-[17px] font-semibold" : "text-[15px] font-semibold",
         "line-clamp-3",
       )}
