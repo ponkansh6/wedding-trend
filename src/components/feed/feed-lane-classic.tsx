@@ -30,7 +30,7 @@ export function FeedLaneClassic({ cards }: FeedLaneClassicProps) {
           満足度の高い王道・定番
         </h2>
         <p className="text-[13px] leading-jp-body tracking-jp-body text-[var(--color-muted-foreground)]">
-          実際に結婚式を挙げた方の体験ブログを、AI要約と元記事へのリンクでまとめました。
+          実際に結婚式を挙げた方の体験ブログを紹介します。読み応えのある元記事をぜひご覧ください。
         </p>
       </header>
 

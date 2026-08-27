@@ -27,7 +27,7 @@ export function FeedLaneTrend({ cards }: FeedLaneTrendProps) {
           最新トレンド速報
         </h2>
         <p className="text-[13px] leading-jp-body tracking-jp-body text-[var(--color-muted-foreground)]">
-          SNS で見つかった「今」の投稿を、AI要約と元投稿へのリンクでまとめました。
+          SNSで見つけた「今」の投稿を紹介します。気になる投稿があれば、元サイトで詳細をご確認ください。
         </p>
       </header>
 

@@ -260,7 +260,7 @@ kill gate K1（robots.txt 変化検知）の入力。取得のたびに内容ハ
 (3) は Vercel Cron を増やさず GitHub Actions で独立して動く（§6.3 を参照）。
 
 - **2-lane design**:
-  - SNS トレンド速報レーン: `src/components/feed/feed-lane-trend.tsx`, `src/components/feed/sns-embed.tsx`
+  - SNS トレンド速報レーン: `src/components/feed/feed-lane-trend.tsx`
   - ブログ定番レーン: `src/components/feed/feed-lane-classic.tsx`, `src/components/feed/feed-card.tsx`
 - **Collection pipeline**:
   - `src/lib/sources/registry.ts` -> 各アダプタ (`src/lib/sources/hatena-bookmark.ts`, `src/lib/sources/google-news.ts`, `src/lib/sources/note.ts`, `src/lib/sources/ameblo.ts`) -> RSS フェッチャー (`src/lib/sources/base/rss-fetcher.ts`, `src/lib/sources/base/feed-parser.ts`)
@@ -708,8 +708,7 @@ THEN 1 ELSE 0 END` で判定している。`json_extract` は文字列値をク�
   この OR の左辺（`aiTitle IS NOT NULL`）を満たす投稿が今後生まれることはない。
 - **phase2**: `post_rationales.post_id IS NOT NULL` のみ。バックフィル完了後に
   切り替える、判定根拠のみを表示条件とする最終形。
-- 描画は判定根拠（`topicAnchor`/`rationaleText`）を優先し、無ければ
-  `aiSummary` にフォールバックする（`src/components/feed/feed-card.tsx`）。
+- 判定根拠（`post_rationales` 行）の存在は掲載可否の条件としてのみ用い、topicAnchor/rationaleText/aiSummary はいずれも公開面には描画しない（`src/components/feed/feed-card.tsx`）。
 - 両フェーズとも `posts.status = "published"` が前提条件であり、
   §10-4 の決定的ゲート（判定に足る原文テキストが存在しない）を満たさない
   投稿は `post_rationales` 行を持たない・`status` が `"pending"` のまま
@@ -847,7 +846,9 @@ THEN 1 ELSE 0 END` で判定している。`json_extract` は文字列値をク�
 
     **禁止事項**: ブロックされた場合に、User-Agent の変更・IP ローテーション等による回避を行ってはならない。回避行為は、蓋然性の低いリスク（不法行為・刑事）を現実化させる最短経路である。
 
-11. **新規ホストを `HOST_ALLOWLIST` に追加する際の入場基準（2026-08-25 訂正）**: 新規ホストの追加は以下を満たすことを原則とする。
+11. **外部サイトの画像の転載禁止（画像非表示ポリシー）**: 外部サイトの画像（OGP 画像、サムネイル画像、SNS 埋め込み等）はパイプラインでの処理や内部選定目的で一時的に取得・保存される場合があるものの、公開面（フィードカード等）においては一切再掲載・描画しない。これは中立キュレーションにおける無断転載リスクを排除するための法的・構造的制約である。
+
+12. **新規ホストを `HOST_ALLOWLIST` に追加する際の入場基準（2026-08-25 訂正）**: 新規ホストの追加は以下を満たすことを原則とする。
     1. ~~構造化メタデータ（JSON-LD / meta / `dc:creator`）から `author` が取得できること~~ → **加点要素に格下げ**（訂正）。第2項は当初から「`author` は非 null の場合に表示する」という条件付き要件であり、`author` の取得可否そのものは要件2 の充足条件ではない。取得できれば §10-7 の既知の限界（可視バイラインの取りこぼし）を減らせるため加点はするが、必須要件ではない
     2. 記事が運営または署名ライターによる編集記事であること（UGC 主体のホストではないこと）。**判定方法は `author` メタデータの有無ではなく、本文の人称（三人称か一人称か）・取材構造（インタビュー引用の分離があるか）・投稿導線の遷移先（サイト共通ナビか当該ページ固有か）を実地確認すること。** `author` の有無だけで UGC/編集記事を判定すると誤判定しうる（§10-8 の訂正を参照）
     3. robots.txt が対象記事パスを許可していること
