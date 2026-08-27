@@ -60,6 +60,8 @@ const { curatePosts } = await import("../src/lib/llm/batch.ts");
 const { computeContentHash, computeCurationSignature } =
   await import("../src/lib/llm/signature.ts");
 const { LLM_MODEL } = await import("../src/lib/llm/client.ts");
+const { RATIONALE_PROMPT_VERSION } = await import("../src/lib/constants.ts");
+const { checkAnchorGrounding } = await import("../src/lib/publish/gate.ts");
 
 // 本番の対象件数（数十件想定）を十分に上回る上限。無限に伸びないための保険。
 const BACKFILL_LIMIT = 1000;
@@ -115,6 +117,21 @@ const updates = candidates
                 promotional: result.promotional,
                 preDecisionOrPhotoShoot: result.preDecisionOrPhotoShoot,
               },
+            }
+          : undefined,
+      rationale:
+        c.id !== null &&
+        checkAnchorGrounding(
+          result.topicAnchor ?? "",
+          `${c.originalTitle ?? ""}\n${c.originalExcerpt ?? ""}`,
+        ).ok
+          ? {
+              postId: c.id,
+              topicAnchor: result.topicAnchor,
+              rationaleText: result.rationaleText,
+              evidenceSufficient: true,
+              modelId: LLM_MODEL,
+              promptVersion: RATIONALE_PROMPT_VERSION,
             }
           : undefined,
     };
