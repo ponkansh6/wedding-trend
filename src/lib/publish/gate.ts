@@ -51,7 +51,12 @@ function containsStrictAdToken(normalizedTitle: string): boolean {
   return letterRuns.some((run) => run.toUpperCase() === "PR" || run.toUpperCase() === "AD");
 }
 
-/** 制御文字（タブ・改行は許容し、その他の C0/C1 制御文字・DEL を検知）。 */
+/**
+ * 制御文字（タブ・改行は `normalizeTitle` により取り込み段階ですでに単一スペースに正規化されることを
+ * 前提とするためここではチェックから除外し、その他の C0/C1 制御文字・DEL のみを検知する）。
+ * なお、正規化漏れ等の最終防衛線として一律拒否する設計（Option A）も考えられるが、本プロジェクトでは
+ * インゲスト時の `normalizeTitle` を主防壁とし、ここでは通常のC0/C1制御文字のみを対象とする（Option B方針）。
+ */
 // oxlint-disable-next-line no-control-regex -- 制御文字の検知そのものが目的で意図的。
 const CONTROL_CHAR_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/;
 

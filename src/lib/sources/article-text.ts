@@ -27,6 +27,7 @@ import {
   MIN_PARAGRAPH_COUNT,
   HOST_ALLOWLIST,
 } from "@/lib/constants";
+import { normalizeTitle } from "./base/feed-parser";
 // 閾値は定数の一元管理のため constants.ts にのみ定義し、ここで再公開する。
 export { MIN_EVIDENCE_INPUT_CHARS };
 
@@ -287,9 +288,7 @@ export function extractArticleHeadline(containerHtml: string): string | null {
   const { document } = parseHTML(containerHtml);
   const h1 = document.querySelector("h1");
   if (!h1) return null;
-  const text = decodeHtmlEntities(h1.textContent ?? "")
-    .replace(/\s+/g, " ")
-    .trim();
+  const text = normalizeTitle(h1.textContent);
   return text.length > 0 ? text : null;
 }
 
@@ -301,9 +300,8 @@ export function extractArticleHeadline(containerHtml: string): string | null {
 export function extractHtmlTitle(html: string): string | null {
   const match = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
   if (!match) return null;
-  const title = decodeHtmlEntities(match[1])
-    .replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  // strip potential tags inside title if any
+  const cleaned = match[1].replace(/<[^>]+>/g, " ");
+  const title = normalizeTitle(cleaned);
   return title.length > 0 ? title : null;
 }

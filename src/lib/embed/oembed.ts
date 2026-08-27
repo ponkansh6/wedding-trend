@@ -1,6 +1,7 @@
 import { OEMBED_TIMEOUT_MS } from "@/lib/constants";
 import { detectEmbedProvider } from "./providers";
 import type { EmbedProvider } from "@/lib/types";
+import { normalizeTitle } from "@/lib/sources/base/feed-parser";
 
 export interface OEmbedResult {
   html: string | null;
@@ -58,7 +59,7 @@ export async function fetchOEmbed(url: string): Promise<OEmbedResult | null> {
       html: typeof data.html === "string" ? data.html : null,
       thumbnailUrl: typeof data.thumbnail_url === "string" ? data.thumbnail_url : null,
       authorName: typeof data.author_name === "string" ? data.author_name : null,
-      title: typeof data.title === "string" ? data.title : null,
+      title: typeof data.title === "string" ? normalizeTitle(data.title) : null,
       provider,
     };
   } catch (err) {

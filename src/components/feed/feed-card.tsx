@@ -1,4 +1,4 @@
-import { ExternalLink, Flame, Landmark } from "lucide-react";
+import { ExternalLink, Flame, Landmark, Sparkles } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -48,6 +48,31 @@ export function FeedCard({ card, variant, index = 0 }: FeedCardProps) {
 
       <Title card={card} variant={variant} />
 
+      {card.topicAnchor && (
+        <div className="flex flex-col gap-2">
+          <p className="line-clamp-1 text-[14px] leading-snug text-[var(--color-muted-foreground)]">
+            {card.topicAnchor}
+          </p>
+          <Badge
+            variant="ai"
+            className="w-fit"
+            title="このアンカー・特徴ラベルはAIが自動判定しており、誤りを含むことがあります"
+          >
+            <Sparkles className="size-2.5" aria-hidden />
+            AI判定
+          </Badge>
+        </div>
+      )}
+
+      {card.usefulness && (
+        <div className="flex flex-wrap gap-1.5">
+          {card.usefulness.firsthand && <Badge variant="category">当事者本人</Badge>}
+          {card.usefulness.ceremonyDecision && <Badge variant="category">意思決定に効く</Badge>}
+          {card.usefulness.specific && <Badge variant="category">具体的</Badge>}
+          {card.usefulness.weddingDayContent && <Badge variant="category">結婚式当日の内容</Badge>}
+        </div>
+      )}
+
       <Footer card={card} variant={variant} />
     </Card>
   );
@@ -59,7 +84,7 @@ function Title({ card, variant }: { card: FeedCardData; variant: FeedCardVariant
       className={cn(
         "font-display leading-jp-heading tracking-jp-heading text-balance text-[var(--color-foreground)]",
         variant === "visual" ? "text-[17px] font-semibold" : "text-[15px] font-semibold",
-        "line-clamp-2",
+        "line-clamp-3",
       )}
     >
       {card.originalTitle}

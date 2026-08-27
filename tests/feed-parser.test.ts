@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   decodeEntities,
-  extractFirstImage,
+  normalizeTitle,
   parseFeed,
   stripHtml,
 } from "@/lib/sources/base/feed-parser";
@@ -56,6 +56,21 @@ const ATOM_OBJECT_LINK_FIXTURE = `<?xml version="1.0" encoding="UTF-8"?>
 </entry>
 </feed>`;
 
+const MESSY_TITLE_RSS_FIXTURE = `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+<channel>
+<title>Messy Title Blog</title>
+<item>
+<title>
+  結婚式の
+	  タイトル例\n\u2028行区切り\u2029パラグラフ区切り  
+</title>
+<link>https://example.com/messy</link>
+<description>desc</description>
+</item>
+</channel>
+</rss>`;
+
 describe("parseFeed", () => {
   it("parses RSS 2.0 <item> entries", () => {
     const entries = parseFeed(RSS2_FIXTURE);
@@ -75,6 +90,15 @@ describe("parseFeed", () => {
     const entries = parseFeed(ATOM_OBJECT_LINK_FIXTURE);
     expect(entries).toHaveLength(1);
     expect(entries[0].link).toBe("https://example.com/atom-obj");
+  });
+
+  it("normalizes titles in feed items by collapsing all whitespace runs and trimming", () => {
+    const entries = parseFeed(MESSY_TITLE_RSS_FIXTURE);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].title).toBe("結婚式の タイトル例 行区切り パラグラフ区切り");
+    expect(entries[0].title).not.toContain("\n");
+    expect(entries[0].title).not.toContain("\r");
+    expect(entries[0].title).not.toContain("\t");
   });
 
   it("parses RSS 1.0 (RDF) entries", () => {
@@ -138,15 +162,23 @@ describe("stripHtml", () => {
   });
 });
 
-describe("extractFirstImage", () => {
-  it("extracts the first <img src> in HTML", () => {
-    const html =
-      '<p><img src="https://example.com/a.jpg"/></p><img src="https://example.com/b.jpg"/>';
-    expect(extractFirstImage(html)).toBe("https://example.com/a.jpg");
+describe("normalizeTitle", () => {
+  it("collapses whitespace runs, newlines, tabs, and line/paragraph separators into single spaces and trims", () => {
+    const messy = "  結婚式の\n\r\tタイトル\u2028テスト\u2029例  ";
+    expect(normalizeTitle(messy)).toBe("結婚式の タイトル テスト 例");
   });
 
-  it("returns null when there is no image", () => {
-    expect(extractFirstImage("<p>no image here</p>")).toBeNull();
-    expect(extractFirstImage(null)).toBeNull();
+  it("preserves U+3000 ideographic full-width spaces verbatim", () => {
+    const withFullWidthSpace = "結婚式　準備　レポート";
+    expect(normalizeTitle(withFullWidthSpace)).toBe("結婚式　準備　レポート");
+  });
+
+  it("decodes entities while normalizing", () => {
+    expect(normalizeTitle("結婚式の &amp; 費用")).toBe("結婚式の & 費用");
+  });
+
+  it("returns empty string for null or undefined", () => {
+    expect(normalizeTitle(null)).toBe("");
+    expect(normalizeTitle(undefined)).toBe("");
   });
 });

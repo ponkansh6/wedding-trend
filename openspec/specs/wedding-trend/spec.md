@@ -708,7 +708,13 @@ THEN 1 ELSE 0 END` で判定している。`json_extract` は文字列値をク�
   この OR の左辺（`aiTitle IS NOT NULL`）を満たす投稿が今後生まれることはない。
 - **phase2**: `post_rationales.post_id IS NOT NULL` のみ。バックフィル完了後に
   切り替える、判定根拠のみを表示条件とする最終形。
-- 判定根拠（`post_rationales` 行）の存在は掲載可否の条件としてのみ用い、topicAnchor/rationaleText/aiSummary はいずれも公開面には描画しない（`src/components/feed/feed-card.tsx`）。
+- 判定根拠（`post_rationales` 行）の存在は掲載可否の条件として用いる。
+- `topicAnchor` と有用度判定のうち肯定的4種（`firsthand`/`ceremonyDecision`/`specific`/`weddingDayContent`）は公開面に描画する。
+- `rationaleText`・`aiSummary`・否定的または中立的な判定（`preDecisionOrPhotoShoot`・`promotional`）はいずれも公開面には描画しない。
+- `topicAnchor`・有用度ラベルは LLM 生成物であり、`ai` バリアントの「AI判定」バッジで読者に明示する（`src/components/feed/feed-card.tsx`）。
+- 参照行 `src/components/feed/feed-card.tsx` を維持する。
+- タイトル取得の全経路で `normalizeTitle()`（`src/lib/sources/base/feed-parser.ts`）が改行・タブ・U+2028/2029・連続半角空白を単一空白に正規化し前後を trim する（U+3000 全角空白は逐語性維持のため正規化対象外）。
+- `src/lib/publish/gate.ts` の `CONTROL_CHAR_RE` は C0/C1（タブ・改行を除く）を検知する最終防衛線ではなく、ホワイトスペースの正規化は取得段階の `normalizeTitle()` が担う旨をコメントで明記している。
 - 両フェーズとも `posts.status = "published"` が前提条件であり、
   §10-4 の決定的ゲート（判定に足る原文テキストが存在しない）を満たさない
   投稿は `post_rationales` 行を持たない・`status` が `"pending"` のまま

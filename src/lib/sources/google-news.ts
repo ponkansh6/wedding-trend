@@ -1,7 +1,7 @@
 import { XMLParser } from "fast-xml-parser";
 import { GOOGLE_NEWS_QUERIES, SOURCE_ITEM_LIMIT } from "@/lib/constants";
 import { fetchRssText } from "./base/rss-fetcher";
-import { decodeEntities } from "./base/feed-parser";
+import { decodeEntities, normalizeTitle } from "./base/feed-parser";
 
 const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_" });
 
@@ -50,7 +50,7 @@ function parseGoogleNewsItem(raw: unknown): GoogleNewsItem {
         ? decodeEntities((sourceNode as Record<string, unknown>)["#text"])
         : null;
 
-  const rawTitle = decodeEntities(item.title);
+  const rawTitle = normalizeTitle(item.title);
 
   return {
     title: stripSourceSuffix(rawTitle, sourceName),

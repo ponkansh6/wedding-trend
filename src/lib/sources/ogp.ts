@@ -1,3 +1,5 @@
+import { normalizeTitle } from "./base/feed-parser";
+
 export interface OgpMetadata {
   title: string | null;
   description: string | null;
@@ -108,7 +110,7 @@ export function parseOgpMetadata(html: string): OgpMetadata {
   // <title> タグの抽出
   const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
   if (titleMatch && titleMatch[1]) {
-    htmlTitle = decodeHtmlEntities(titleMatch[1].trim());
+    htmlTitle = normalizeTitle(titleMatch[1]);
   }
 
   // <meta> タグの走査
@@ -125,7 +127,7 @@ export function parseOgpMetadata(html: string): OgpMetadata {
       const prop = propMatch[2].toLowerCase();
       const content = decodeHtmlEntities(contentMatch[2].trim());
 
-      if (prop === "og:title") ogTitle = content;
+      if (prop === "og:title") ogTitle = normalizeTitle(contentMatch[2]);
       else if (prop === "og:description") ogDesc = content;
       else if (prop === "og:image") ogImage = content;
       else if (prop === "og:site_name") ogSiteName = content;

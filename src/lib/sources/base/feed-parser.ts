@@ -45,6 +45,13 @@ export function decodeEntities(input: unknown): string {
     .replace(/&nbsp;/g, " ");
 }
 
+/** 名前付きエンティティ・数値文字参照をデコードした上で、空白（改行・タブ等、U+3000を除く）を正規化する。 */
+export function normalizeTitle(input: unknown): string {
+  const str = decodeEntities(input);
+  if (!str) return "";
+  return str.replace(/[ \t\r\n\u2028\u2029]+/g, " ").trim();
+}
+
 /** HTML タグを除去し、連続する空白を 1 個にまとめ、前後をトリムする。 */
 export function stripHtml(html: string): string {
   if (!html) return "";
@@ -151,7 +158,7 @@ function parseRss2Item(raw: unknown): FeedEntry {
   const author = readAuthor(item["dc:creator"], item["note:creatorName"], item.author);
 
   return {
-    title: decodeEntities(item.title),
+    title: normalizeTitle(item.title),
     link,
     excerpt: truncateExcerpt(bodyHtml),
     author,
@@ -180,7 +187,7 @@ function parseAtomEntry(raw: unknown): FeedEntry {
   const publishedRaw = readDate(entry.published, entry.updated);
 
   return {
-    title: decodeEntities(entry.title),
+    title: normalizeTitle(entry.title),
     link,
     excerpt: truncateExcerpt(bodyHtml),
     author,
