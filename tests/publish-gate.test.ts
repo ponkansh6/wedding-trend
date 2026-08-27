@@ -105,6 +105,11 @@ describe("checkAnchorGrounding (plan 07 §5-M1: topicAnchor の語彙的接地)"
     expect(checkAnchorGrounding("持ち込み料の交渉", bodyText)).toEqual({ ok: true });
   });
 
+  it("accepts an anchor containing allowlisted connectors/framing nouns even if absent from body", () => {
+    // "持ち込み料" is in body, but "理由" is in CONNECTOR_ALLOWLIST
+    expect(checkAnchorGrounding("持ち込み料の理由", bodyText)).toEqual({ ok: true });
+  });
+
   it("rejects an anchor containing a term absent from the body, and reports it in missingTerms", () => {
     const result = checkAnchorGrounding("海外挙式の費用相場", bodyText);
     expect(result.ok).toBe(false);

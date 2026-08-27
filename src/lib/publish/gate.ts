@@ -113,6 +113,56 @@ export function filterTitle(title: string): GateResult {
 const PARTICLE_SPLIT_RE =
   /(?:の|を|に|は|が|で|と|も|や|から|まで|より|へ|・|、|。|「|」|【|】|\[|\]|\(|\)|\s+)/g;
 
+/**
+ * Grounding allowlist: connectors / framing nouns that may appear in an anchor
+ * WITHOUT needing a verbatim source match. Content nouns (everything else) MUST
+ * still appear verbatim in the source — this preserves the no-fabrication guarantee.
+ */
+const CONNECTOR_ALLOWLIST = new Set<string>([
+  // particles / basic connectors
+  "の",
+  "に",
+  "を",
+  "と",
+  "から",
+  "で",
+  "が",
+  "は",
+  "や",
+  "か",
+  "も",
+  "について",
+  "ため",
+  "へ",
+  "まで",
+  "より",
+  "など",
+  "しか",
+  "ばかり",
+  // framing nouns that indicate decision/scene naming (click-inviting)
+  "理由",
+  "経緯",
+  "きっかけ",
+  "背景",
+  "決め手",
+  "ポイント",
+  "こだわり",
+  "選び方",
+  "迷い",
+  "悩み",
+  "相談",
+  "話し合い",
+  "決断",
+  "結果",
+  "変化",
+  "したい",
+  "したいか",
+  "するか",
+  "された",
+  "なった",
+  "なる",
+]);
+
 /** 記号・数字のみで構成される語（特徴語として無意味）を除外する判定。 */
 const SYMBOL_OR_DIGIT_ONLY_RE = /^[\p{P}\p{S}0-9０-９\s]+$/u;
 
@@ -223,7 +273,8 @@ export function checkAnchorGrounding(topicAnchor: string, bodyText: string): Gat
   }
 
   const normalizedBody = normalizeForGrounding(bodyText);
-  const missingTerms = terms.filter(
+  const requiredTerms = terms.filter((term) => !CONNECTOR_ALLOWLIST.has(term));
+  const missingTerms = requiredTerms.filter(
     (term) => !normalizedBody.includes(normalizeForGrounding(term)),
   );
 
