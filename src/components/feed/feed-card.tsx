@@ -65,12 +65,16 @@ export function FeedCard({ card, variant, index = 0 }: FeedCardProps) {
       )}
 
       {card.usefulness && (
-        <div className="flex flex-wrap gap-1.5">
-          {card.usefulness.firsthand && <Badge variant="category">当事者本人</Badge>}
-          {card.usefulness.ceremonyDecision && <Badge variant="category">意思決定に効く</Badge>}
-          {card.usefulness.specific && <Badge variant="category">具体的</Badge>}
-          {card.usefulness.weddingDayContent && <Badge variant="category">結婚式当日の内容</Badge>}
-        </div>
+        <p className="text-[11px] leading-tight text-muted-foreground">
+          {[
+            card.usefulness.firsthand && "当事者",
+            card.usefulness.ceremonyDecision && "意思決定",
+            card.usefulness.specific && "具体的",
+            card.usefulness.weddingDayContent && "当日内容",
+          ]
+            .filter(Boolean)
+            .join("・")}
+        </p>
       )}
 
       <Footer card={card} variant={variant} />
