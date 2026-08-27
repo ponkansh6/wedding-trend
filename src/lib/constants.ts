@@ -57,7 +57,7 @@ export const LLM_SINGLE_MAX_TOKENS = 800;
  * `computeCurationSignature` の対象であるプロンプトそのものの変更であり、
  * bump により全投稿の curationSignature が不一致になり再キュレーションされる）。
  */
-export const CURATION_PROMPT_VERSION = 5;
+export const CURATION_PROMPT_VERSION = 6;
 export const RATIONALE_PROMPT_VERSION = "rationale-v1";
 /** フィード表示条件のフェーズ。phase1: 移行期（レガシー対 OR 根拠存在）/ phase2: 根拠のみ。 */
 export const RATIONALE_DISPLAY_PHASE = "phase1" as const;
