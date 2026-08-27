@@ -211,7 +211,7 @@ describe("topicAnchor validation (plan 07 §5-M1 / §6-Q1,Q5: rationaleText / ev
 
   it("asserts prompt no longer instructs the LLM to generate rationaleText / evidenceSufficient", () => {
     const prompt = buildSingleCurationPrompt({ title: "テスト", excerpt: "テスト本文" });
-    expect(prompt).toContain("結論のアンカー");
+    expect(prompt).toContain("結論・結果・具体的数値を開示しないこと");
     expect(prompt).not.toContain("rationaleText");
     expect(prompt).not.toContain("evidenceSufficient");
   });

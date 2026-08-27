@@ -56,8 +56,9 @@ export const LLM_SINGLE_MAX_TOKENS = 800;
  * 重み変更のときとは異なり bump が正しい——この変更は
  * `computeCurationSignature` の対象であるプロンプトそのものの変更であり、
  * bump により全投稿の curationSignature が不一致になり再キュレーションされる）。
+ * v8 (2026-08-27, shared_plan/15): topicAnchor を「結論を出さずに記事が扱う具体的な判断・場面・選択肢を体言止めで名指しする」よう RATIONALE_RULES を書き換えた。bump により全投稿の curationSignature が不一致になり、backfill-usefulness.mjs で再キュレーションされる。
  */
-export const CURATION_PROMPT_VERSION = 7;
+export const CURATION_PROMPT_VERSION = 8;
 export const RATIONALE_PROMPT_VERSION = "rationale-v1";
 /** フィード表示条件のフェーズ。phase1: 移行期（レガシー対 OR 根拠存在）/ phase2: 根拠のみ。 */
 export const RATIONALE_DISPLAY_PHASE = "phase1" as const;
