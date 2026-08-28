@@ -13,16 +13,61 @@
  * CURATION_DEADLINE_MS（ソフト締切）はローカル実行には無関係なので、
  * 予算を上げ・締切なしで一括処理する。
  *
+ * Gemini 無料枠（15 req/min）は全候補を一度に流すとすぐに枯渇する
+ * （429 の指数バックオフ再試行が積み重なりログが埋まる上、実際の成功率も
+ * 落ちる）。そのための分割実行オプション（--limit / --source）と、
+ * バッチ投入間隔（BACKFILL_CHUNK_SIZE / BACKFILL_CHUNK_DELAY_MS）を用意している。
+ * **再開可能性**: LLM 呼び出しに失敗した候補（429 で結果を得られなかった等）は
+ * `curationSignature` を更新しないため、次回このスクリプトを実行したとき
+ * `getStaleCurationCandidates()` に再び候補として現れる。したがって
+ * `--limit` で小分けにしながら何度も再実行しても安全（二重更新にはならず、
+ * 前回失敗した分は自然にリトライされる）。
+ *
  * 使い方（pnpm 経由。npx/npm は使わない）:
- *   pnpm exec tsx scripts/backfill-usefulness.mjs          # dry-run（対象件数のみ表示）
- *   pnpm exec tsx scripts/backfill-usefulness.mjs --apply  # 実際に実行（Gemini 課金が発生する）
+ *   pnpm exec tsx scripts/backfill-usefulness.mjs          # dry-run（Gemini を呼んで
+ *     プレビュー表示するが DB へは書き込まない。Gemini 課金は dry-run でも発生する）
+ *   pnpm exec tsx scripts/backfill-usefulness.mjs --apply  # 実際に DB へ書き込む
  *   pnpm exec tsx scripts/backfill-usefulness.mjs --apply --force
  *     # 署名に関わらず全ブログ投稿を再スコア（キュレーション結果の修正・検証用）
+ *   pnpm exec tsx scripts/backfill-usefulness.mjs --limit 20
+ *     # 候補プールの先頭 20 件だけを対象にする（無料枠内での分割実行用）
+ *   pnpm exec tsx scripts/backfill-usefulness.mjs --source note.com --limit 20
+ *     # URL に "note.com" を含む候補（プラン16 Stage 6 のコホート順）に絞った上で先頭 20 件
+ *
+ * 環境変数（バッチ投入間隔の調整。Gemini 無料枠 15 req/min を踏まえたデフォルト値）:
+ *   BACKFILL_CHUNK_SIZE      : curatePosts() 1 回あたりに渡す候補数（デフォルト 5）
+ *   BACKFILL_CHUNK_DELAY_MS  : チャンク間のウェイト（ミリ秒、デフォルト 15000）
  */
 import { existsSync, readFileSync } from "node:fs";
 
 const APPLY = process.argv.includes("--apply");
 const FORCE = process.argv.includes("--force");
+
+/** `--limit N` / `--source X` のような `--flag value` 形式の値を argv から取り出す。 */
+function readFlagValue(flag) {
+  const idx = process.argv.indexOf(flag);
+  if (idx === -1 || idx + 1 >= process.argv.length) return undefined;
+  return process.argv[idx + 1];
+}
+
+const LIMIT_RAW = readFlagValue("--limit");
+const LIMIT = LIMIT_RAW !== undefined ? Number.parseInt(LIMIT_RAW, 10) : undefined;
+if (LIMIT_RAW !== undefined && (!Number.isFinite(LIMIT) || LIMIT < 0)) {
+  console.error(`--limit の値が不正です: ${LIMIT_RAW}`);
+  process.exit(1);
+}
+const SOURCE = readFlagValue("--source");
+
+const CHUNK_SIZE = process.env.BACKFILL_CHUNK_SIZE
+  ? Number.parseInt(process.env.BACKFILL_CHUNK_SIZE, 10)
+  : 5;
+const CHUNK_DELAY_MS = process.env.BACKFILL_CHUNK_DELAY_MS
+  ? Number.parseInt(process.env.BACKFILL_CHUNK_DELAY_MS, 10)
+  : 15_000;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 // .env.local の簡易パーサ（scripts/apply-migrations-remote.mjs と同じ作法）。
 if (existsSync(".env.local")) {
@@ -55,7 +100,8 @@ console.log(`接続先スキーム: ${process.env.TURSO_DATABASE_URL.split(":")[
 
 // env を設定した後に import する（src/lib/db/index.ts はモジュール読み込み時に
 // process.env を読んで接続を作るため）。
-const { getStaleCurationCandidates, markCurated } = await import("../src/lib/db/repository.ts");
+const { getStaleCurationCandidates, markCurated, getRationaleByPostId } =
+  await import("../src/lib/db/repository.ts");
 const { curatePosts } = await import("../src/lib/llm/batch.ts");
 const { computeContentHash, computeCurationSignature } =
   await import("../src/lib/llm/signature.ts");
@@ -63,127 +109,227 @@ const { LLM_MODEL } = await import("../src/lib/llm/client.ts");
 const { RATIONALE_PROMPT_VERSION } = await import("../src/lib/constants.ts");
 const { validateTopicAnchor } = await import("../src/lib/publish/gate.ts");
 const { shouldRegenerateAnchor } = await import("./lib/backfill-anchor-gate.mjs");
+const {
+  partitionCandidates,
+  selectCandidatesForRun,
+  chunkArray,
+  classifyBackfillOutcomes,
+  summarizeBackfillOutcomes,
+  buildBackfillUpdates,
+  toMarkCuratedInput,
+} = await import("./lib/backfill-plan.mjs");
 
-// 本番の対象件数（数十件想定）を十分に上回る上限。無限に伸びないための保険。
+// 本番の対象件数（数十件想定）を十分に上回る上限。無限に伸びないための保険であり、
+// --limit とは別物: --source によるコホート絞り込みを --limit 適用前に行うため、
+// 常に大きめのプールを取得してから scripts/lib/backfill-plan.mjs の
+// selectCandidatesForRun() で絞り込む（詳細は同関数の JSDoc 参照）。
 const BACKFILL_LIMIT = 1000;
 
 const currentSignature = computeCurationSignature();
 console.log(`対象シグネチャ: ${currentSignature} / モデル: ${LLM_MODEL}`);
 
-const candidates = await getStaleCurationCandidates({
+const allCandidates = await getStaleCurationCandidates({
   currentSignature,
   limit: BACKFILL_LIMIT,
   force: FORCE,
 });
-console.log(`バックフィル対象: ${candidates.length} 件${FORCE ? "（--force: 署名無視）" : ""}`);
+console.log(
+  `バックフィル対象（DB 上の候補プール全体）: ${allCandidates.length} 件${FORCE ? "（--force: 署名無視）" : ""}`,
+);
 
-if (!APPLY) {
+// --source によるコホート絞り込み → --limit による頭出し、の順で適用する
+// （selectCandidatesForRun の JSDoc 参照。順序を逆にすると --source の意味が失われる）。
+const candidates = selectCandidatesForRun(allCandidates, { source: SOURCE, limit: LIMIT });
+if (SOURCE || LIMIT !== undefined) {
   console.log(
-    "dry-run です。実行するには --apply を付けて再実行してください（Gemini 課金が発生します）。",
+    `今回の実行対象（--source=${SOURCE ?? "(指定なし)"} --limit=${LIMIT ?? "(指定なし)"} 適用後）: ${candidates.length} 件`,
   );
-  process.exit(0);
 }
+
 if (candidates.length === 0) {
   console.log("対象なし。終了します。");
   process.exit(0);
 }
 
-console.log("Gemini によるキュレーションを開始します...");
-// 1. プレフライト: shouldRegenerateAnchor が false の候補は、LLM 呼び出し時の入力から除外するか、
-// あるいは結果処理時に topicAnchor を設定しない。ここでは curatePosts に渡す入力自体をフィルタするか、
-// まとめて処理しつつ結果構築時に適用する。
-// プラン要求: "if shouldRegenerateAnchor is false → skip the record (keep existing topicAnchor, do NOT call the LLM, do NOT overwrite)"
-// 注意: curatePosts は一括配列を受け取るため、ここで候補を 2 つのグループ（再生成する候補 / スキップする候補）に分けるのがクリーン。
-const runnableCandidates = [];
-const skippedIndicesMap = new Map();
-
-candidates.forEach((c, index) => {
-  if (shouldRegenerateAnchor({ title: c.originalTitle, excerpt: c.originalExcerpt })) {
-    runnableCandidates.push({ candidate: c, originalIndex: index });
-  } else {
-    skippedIndicesMap.set(index, c);
-  }
-});
+// R4: dry-run でも新旧 topicAnchor の対比を表示するため、--apply の有無にかかわらず
+// Gemini を呼び出す（DB への書き込みだけを末尾で APPLY によってゲートする）。
+// dry-run でも Gemini 課金は発生することを明示しておく。
+console.log(
+  APPLY
+    ? "Gemini によるキュレーションを開始します..."
+    : "dry-run: Gemini によるキュレーションを実行して結果をプレビューします（課金が発生します。DB へは書き込みません）...",
+);
+// プレフライト: shouldRegenerateAnchor が false の候補は、LLM 呼び出しの入力から
+// 除外する（スキップし、既存アンカー・既存キュレーション値は一切温存する）。
+// 分割ロジック本体は scripts/lib/backfill-plan.mjs の partitionCandidates()
+// （純粋関数として抽出し、単体テストで「スキップ対象は updates に一切現れない」
+// 不変条件を固定している。tests/backfill-plan.test.ts 参照）。
+const { runnableCandidates, skippedCandidates } = partitionCandidates(
+  candidates,
+  shouldRegenerateAnchor,
+);
 
 console.log(
-  `プレフライト判定: 再生成対象 ${runnableCandidates.length} 件 / スキップ（タイトルのみ等） ${skippedIndicesMap.size} 件`,
+  `プレフライト判定: 再生成対象（＝ LLM を呼ぶ件数） ${runnableCandidates.length} 件 / スキップ（タイトルのみ等） ${skippedCandidates.length} 件`,
 );
+
+// Gemini 無料枠（15 req/min）への配慮: curatePosts() 自体の内部リトライ・並行数
+// 制御（src/lib/llm/batch.ts, src/lib/llm/client.ts）は変更せず、このスクリプト側で
+// 「一度に curatePosts() へ渡す件数を CHUNK_SIZE 件に抑え、チャンク間に
+// CHUNK_DELAY_MS のウェイトを挟む」ことでバースト的なリクエスト集中を避ける。
+const runnableChunks = chunkArray(runnableCandidates, CHUNK_SIZE);
+if (runnableChunks.length > 1) {
+  console.log(
+    `チャンク分割: ${runnableChunks.length} チャンク（1チャンクあたり最大 ${CHUNK_SIZE} 件、間隔 ${CHUNK_DELAY_MS}ms）`,
+  );
+}
 
 let resultsMap = new Map();
 let geminiCalls = 0;
 
-if (runnableCandidates.length > 0) {
+for (let chunkIdx = 0; chunkIdx < runnableChunks.length; chunkIdx++) {
+  const chunk = runnableChunks[chunkIdx];
+  if (chunk.length === 0) continue;
+  if (chunkIdx > 0) {
+    console.log(`  ...チャンク間ウェイト ${CHUNK_DELAY_MS}ms...`);
+    await sleep(CHUNK_DELAY_MS);
+  }
+  console.log(
+    `  チャンク ${chunkIdx + 1}/${runnableChunks.length}（${chunk.length} 件）を処理中...`,
+  );
   const curationRes = await curatePosts(
-    runnableCandidates.map((rc) => ({
+    chunk.map((rc) => ({
       title: rc.candidate.originalTitle,
       excerpt: rc.candidate.originalExcerpt,
     })),
   );
-  geminiCalls = curationRes.geminiCalls;
+  geminiCalls += curationRes.geminiCalls;
   curationRes.results.forEach((res, idx) => {
-    resultsMap.set(runnableCandidates[idx].originalIndex, res);
+    resultsMap.set(chunk[idx].originalIndex, res);
   });
 }
 
-const updates = candidates
-  .map((c, i) => {
-    const isSkipped = skippedIndicesMap.has(i);
-    const result = resultsMap.get(i);
-    if (!isSkipped && !result) return null;
+// R4: dry-run 表示用に、実行対象候補の既存 topicAnchor（旧値）をまとめて引く。
+const oldAnchorByPostId = new Map();
+await Promise.all(
+  runnableCandidates
+    .filter((rc) => rc.candidate.id !== null)
+    .map(async (rc) => {
+      const existing = await getRationaleByPostId(rc.candidate.id);
+      oldAnchorByPostId.set(rc.candidate.id, existing?.topicAnchor ?? null);
+    }),
+);
 
-    let finalTopicAnchor = isSkipped ? null : result.topicAnchor;
+// 3状態への分類本体は scripts/lib/backfill-plan.mjs の classifyBackfillOutcomes()。
+// 「LLM 呼び出し自体が失敗した（結果なし）」候補と「LLM は成功したが gate に
+// 落ちた」候補を明確に区別する（このスクリプトが直す対象の退行）。
+const outcomes = classifyBackfillOutcomes(runnableCandidates, resultsMap, { validateTopicAnchor });
+const outcomeSummary = summarizeBackfillOutcomes(outcomes);
 
-    if (!isSkipped && finalTopicAnchor) {
-      const corpus = `${c.originalTitle ?? ""}\n${c.originalExcerpt ?? ""}`;
-      const gateRes = validateTopicAnchor(finalTopicAnchor, {
-        corpus,
-        title: c.originalTitle ?? "",
-      });
-      if (!gateRes.ok) {
-        // ポストフライト安全フィルター: 失敗した場合は topicAnchor を null に劣化させる
-        finalTopicAnchor = null;
+// updates 構築本体は scripts/lib/backfill-plan.mjs の buildBackfillUpdates()。
+// ここで渡す outcomes は上の分類結果そのものであり、kind === "llm_failed" の候補は
+// 内部で除外されるため、返る updates にそのエントリは一切現れない（＝ posts への
+// UPDATE 文が生成されない。R1）。プレフライトでスキップされた候補は
+// runnableCandidates にすら含まれていないため、同様に updates に現れない。
+const { updates, degradeReasonCounts, matchedTermCounts } = buildBackfillUpdates(outcomes, {
+  computeContentHash,
+  currentSignature,
+  modelId: LLM_MODEL,
+  rationalePromptVersion: RATIONALE_PROMPT_VERSION,
+  oldAnchorByPostId,
+});
+
+// R4: dry-run（--apply なし）でも、実行対象・スキップ対象・LLM失敗/gate degrade/
+// 更新の内訳を目視レビューできるようにする。
+console.log("");
+console.log("── サマリー ──");
+console.log(`候補総数（今回の対象プール）: ${candidates.length} 件`);
+console.log(`LLM を呼んだ件数（プレフライト通過分）: ${runnableCandidates.length} 件`);
+console.log(`スキップ（材料不足のため posts は一切更新しない）: ${skippedCandidates.length} 件`);
+if (skippedCandidates.length > 0) {
+  console.log("  スキップ対象 URL:", skippedCandidates.map((rc) => rc.candidate.url).join(", "));
+}
+console.log("");
+console.log("── LLM 呼び出し後の内訳（3状態。件数の合計は「LLM を呼んだ件数」と一致する） ──");
+console.log(
+  `  LLM 失敗（429 等で結果が得られず、updates に含めない・posts 未更新・次回また候補になる）: ${outcomeSummary.llmFailed} 件`,
+);
+console.log(
+  `  gate degrade（生成できたが validateTopicAnchor に落ちたので topicAnchor = null。` +
+    `旧アンカー・curationSignature は温存し次回また再生成の候補に残す。aiTitle/aiSummary/category/tag は更新する）: ${outcomeSummary.gateDegrade} 件`,
+);
+console.log(
+  `  更新（topicAnchor を含め通常どおり反映。curationSignature も前進）: ${outcomeSummary.updated} 件`,
+);
+console.log(`  → updates 件数: ${updates.length} 件（= gate degrade + 更新。LLM失敗分は含まない）`);
+if (degradeReasonCounts.size > 0) {
+  console.log("  gate degrade の理由内訳:");
+  for (const [reason, count] of degradeReasonCounts) {
+    console.log(`    - ${reason}: ${count} 件`);
+  }
+}
+if (matchedTermCounts.size > 0) {
+  // 要件4: anchor_prohibited_term で実際にどの denylist 項目（語 or 正規表現の
+  // source）が効いたかの内訳。src/lib/publish/gate.ts の checkAnchorDenylist の
+  // matchedTerms JSDoc を参照（ルール識別子であり、実際の一致文字列そのものでは
+  // ない箇所がある。個々の却下アンカーの実文言は下の「topicAnchor 対比」に出る）。
+  console.log("  anchor_prohibited_term で抵触した denylist 項目の内訳:");
+  for (const [term, count] of matchedTermCounts) {
+    console.log(`    - ${term}: ${count} 件`);
+  }
+}
+if (outcomeSummary.llmFailed > 0) {
+  const failedUrls = outcomes.filter((o) => o.kind === "llm_failed").map((o) => o.candidate.url);
+  console.log(`  LLM 失敗 URL（次回再実行で自動的に再候補化される）: ${failedUrls.join(", ")}`);
+}
+if (updates.length > 0) {
+  console.log("");
+  console.log(
+    "── topicAnchor 対比（旧 → 新。gate degrade は新が null になり、旧アンカー・署名は温存される） ──",
+  );
+  for (const u of updates) {
+    const oldAnchor = u._oldTopicAnchor ?? "(なし)";
+    const newAnchor = u._newTopicAnchor ?? "(null / gate degrade)";
+    const reasonSuffix =
+      u._kind === "gate_degrade" ? `（理由: ${u._gateReason ?? "unknown"}）` : "";
+    const lines = [
+      `  [${u._kind}]${reasonSuffix} ${u.url}`,
+      `    旧: ${oldAnchor}`,
+      `    新: ${newAnchor}`,
+    ];
+    // 要件1〜3: 却下されたアンカーの実際の文言と、missingTerms（anchor_ungrounded）/
+    // matchedTerms（anchor_prohibited_term）を1回目・リトライそれぞれ表示する。
+    for (const rejected of u._rejectedAnchors ?? []) {
+      const attemptLabel = rejected.attempt === "first" ? "1回目" : "リトライ";
+      const anchorText = rejected.anchor ?? "(生成なし)";
+      const details = [];
+      if (rejected.missingTerms && rejected.missingTerms.length > 0) {
+        details.push(`未接地語: ${rejected.missingTerms.join("・")}`);
       }
+      if (rejected.matchedTerms && rejected.matchedTerms.length > 0) {
+        details.push(`抵触: ${rejected.matchedTerms.join("・")}`);
+      }
+      const detailSuffix = details.length > 0 ? `（${details.join(", ")}）` : "";
+      lines.push(
+        `    却下(${attemptLabel}, 理由: ${rejected.reason ?? "unknown"}): 「${anchorText}」${detailSuffix}`,
+      );
     }
+    console.log(lines.join("\n"));
+  }
+}
+console.log("");
 
-    return {
-      url: c.url,
-      aiTitle: isSkipped ? null : result.title,
-      aiSummary: isSkipped ? null : result.summary,
-      category: isSkipped ? null : result.category,
-      tag: isSkipped ? null : result.tag,
-      contentHash: computeContentHash(c.originalTitle, c.originalExcerpt),
-      curationSignature: currentSignature,
-      usefulness:
-        c.id !== null && !isSkipped
-          ? {
-              postId: c.id,
-              modelId: LLM_MODEL,
-              criteria: {
-                firsthand: result.firsthand,
-                ceremonyDecision: result.ceremonyDecision,
-                specific: result.specific,
-                weddingDayContent: result.weddingDayContent,
-                promotional: result.promotional,
-                preDecisionOrPhotoShoot: result.preDecisionOrPhotoShoot,
-              },
-            }
-          : undefined,
-      rationale:
-        c.id !== null && !isSkipped && finalTopicAnchor !== null
-          ? {
-              postId: c.id,
-              topicAnchor: finalTopicAnchor,
-              rationaleText: result.rationaleText,
-              evidenceSufficient: true,
-              modelId: LLM_MODEL,
-              promptVersion: RATIONALE_PROMPT_VERSION,
-            }
-          : undefined,
-    };
-  })
-  .filter((u) => u !== null);
+if (!APPLY) {
+  console.log(
+    "dry-run です。上記内容で問題なければ --apply を付けて再実行してください（Gemini 課金が発生します）。",
+  );
+  process.exit(0);
+}
 
-const markResult = await markCurated(updates);
+// markCurated に渡す前に dry-run 専用フィールドを取り除く。
+const applyUpdates = toMarkCuratedInput(updates);
+
+const markResult = await markCurated(applyUpdates);
 
 console.log(`Gemini 呼び出し回数: ${geminiCalls}`);
 console.log(`更新成功: ${markResult.succeeded.length} 件 / 失敗: ${markResult.failed.length} 件`);

@@ -199,6 +199,72 @@ describe("Database Repository and Queries", () => {
     expect(usefulnessRows).toHaveLength(0);
   });
 
+  // 注意: このテストは buildPostSet のガード（`u.aiSummary !== undefined ? {...} : {}`
+  // 等）を壊しても落ちない。Drizzle の `.set()` は元々 `undefined` プロパティを
+  // 無視するため、`undefined` を渡す限りガードの有無に関わらず既存値は保持される
+  // （ガードは意図の明示であり、唯一の防御線ではない。詳細は buildPostSet の
+  // JSDoc コメントを参照）。ここで確認しているのは
+  // 「CurationUpdate の aiSummary/category/tag を省略しても markCurated は
+  // 例外を投げず、posts の既存フィールドを破壊しない」という markCurated の
+  // 素直な特性であって、preflight スキップの不変条件そのものではない。
+  // その不変条件（「shouldRegenerateAnchor が false の候補は updates に
+  // 一切現れない」）は tests/backfill-plan.test.ts で
+  // scripts/lib/backfill-plan.mjs の純粋関数を直接検証している。
+  it("markCurated with aiSummary/category/tag omitted (undefined) does not overwrite existing posts fields (characterization of Drizzle's undefined-ignoring .set(), not a regression guard by itself)", async () => {
+    await upsertPosts([
+      {
+        url: "https://example.com/preserve-existing",
+        sourceType: "blog",
+        sourceId: "note",
+        sourceName: "note",
+        originalTitle: "Preserve Existing Title",
+        originalExcerpt: "excerpt",
+        author: null,
+        thumbnailUrl: null,
+        publishedAt: null,
+      },
+    ]);
+
+    // 1回目: 通常どおり実値でキュレーションする。
+    const firstRes = await markCurated([
+      {
+        url: "https://example.com/preserve-existing",
+        aiTitle: "Existing AI Title",
+        aiSummary: "Existing AI Summary",
+        category: "その他",
+        tag: "trend",
+        contentHash: "hash-v1",
+        curationSignature: "sig-v1",
+      },
+    ]);
+    expect(firstRes.succeeded).toContain("https://example.com/preserve-existing");
+
+    // 2回目: backfill スクリプトの preflight スキップ経路を模して、
+    // aiTitle/aiSummary/category/tag を省略（undefined）した CurationUpdate を渡す。
+    // これは shouldRegenerateAnchor が false の候補について contentHash /
+    // curationSignature も更新しない（=署名を進めない）方針も兼ねて確認する。
+    const secondRes = await markCurated([
+      {
+        url: "https://example.com/preserve-existing",
+        contentHash: "hash-v1",
+        curationSignature: "sig-v1",
+      },
+    ]);
+    expect(secondRes.succeeded).toContain("https://example.com/preserve-existing");
+
+    const rows = await db
+      .select()
+      .from(posts)
+      .where(eq(posts.url, "https://example.com/preserve-existing"));
+    expect(rows).toHaveLength(1);
+    // aiTitle/aiSummary/category/tag は undefined を渡した2回目の呼び出しで
+    // 破壊されず、1回目に書き込んだ既存値のまま残っていること。
+    expect(rows[0].aiTitle).toBe("Existing AI Title");
+    expect(rows[0].aiSummary).toBe("Existing AI Summary");
+    expect(rows[0].category).toBe("その他");
+    expect(rows[0].tag).toBe("trend");
+  });
+
   it("T3: getFeedCards excludes posts whose aiSummary is null even when curated otherwise", async () => {
     await upsertPosts([
       {

@@ -181,9 +181,28 @@ export async function getPostsByUrls(urls: string[]): Promise<Map<string, PostCu
 export interface CurationUpdate {
   url: string;
   aiTitle?: string | null;
-  aiSummary: string;
-  category: Category;
-  tag: TrendTag;
+  /**
+   * `undefined` を渡すと SET 句から除外され、`posts` の既存値を保持する
+   * （`aiTitle` と同じ「防御的 undefined ガード」。`scripts/backfill-usefulness.mjs`
+   * の preflight スキップ経路が既存の非 NULL 値を誤って NULL 上書きしていた
+   * 退行の再発防止。詳細は `buildPostSet` を参照）。
+   * ingest / evergreen / submit-url / discovery-ingest の通常経路は常に
+   * 実値を渡すため挙動は変わらない。
+   *
+   * ⚠️ **このガードは唯一の防御線ではない**: Drizzle の `.set()` はそもそも
+   * `undefined` のプロパティを無視する（値を渡さなければ SET 句に載らない）ため、
+   * `undefined` を渡す限りこのガードを削除しても実害は出ない
+   * （`tests/db.test.ts` の characterization テスト参照）。真の防御線は
+   * `scripts/backfill-usefulness.mjs` 側にある: preflight でスキップした候補を
+   * `markCurated()` に渡す `updates` 配列にそもそも含めないこと
+   * （`scripts/lib/backfill-plan.mjs` の `buildBackfillUpdates` /
+   * `tests/backfill-plan.test.ts` が固定している不変条件）。ここのガードは
+   * 「`undefined` を渡せば既存値が保持される」という契約を型・コードとして
+   * 明示するための defense-in-depth（意図の明示）に過ぎない。
+   */
+  aiSummary?: string | null;
+  category?: Category | null;
+  tag?: TrendTag | null;
   contentHash: string;
   curationSignature: string;
   /** 指定があれば status も一緒に更新する（例: submit-url でのキュレーション失敗 → "pending"）。 */
@@ -247,9 +266,9 @@ export async function markCurated(
     const isRemovedPost = id !== undefined && removedIds.has(id);
     return {
       ...(u.aiTitle !== undefined ? { aiTitle: u.aiTitle } : {}),
-      aiSummary: u.aiSummary,
-      category: u.category,
-      tag: u.tag,
+      ...(u.aiSummary !== undefined ? { aiSummary: u.aiSummary } : {}),
+      ...(u.category !== undefined ? { category: u.category } : {}),
+      ...(u.tag !== undefined ? { tag: u.tag } : {}),
       contentHash: u.contentHash,
       curationSignature: u.curationSignature,
       updatedAt: now,
