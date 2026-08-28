@@ -25,7 +25,9 @@
     "check:oembed": "node scripts/check-oembed-contract.mjs",
     "eval:llm": "node scripts/eval-llm-compliance.mjs",
     "backfill:usefulness": "tsx scripts/backfill-usefulness.mjs",
-    "retract": "tsx scripts/retract.mjs"
+    "retract": "tsx scripts/retract.mjs",
+    "snapshot:anchors": "tsx scripts/snapshot-anchors.mjs",
+    "restore:anchors": "tsx scripts/restore-anchors.mjs"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

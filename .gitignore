@@ -49,3 +49,6 @@ next-env.d.ts
 # ローカル開発用 SQLite（file: スキーム）
 local.db
 local.db-*
+
+# topicAnchor 再生成前の復元用スナップショット（scripts/snapshot-anchors.mjs）
+snapshots/
