@@ -149,34 +149,21 @@ describe("New Anchor Gate Checks (D2, D3, D4, D6, validateTopicAnchor)", () => {
     expect(checkAnchorGrounding("銀座の会場", "銀座の素敵な会場")).toEqual({ ok: true });
   });
 
-  it("D3: hard denylist — 残すのは数値・日付・金額・PII のみ（2026-08-29: clickbait 語群は撤廃）", () => {
-    // 残す: 数値・金額・日付・元号（§10-3「結論・具体的数値を開示しない」）。
-    expect(checkAnchorDenylist("30万の節約術").ok).toBe(false);
-    expect(checkAnchorDenylist("結婚式は20万円").ok).toBe(false);
-    expect(checkAnchorDenylist("令和7年のトレンド").ok).toBe(false);
-    expect(checkAnchorDenylist("三人で行こうかな").ok).toBe(false); // 漢数字
-    // 残す: 個人識別情報。
+  it("D3: hard denylist — 残すのは個人識別情報のみ（2026-08-29 第2段: 数値・日付・金額・漢数字パターンも撤廃）", () => {
+    // 残す: 個人識別情報（SNS ハンドル・敬称付き人名）。
     expect(checkAnchorDenylist("@yamada さんの話").ok).toBe(false);
-    // 撤廃: clickbait 語・語尾パターン（しよう/すべき）は通す。
+    expect(checkAnchorDenylist("マイさんが悩んだ席次").ok).toBe(false);
+    // 撤廃: 数値・金額・日付・元号・漢数字は通す（接地検証と根拠文の数値 refine に委ねる）。
+    expect(checkAnchorDenylist("30万の節約術").ok).toBe(true);
+    expect(checkAnchorDenylist("結婚式は20万円").ok).toBe(true);
+    expect(checkAnchorDenylist("令和7年のトレンド").ok).toBe(true);
+    expect(checkAnchorDenylist("二部制ウェディングをどう組んだか").ok).toBe(true); // 漢数字の過剰棄却解消
+    // 撤廃: clickbait 語・語尾パターン。
     expect(checkAnchorDenylist("衝撃の事実").ok).toBe(true);
-    expect(checkAnchorDenylist("必見のポイント").ok).toBe(true);
-    expect(checkAnchorDenylist("どう準備すべき").ok).toBe(true);
     expect(checkAnchorDenylist("会場をどう選ぼう").ok).toBe(true);
-    expect(checkAnchorDenylist("結婚式をしたい人ではなかった").ok).toBe(true);
   });
 
-  it("D3 可視化対応: checkAnchorDenylist は抵触した denylist 項目を matchedTerms として返す（判定ロジック自体は不変）", () => {
-    // DENYLIST_PATTERNS 一致時は、マッチした正規表現の source がルール識別子として入る
-    // （個々の実測値ではなく、同じルールへ集計できる識別子である点が本命）。
-    const patternHit = checkAnchorDenylist("持ち込み料は20万円");
-    expect(patternHit.ok).toBe(false);
-    if (!patternHit.ok) {
-      expect(patternHit.reason).toBe("anchor_prohibited_term");
-      expect(patternHit.matchedTerms).toEqual(["[0-9０-９]"]);
-    }
-
-    // 個人識別情報パターン（denylist の一部として checkAnchorDenylist 内で先に判定される）
-    // は、実際の氏名・ハンドルではなく固定のルール識別子を返す。
+  it("D3 可視化対応: checkAnchorDenylist は抵触した個人識別情報パターンの識別子を matchedTerms として返す", () => {
     const snsHit = checkAnchorDenylist("@yamada さんの話");
     expect(snsHit.ok).toBe(false);
     if (!snsHit.ok) {
@@ -184,8 +171,14 @@ describe("New Anchor Gate Checks (D2, D3, D4, D6, validateTopicAnchor)", () => {
       expect(snsHit.matchedTerms).toEqual(["personal_info_sns_handle"]);
     }
 
+    const honorificHit = checkAnchorDenylist("マイさんの会場選び");
+    expect(honorificHit.ok).toBe(false);
+    if (!honorificHit.ok) {
+      expect(honorificHit.matchedTerms).toEqual(["personal_info_honorific"]);
+    }
+
     // gate 通過時は matchedTerms を持たない。
-    const passing = checkAnchorDenylist("結婚式をしたい人ではなかった");
+    const passing = checkAnchorDenylist("持ち込み料は20万円かかった話");
     expect(passing).toEqual({ ok: true });
   });
 
@@ -226,15 +219,22 @@ describe("New Anchor Gate Checks (D2, D3, D4, D6, validateTopicAnchor)", () => {
     });
     expect(redundant).toEqual({ ok: true });
 
-    // Prohibited term / denylist（数値は §10-3 の結論非開示制約として維持）
-    const badDeny = validateTopicAnchor("館内案内で20万円の話がどう出たのか", {
-      corpus: `${corpus}20万円`,
+    // Prohibited term / denylist（2026-08-29 第2段以降は個人識別情報のみ）
+    const badDeny = validateTopicAnchor("マイさんが館内案内で何を確認したのか", {
+      corpus: `${corpus}新婦マイさん`,
       title,
     });
     expect(badDeny.ok).toBe(false);
     if (!badDeny.ok) {
       expect(badDeny.reason).toBe("anchor_prohibited_term");
     }
+
+    // 2026-08-29 第2段: 数値・金額はアンカーの denylist 対象外（接地すれば通る）。
+    const numeric = validateTopicAnchor("館内案内で20万円がどう出たのか", {
+      corpus: `${corpus}20万円`,
+      title,
+    });
+    expect(numeric).toEqual({ ok: true });
 
     // 語彙的接地は維持（ハルシネーション防止）。
     const badGround = validateTopicAnchor("函館旅行の予算をどう組んだのか", { corpus, title });

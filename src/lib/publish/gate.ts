@@ -131,40 +131,21 @@ function isHiraganaContaining(s: string): boolean {
 }
 
 /**
- * 2026-08-29 のゲート緩和: clickbait 語群（衝撃・必見・やばい・最高・神・感動 等）の
- * denylist を撤廃した。残すのは「結論・具体的数値の開示禁止」（§10-3）に直結する
- * 数値・日付・金額パターンと、個人識別情報パターン（`findPersonalInfoMatchRule`）のみ。
- */
-const DENYLIST_TERMS: string[] = [];
-
-const DENYLIST_PATTERNS: RegExp[] = [
-  /[0-9０-９]/,
-  /[一二三四五六七八九十百千万億零]/,
-  /[円万％%割ドルユーロ¥$£€]/,
-  /\d{4}年/,
-  /\d{1,2}月\d{1,2}日/,
-  /(平成|昭和|令和)\d+年/,
-];
-
-/**
- * 判定ロジック自体（何を denylist とみなすか・順序）は一切変更していない。
- * 可視化のため、棄却の根拠になった denylist 項目（「どのルールが効いたか」の
- * 識別子）を `matchedTerms` に詰めて返すようにしただけ（コーディネーターからの
- * 追加依頼: どの語・パターンに抵触したのかを集計・表示できるようにする）。
+ * topicAnchor の denylist 検証。
  *
- * `matchedTerms` の中身:
- * - `DENYLIST_TERMS` 一致: その語そのもの（例: `"衝撃"`）。
- * - `DENYLIST_PATTERNS` 一致: 正規表現の `source`（例: `"すべき$"`）。
- *   実際にマッチした部分文字列（例: `"20万円"`）ではなくルール識別子を
- *   返すのは、複数の異なる実測値が同じルールに集計されるようにするため
- *   （呼び出し元がサマリで「どの denylist 項目が何件効いたか」を数えられる）。
- * - 個人識別情報パターン一致: `"personal_info_sns_handle"` または
- *   `"personal_info_honorific"`（どちらのパターンが発火したかの識別子。
- *   実際の氏名・ハンドル文字列自体は含めない）。
+ * - **2026-08-29 (第1段)**: clickbait 語群（衝撃・必見・やばい・最高・神・感動 等）
+ *   と語尾パターン（しよう/すべき/N つの）を撤廃。
+ * - **2026-08-29 (第2段, オーナー判断)**: 数値・漢数字・金額・日付パターンも撤廃した。
+ *   漢数字パターン（`一二三…`）が「二部制」「三次会」「一緒に」等の非数値語を
+ *   過剰棄却していたのが直接の契機。数値開示の抑制は接地検証（コーパスに実在
+ *   する語しか使えない）と `renderRationaleText` 側の数値 refine（spec §10 K9）
+ *   に委ね、アンカーの denylist としては**個人識別情報のみ**を残す。
+ *
+ * `matchedTerms` には発火した個人識別情報パターンの識別子
+ * （`"personal_info_sns_handle"` / `"personal_info_honorific"`）を入れる
+ * （実際の氏名・ハンドル文字列自体は含めない）。
  */
 export function checkAnchorDenylist(topicAnchor: string): GateResult {
-  const normalized = topicAnchor.normalize("NFKC");
-
   const personalInfoRule = findPersonalInfoMatchRule(topicAnchor);
   if (personalInfoRule !== null) {
     return {
@@ -173,26 +154,6 @@ export function checkAnchorDenylist(topicAnchor: string): GateResult {
       missingTerms: [],
       matchedTerms: [personalInfoRule],
     };
-  }
-  for (const term of DENYLIST_TERMS) {
-    if (normalized.includes(term)) {
-      return {
-        ok: false,
-        reason: "anchor_prohibited_term",
-        missingTerms: [],
-        matchedTerms: [term],
-      };
-    }
-  }
-  for (const pat of DENYLIST_PATTERNS) {
-    if (pat.test(normalized)) {
-      return {
-        ok: false,
-        reason: "anchor_prohibited_term",
-        missingTerms: [],
-        matchedTerms: [pat.source],
-      };
-    }
   }
   return { ok: true };
 }
