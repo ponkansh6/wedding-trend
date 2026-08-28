@@ -17,7 +17,21 @@ import { RATIONALE_TEXT_MAX_CHARS, RATIONALE_TEXT_MIN_CHARS } from "@/lib/consta
 import type { PromotionalLevel } from "@/lib/scoring/usefulness";
 import type { DropReason } from "@/lib/types";
 
-export type GateResult = { ok: true } | { ok: false; reason: DropReason; missingTerms?: string[] };
+export type GateResult =
+  | { ok: true }
+  | {
+      ok: false;
+      reason: DropReason;
+      missingTerms?: string[];
+      /**
+       * `anchor_prohibited_term`（`checkAnchorDenylist`）で、実際に抵触した
+       * denylist 語・パターンの照合結果（マッチした部分文字列）。可視化専用の
+       * 追加情報であり、判定ロジック自体には一切影響しない
+       * （バックフィルのドライラン等で「なぜ落ちたか」を人が読める形にするため。
+       * `src/lib/publish/gate.ts` の `checkAnchorDenylist` JSDoc 参照）。
+       */
+      matchedTerms?: string[];
+    };
 
 // ─────────────────────────────────────────────────────────────
 // filterTitle（M1: タイトル公開フィルタ）
@@ -176,19 +190,52 @@ const DENYLIST_PATTERNS: RegExp[] = [
   /すべき$/,
 ];
 
+/**
+ * 判定ロジック自体（何を denylist とみなすか・順序）は一切変更していない。
+ * 可視化のため、棄却の根拠になった denylist 項目（「どのルールが効いたか」の
+ * 識別子）を `matchedTerms` に詰めて返すようにしただけ（コーディネーターからの
+ * 追加依頼: どの語・パターンに抵触したのかを集計・表示できるようにする）。
+ *
+ * `matchedTerms` の中身:
+ * - `DENYLIST_TERMS` 一致: その語そのもの（例: `"衝撃"`）。
+ * - `DENYLIST_PATTERNS` 一致: 正規表現の `source`（例: `"すべき$"`）。
+ *   実際にマッチした部分文字列（例: `"20万円"`）ではなくルール識別子を
+ *   返すのは、複数の異なる実測値が同じルールに集計されるようにするため
+ *   （呼び出し元がサマリで「どの denylist 項目が何件効いたか」を数えられる）。
+ * - 個人識別情報パターン一致: `"personal_info_sns_handle"` または
+ *   `"personal_info_honorific"`（どちらのパターンが発火したかの識別子。
+ *   実際の氏名・ハンドル文字列自体は含めない）。
+ */
 export function checkAnchorDenylist(topicAnchor: string): GateResult {
   const normalized = topicAnchor.normalize("NFKC");
-  if (containsPersonalInfoPattern(topicAnchor)) {
-    return { ok: false, reason: "anchor_prohibited_term", missingTerms: [] };
+
+  const personalInfoRule = findPersonalInfoMatchRule(topicAnchor);
+  if (personalInfoRule !== null) {
+    return {
+      ok: false,
+      reason: "anchor_prohibited_term",
+      missingTerms: [],
+      matchedTerms: [personalInfoRule],
+    };
   }
   for (const term of DENYLIST_TERMS) {
     if (normalized.includes(term)) {
-      return { ok: false, reason: "anchor_prohibited_term", missingTerms: [] };
+      return {
+        ok: false,
+        reason: "anchor_prohibited_term",
+        missingTerms: [],
+        matchedTerms: [term],
+      };
     }
   }
   for (const pat of DENYLIST_PATTERNS) {
     if (pat.test(normalized)) {
-      return { ok: false, reason: "anchor_prohibited_term", missingTerms: [] };
+      return {
+        ok: false,
+        reason: "anchor_prohibited_term",
+        missingTerms: [],
+        matchedTerms: [pat.source],
+      };
     }
   }
   return { ok: true };
@@ -288,18 +335,33 @@ const SNS_HANDLE_RE = /@[A-Za-z0-9_.]{2,}/;
  * 扱う。誤検知（過剰棄却）を避けるため、敬称直前語が既知の一般語と
  * 完全一致する場合は個人名候補から除外する。
  */
-function containsPersonalInfoPattern(text: string): boolean {
+/** `findPersonalInfoMatchRule` が返す、発火した個人識別情報パターンの識別子。 */
+type PersonalInfoRule = "personal_info_sns_handle" | "personal_info_honorific";
+
+/**
+ * 個人識別情報らしきパターン（SNS ハンドル・敬称付き氏名）に実際にマッチした
+ * 場合、どちらのパターンが発火したかの識別子を返す（マッチしなければ
+ * `null`）。判定条件自体は元の `containsPersonalInfoPattern` 実装と完全に
+ * 同一——可視化目的で呼び出し元がルール識別子を使えるように、真偽値では
+ * なくラベル付きの結果を返す形へ抽出しただけである（実際の氏名・ハンドル
+ * 文字列そのものは返さない。ログに個人名が残ることを避けるため）。
+ */
+function findPersonalInfoMatchRule(text: string): PersonalInfoRule | null {
   const normalized = text.normalize("NFKC");
 
-  if (SNS_HANDLE_RE.test(normalized)) return true;
+  if (SNS_HANDLE_RE.test(normalized)) return "personal_info_sns_handle";
 
   const honorificMatches = normalized.matchAll(HONORIFIC_RE);
   for (const match of honorificMatches) {
     const candidate = match[1];
-    if (!HONORIFIC_SAFE_PREFIXES.includes(candidate)) return true;
+    if (!HONORIFIC_SAFE_PREFIXES.includes(candidate)) return "personal_info_honorific";
   }
 
-  return false;
+  return null;
+}
+
+function containsPersonalInfoPattern(text: string): boolean {
+  return findPersonalInfoMatchRule(text) !== null;
 }
 
 /**

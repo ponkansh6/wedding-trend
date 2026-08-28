@@ -21,7 +21,12 @@ import {
   type CurationInput,
   type CurationItem,
 } from "./schemas";
-import { validateTopicAnchor, extractFeatureTerms, renderRationaleText } from "@/lib/publish/gate";
+import {
+  validateTopicAnchor,
+  extractFeatureTerms,
+  renderRationaleText,
+  type GateResult,
+} from "@/lib/publish/gate";
 
 /**
  * キュレーション結果本体（LLM が実際に決めた部分。index はバッチ内の整列にのみ
@@ -34,6 +39,35 @@ import { validateTopicAnchor, extractFeatureTerms, renderRationaleText } from "@
 export type CurationResult = Omit<CurationItem, "index" | "topicAnchor"> & {
   topicAnchor: string | null;
   rationaleText: string | null;
+  /**
+   * `topicAnchor` が gate（`validateTopicAnchor`）落ちで null に degrade された
+   * 場合の理由コード（`validateTopicAnchor` が返す `reason`）。degrade して
+   * いない場合（gate 通過、または最初から候補生成しなかった等）は null。
+   * `scripts/backfill-usefulness.mjs` の欠陥2対応:
+   * 呼び出し元（バックフィルスクリプト等）が「なぜ degrade したか」を
+   * 集計・表示できるようにするため、gate の判定結果をここまで伝播させる。
+   */
+  degradeReason?: string | null;
+  /** 1回目の生成が gate に落ちた場合の理由（retry前）。degrade しなかった場合は null。 */
+  firstAttemptReason?: string | null;
+  /** リトライ（feedback 付き再生成）が gate に落ちた場合の理由。リトライしなかった、
+   * またはリトライで通った場合は null。 */
+  retryAttemptReason?: string | null;
+  /**
+   * 追加の可視化対応（コーディネーターからの依頼）: 却下されたアンカーの
+   * 「実際の文言」と、gate の詳細（`anchor_ungrounded` なら本文に無かった語
+   * `missingTerms`、`anchor_prohibited_term` ならどの denylist 項目に抵触
+   * したか `matchedTerms`）を、1回目・リトライそれぞれについて伝播させる。
+   * `topicAnchor` が最終的に null に degrade していない（gate 通過）場合や
+   * 元々その回の生成を試みていない場合はいずれも `null`/未設定。
+   */
+  firstAttemptAnchor?: string | null;
+  firstAttemptMissingTerms?: string[];
+  firstAttemptMatchedTerms?: string[];
+  /** リトライを実施しなかった場合は `undefined`（1回目で gate 通過、または1回目の LLM 呼び出し自体が失敗）。 */
+  retryAttemptAnchor?: string | null;
+  retryAttemptMissingTerms?: string[];
+  retryAttemptMatchedTerms?: string[];
 };
 
 /** `renderRationaleText()` に渡す 6 boolean を item から取り出すヘルパ。 */
@@ -162,6 +196,13 @@ export async function curateSingle(
     );
   };
   const gated = await curateAnchorWithRetry(generate, input);
+  if (!gated) {
+    // 欠陥3: LLM 呼び出し失敗（curateAnchorWithRetry が null を返した）をそのまま
+    // 呼び出し元へ伝播する。呼び出し元（evergreen/submit-url/discovery-ingest/
+    // ingest）はいずれも `curationResult === null` を「LLM 呼び出し失敗
+    // （一時的技術障害）」として再試行キューへ回す分岐を持つ。
+    return null;
+  }
   return attachRationale(gated);
 }
 
@@ -211,14 +252,34 @@ export async function curateBatch(
 
       const gateRes = validateTopicAnchor(item.topicAnchor, { corpus, title });
       let finalAnchor: string | null = item.topicAnchor;
+      let degradeReason: string | null = null;
+      let firstAttemptReason: string | null = null;
+      let retryAttemptReason: string | null = null;
+      let firstAttemptAnchor: string | null = null;
+      let firstAttemptMissingTerms: string[] | undefined;
+      let firstAttemptMatchedTerms: string[] | undefined;
+      let retryAttemptAnchor: string | null | undefined;
+      let retryAttemptMissingTerms: string[] | undefined;
+      let retryAttemptMatchedTerms: string[] | undefined;
 
       if (!gateRes.ok) {
         const reason = "reason" in gateRes ? gateRes.reason : "unknown";
+        firstAttemptReason = reason;
+        firstAttemptAnchor = item.topicAnchor;
+        const firstGateDetails = gateDetails(gateRes);
+        firstAttemptMissingTerms = firstGateDetails.missingTerms;
+        firstAttemptMatchedTerms = firstGateDetails.matchedTerms;
         const titleTerms = extractFeatureTerms(title).join("、");
         const feedback = `このアンカーは検証に失敗しました（理由: ${reason}）。タイトルに無い語を1つ以上使い、許可されるひらがな述語で『問いを立てる節』にしなさい。タイトル語彙参考: [${titleTerms}]`;
 
+        // 欠陥3: curateSingle は LLM 呼び出し失敗時に null を返すようになった
+        // （プレースホルダは捏造しない）。retryRes が null の場合は「リトライも
+        // LLM 呼び出し自体が失敗した」ことを意味し、以下では finalAnchor = null
+        // （1回目の理由で degrade）にフォールバックする。1回目の item 自体は
+        // 有効な結果のため、これは「LLM 失敗」ではなく「gate degrade」として扱う。
         const retryRes = await curateSingle(input, { onGeminiCall: opts?.onGeminiCall, feedback });
         if (retryRes && retryRes.topicAnchor) {
+          retryAttemptAnchor = retryRes.topicAnchor;
           const retryGateRes = validateTopicAnchor(retryRes.topicAnchor, { corpus, title });
           if (retryGateRes.ok) {
             // Use fields from retryRes
@@ -234,10 +295,22 @@ export async function curateBatch(
               weddingDayContent: retryRes.weddingDayContent,
               promotional: retryRes.promotional,
               preDecisionOrPhotoShoot: retryRes.preDecisionOrPhotoShoot,
+              degradeReason: null,
+              firstAttemptReason: reason,
+              retryAttemptReason: null,
+              firstAttemptAnchor,
+              firstAttemptMissingTerms,
+              firstAttemptMatchedTerms,
             });
           }
+          const retryGateDetails = gateDetails(retryGateRes);
+          retryAttemptMissingTerms = retryGateDetails.missingTerms;
+          retryAttemptMatchedTerms = retryGateDetails.matchedTerms;
+          retryAttemptReason =
+            "reason" in retryGateRes ? (retryGateRes.reason ?? "unknown") : "unknown";
         }
         finalAnchor = null;
+        degradeReason = retryAttemptReason ?? reason;
       }
 
       return attachRationale({
@@ -252,6 +325,15 @@ export async function curateBatch(
         weddingDayContent: item.weddingDayContent,
         promotional: item.promotional,
         preDecisionOrPhotoShoot: item.preDecisionOrPhotoShoot,
+        degradeReason,
+        firstAttemptReason,
+        retryAttemptReason,
+        firstAttemptAnchor,
+        firstAttemptMissingTerms,
+        firstAttemptMatchedTerms,
+        retryAttemptAnchor,
+        retryAttemptMissingTerms,
+        retryAttemptMatchedTerms,
       });
     }),
   );
@@ -273,55 +355,123 @@ export type AnchorGenerateFn = (
   feedback?: string,
 ) => Promise<Omit<CurationItem, "index"> | null>;
 
+/** `curateAnchorWithRetry` の成功時の戻り値（欠陥2: gate degrade の理由コード・
+ * 却下されたアンカー文言・missingTerms/matchedTerms を伝播する）。 */
+export type AnchorRetryResult = { topicAnchor: string | null } & Omit<
+  CurationItem,
+  "index" | "topicAnchor"
+> & {
+    degradeReason: string | null;
+    firstAttemptReason: string | null;
+    retryAttemptReason: string | null;
+    firstAttemptAnchor: string | null;
+    firstAttemptMissingTerms?: string[];
+    firstAttemptMatchedTerms?: string[];
+    retryAttemptAnchor?: string | null;
+    retryAttemptMissingTerms?: string[];
+    retryAttemptMatchedTerms?: string[];
+  };
+
+/** gate に落ちた `GateResult`（`ok: false`）から `missingTerms`/`matchedTerms` を取り出す。 */
+function gateDetails(gateRes: GateResult): { missingTerms?: string[]; matchedTerms?: string[] } {
+  if (gateRes.ok) return {};
+  return { missingTerms: gateRes.missingTerms, matchedTerms: gateRes.matchedTerms };
+}
+
+/**
+ * `generate()`（LLM 呼び出し）→ `validateTopicAnchor()`（gate）→ 必要なら
+ * feedback 付きで1回だけ再生成、という D5 の degrade-to-null フローを担う。
+ *
+ * ⚠️ **欠陥3の修正（重要）**: `generate()` が `null` を返す＝ LLM 呼び出し自体が
+ * 失敗した（429 等の一時的技術障害。`callAndParse` が全リトライを使い切って
+ * 諦めた場合）ことを意味する。この関数はその失敗を**握りつぶさず、
+ * `null` を返してそのまま呼び出し元へ伝播させる**（以前はここで
+ * `category: "準備・段取り"` 等の捏造プレースホルダを返していたが、それは
+ * 呼び出し元から「LLM 呼び出しは成功したが記事は準備・段取りカテゴリだった」
+ * ように見えてしまい、`markCurated`/`markDropped` 経由で誤った内容が
+ * DB に書き込まれ、しかも `curationSignature` が進んで二度と再生成されない
+ * という危険な退行だった）。
+ *
+ * `curateSingle` / `curateBatch` の呼び出し元（`src/lib/pipeline/ingest.ts` /
+ * `evergreen.ts` / `submit-url.ts` / `discovery-ingest.ts`）はいずれも
+ * 「結果が `null` なら LLM 呼び出し失敗として再試行キューへ回す・
+ * `curationSignature` を進めない」という分岐を**既に**持っており
+ * （`if (!result) { ... enqueueXxxRetry ... }` 等）、この関数が実際に `null` を
+ * 返すようになるまでその分岐は到達不能なデッドコードだった。
+ */
 export async function curateAnchorWithRetry(
   generate: AnchorGenerateFn,
   input: CurationInput,
-): Promise<{ topicAnchor: string | null } & Omit<CurationItem, "index" | "topicAnchor">> {
+): Promise<AnchorRetryResult | null> {
   const corpus = `タイトル: ${input.title}\n本文抜粋: ${input.excerpt ?? "（本文抜粋なし）"}`;
   const title = input.title;
 
   const item = await generate(input);
   if (!item) {
-    return {
-      topicAnchor: null,
-      title: input.title,
-      summary: "",
-      category: "準備・段取り",
-      tag: "trend",
-      firsthand: false,
-      ceremonyDecision: false,
-      specific: false,
-      weddingDayContent: false,
-      promotional: "none",
-      preDecisionOrPhotoShoot: false,
-    };
+    // 欠陥3: プレースホルダを捏造せず、LLM 失敗をそのまま伝播する。
+    return null;
   }
 
   const gateRes = validateTopicAnchor(item.topicAnchor, { corpus, title });
   if (gateRes.ok) {
-    return item;
+    return {
+      ...item,
+      degradeReason: null,
+      firstAttemptReason: null,
+      retryAttemptReason: null,
+      firstAttemptAnchor: null,
+    };
   }
 
   const reason = "reason" in gateRes ? gateRes.reason : "unknown";
+  const firstGateDetails = gateDetails(gateRes);
   const titleTerms = extractFeatureTerms(title).join("、");
   const feedback = `このアンカーは検証に失敗しました（理由: ${reason}）。タイトルに無い語を1つ以上使い、許可されるひらがな述語で『問いを立てる節』にしなさい。タイトル語彙参考: [${titleTerms}]`;
 
   const retryItem = await generate(input, feedback);
   if (!retryItem) {
+    // リトライ時の LLM 呼び出しは失敗したが、1回目（`item`）は成功しているため
+    // 「LLM 失敗」ではなく「1回目の理由で degrade」として扱う（1回目の
+    // summary/category 等は有効な内容なので、そこまで捨てる必要はない）。
     return {
       ...item,
       topicAnchor: null,
+      degradeReason: reason,
+      firstAttemptReason: reason,
+      retryAttemptReason: null,
+      firstAttemptAnchor: item.topicAnchor,
+      firstAttemptMissingTerms: firstGateDetails.missingTerms,
+      firstAttemptMatchedTerms: firstGateDetails.matchedTerms,
     };
   }
 
   const retryGateRes = validateTopicAnchor(retryItem.topicAnchor, { corpus, title });
   if (retryGateRes.ok) {
-    return retryItem;
+    return {
+      ...retryItem,
+      degradeReason: null,
+      firstAttemptReason: reason,
+      retryAttemptReason: null,
+      firstAttemptAnchor: item.topicAnchor,
+      firstAttemptMissingTerms: firstGateDetails.missingTerms,
+      firstAttemptMatchedTerms: firstGateDetails.matchedTerms,
+    };
   }
 
+  const retryReason = "reason" in retryGateRes ? retryGateRes.reason : "unknown";
+  const retryGateDetails = gateDetails(retryGateRes);
   return {
     ...retryItem,
     topicAnchor: null,
+    degradeReason: retryReason,
+    firstAttemptReason: reason,
+    retryAttemptReason: retryReason,
+    firstAttemptAnchor: item.topicAnchor,
+    firstAttemptMissingTerms: firstGateDetails.missingTerms,
+    firstAttemptMatchedTerms: firstGateDetails.matchedTerms,
+    retryAttemptAnchor: retryItem.topicAnchor,
+    retryAttemptMissingTerms: retryGateDetails.missingTerms,
+    retryAttemptMatchedTerms: retryGateDetails.matchedTerms,
   };
 }
 

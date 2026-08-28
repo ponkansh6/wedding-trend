@@ -187,6 +187,38 @@ describe("New Anchor Gate Checks (D2, D3, D4, D6, validateTopicAnchor)", () => {
     expect(checkAnchorDenylist("@yamada さんの話").ok).toBe(false);
   });
 
+  it("D3 可視化対応: checkAnchorDenylist は抵触した denylist 項目を matchedTerms として返す（判定ロジック自体は不変）", () => {
+    // DENYLIST_TERMS の語そのものが matchedTerms に入る。
+    const termHit = checkAnchorDenylist("衝撃の事実");
+    expect(termHit.ok).toBe(false);
+    if (!termHit.ok) {
+      expect(termHit.reason).toBe("anchor_prohibited_term");
+      expect(termHit.matchedTerms).toEqual(["衝撃"]);
+    }
+
+    // DENYLIST_PATTERNS 一致時は、マッチした正規表現の source がルール識別子として入る
+    // （個々の実測値ではなく、同じルールへ集計できる識別子である点が本命）。
+    const patternHit = checkAnchorDenylist("持ち込み料はすべき");
+    expect(patternHit.ok).toBe(false);
+    if (!patternHit.ok) {
+      expect(patternHit.reason).toBe("anchor_prohibited_term");
+      expect(patternHit.matchedTerms).toEqual(["すべき$"]);
+    }
+
+    // 個人識別情報パターン（denylist の一部として checkAnchorDenylist 内で先に判定される）
+    // は、実際の氏名・ハンドルではなく固定のルール識別子を返す。
+    const snsHit = checkAnchorDenylist("@yamada さんの話");
+    expect(snsHit.ok).toBe(false);
+    if (!snsHit.ok) {
+      expect(snsHit.reason).toBe("anchor_prohibited_term");
+      expect(snsHit.matchedTerms).toEqual(["personal_info_sns_handle"]);
+    }
+
+    // gate 通過時は matchedTerms を持たない。
+    const passing = checkAnchorDenylist("結婚式をしたい人ではなかった");
+    expect(passing).toEqual({ ok: true });
+  });
+
   it("D4: title non-redundancy (novelty)", () => {
     expect(checkAnchorNovelty("式場見学", "式場見学の件数と決定理由").ok).toBe(false);
     expect(
