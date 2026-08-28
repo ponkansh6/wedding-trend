@@ -4,7 +4,12 @@
 - 参照: `shared_plan/07-unattended-operation.md`（§5〜§8）、`shared_plan/09-extraction-calibration-and-observability.md`（§2-2・§5）
 - 作成日: 2026-08-26
 - 前提コミット: `f40b89c`
-- 状態: **未着手。本文書は計画であり実装ではない。**
+- 状態: **一部実施。** 2026-08-29、オーナー判断でゲート大幅緩和と日次公開制限のサーキットブレーカー化を実施した（spec §11 項1・項4）:
+  - 抽出品質ゲート: `MIN_EVIDENCE_INPUT_CHARS` 80→30、`MAX_LINK_DENSITY` 0.25→0.70、`MIN_PARAGRAPH_COUNT` 3→1
+  - トピックアンカー: clickbait denylist 撤廃、長さ下限 12→6、タイトル冗長性チェックを非ブロッキング化（接地検証は維持）
+  - タイトル公開フィルタ: 広告・PR キーワード拒否を撤廃（制御文字・記号連打・過剰絵文字・空のみ棄却）
+  - `HOST_DAILY_SHARE_MAX` 廃止、`DAILY_PUBLISH_CAP` 15→150（供給スロットルから暴走検知サーキットブレーカーへ）、目標供給量「15件/日」撤廃
+  - 「集約レベルの中立性」を運用ポリシーから撤回（README / AGENTS.md も追随）
 
 ---
 

@@ -17,7 +17,7 @@
  * - Q3: ホスト allowlist が最初の関門（新規ホストの自動追加を構造的に禁止）
  * - Q1: 決定的抽出品質ゲート（LLM 呼び出し前。LLM の自己申告を廃止）
  * - M1: 公開直前ゲート（タイトルフィルタ・topicAnchor 語彙的接地・sticky removal）
- * - Q4: 日次公開上限・ホストシェア上限（上限到達は終端棄却ではなく再試行キューへ）
+ * - Q4: 日次公開サーキットブレーカー（上限到達は終端棄却ではなく再試行キューへ。ホスト別シェア上限は廃止）
  * - §7: `pending` 廃止 → TTL 付き再試行キュー＋理由コード付き終端棄却
  * - Q2: ホスト単位 yield 崩壊検知（ベースライン比較・小標本は判定しない）
  * - M4: 客観トリガによる自動撤回（`revalidatePublishedPosts`、run-discovery.mjs の第3段階）
@@ -25,11 +25,9 @@
 import { createHash } from "node:crypto";
 import {
   BODY_DRIFT_SIMILARITY_MIN,
-  DAILY_PUBLISH_CAP,
   DISCOVERY_INGEST_TIME_BUDGET_MS,
   EVERGREEN_SOURCE_ID,
   HOST_ALLOWLIST_HOSTS,
-  HOST_DAILY_SHARE_MAX,
   isAllowedArticleUrl,
   LLM_MODEL,
   RATIONALE_PROMPT_VERSION,
@@ -42,8 +40,6 @@ import {
 } from "@/lib/constants";
 import {
   completeRetry,
-  countPublishedSince,
-  countPublishedSinceByHost,
   dueRetries,
   enqueueRetry,
   expireRetries,
@@ -68,6 +64,7 @@ import { curateSingle } from "@/lib/llm/batch";
 import type { CurationResult } from "@/lib/llm/batch";
 import { computeContentHash, computeCurationSignature } from "@/lib/llm/signature";
 import { registrableDomain } from "@/lib/pipeline/evergreen";
+import { isDailyPublishCapReached } from "@/lib/pipeline/rate-cap";
 import { checkTermsOfServiceChange, disciplinedFetch } from "@/lib/sources/access-discipline";
 import {
   computeEvidenceSignals,
@@ -509,32 +506,9 @@ async function retryOrGiveUp(
 // Q4: 公開レート上限
 // ─────────────────────────────────────────────────────────────
 
-/**
- * 1ホストが当日の公開のうち占めてよい最大件数（`DAILY_PUBLISH_CAP` ×
- * `HOST_DAILY_SHARE_MAX`）。既存件数がこれに達していたら以後そのホストの
- * 公開を止める（「これから公開する1件を含めた事後シェア」で判定すると、
- * 当日最初の1件が 1/1=100% で常に弾かれてしまうため、事前のホスト件数で
- * 判定する）。
- */
-function hostShareCapCount(): number {
-  return Math.max(1, Math.floor(DAILY_PUBLISH_CAP * HOST_DAILY_SHARE_MAX));
-}
-
-interface RateCapCheck {
-  capped: boolean;
-  totalPublishedToday: number;
-  hostPublishedToday: number;
-}
-
-async function checkRateCap(host: string, now: string): Promise<RateCapCheck> {
-  const sinceIso = jstDayStartIso(now);
-  const [total, byHost] = await Promise.all([
-    countPublishedSince(sinceIso),
-    countPublishedSinceByHost(sinceIso),
-  ]);
-  const hostPublishedToday = byHost[host] ?? 0;
-  const capped = total >= DAILY_PUBLISH_CAP || hostPublishedToday >= hostShareCapCount();
-  return { capped, totalPublishedToday: total, hostPublishedToday };
+async function checkRateCap(now: string): Promise<{ capped: boolean }> {
+  // spec §11 項4: 日次公開サーキットブレーカーのみ（ホスト別シェア上限は廃止）。
+  return { capped: await isDailyPublishCapReached(jstDayStartIso(now)) };
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -752,9 +726,9 @@ async function processUrl(
     return { abortedByKillGate: false, abortedByBudget: false, abortedByRetryAfter: false };
   }
 
-  // Q4: 公開レート上限（日次上限・ホストシェア上限）。上限到達は終端棄却では
-  // なく再試行キューへの繰り延べ（良い記事を上限で捨てない）。
-  const rateCap = await checkRateCap(host, now);
+  // Q4: 日次公開サーキットブレーカー。上限到達は終端棄却ではなく再試行キューへの
+  // 繰り延べ（良い記事を上限で捨てない）。ホスト別シェア上限は廃止（spec §11 項4）。
+  const rateCap = await checkRateCap(now);
   if (rateCap.capped) {
     await retryOrGiveUp(host, url, "rate_capped", now, retryCtx);
     await setDiscoverySeenStatus(host, url, "fetched");

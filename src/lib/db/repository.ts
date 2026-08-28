@@ -449,6 +449,60 @@ export async function getStaleCurationCandidates(params: {
   }
 }
 
+/**
+ * discovery 経路（`originalExcerpt` が常に null。§10-5）で公開済みの blog 投稿の
+ * うち、`curationSignature` が最新（`currentSignature`）と不一致・または未設定の
+ * ものを `publishedAt` 降順で取得する。
+ *
+ * `getStaleCurationCandidates()` との違いは 2 点:
+ * - `status = "published"` に限定する（フィード表示中の記事だけを修復対象にし、
+ *   `rejected` / `retracted` は触らない）。
+ * - `originalExcerpt` が空（null / 空白 / 文字列 "null"）のものに限定する。
+ *   通常のバックフィル（`scripts/backfill-usefulness.mjs`）はプレフライト
+ *   `shouldRegenerateAnchor()` が本文の無い候補を一律スキップするため、
+ *   discovery 経路の投稿は署名を更新できず旧基準のトピックアンカーのまま
+ *   固定される。この SELECT はその救済（`scripts/backfill-mwed-anchors.mjs`
+ *   が本文を規律付き再取得して判定スライスを復元し、再キュレーションする）
+ *   専用の候補選定である。判定スライスは §10-5 のとおり DB へは書き戻さない。
+ *
+ * 読み取り専用のためフェイルソフト（例外を投げず空配列を返す）。
+ */
+export async function getPublishedSlicelessCurationCandidates(params: {
+  currentSignature: string;
+  limit: number;
+}): Promise<CurationCandidate[]> {
+  if (params.limit <= 0) return [];
+  try {
+    const rows = await db
+      .select({
+        id: posts.id,
+        url: posts.url,
+        originalTitle: posts.originalTitle,
+        originalExcerpt: posts.originalExcerpt,
+        publishedAt: posts.publishedAt,
+      })
+      .from(posts)
+      .where(
+        and(
+          eq(posts.sourceType, "blog"),
+          eq(posts.status, "published"),
+          or(isNull(posts.curationSignature), ne(posts.curationSignature, params.currentSignature)),
+          or(
+            isNull(posts.originalExcerpt),
+            eq(sql`trim(coalesce(${posts.originalExcerpt}, ''))`, ""),
+            eq(sql`trim(${posts.originalExcerpt})`, "null"),
+          ),
+        ),
+      )
+      .orderBy(desc(posts.publishedAt))
+      .limit(params.limit);
+    return rows;
+  } catch (err) {
+    console.warn("[db] getPublishedSlicelessCurationCandidates query error:", err);
+    return [];
+  }
+}
+
 export interface EmbedResult {
   embedProvider: EmbedProvider;
   embedHtml: string | null;

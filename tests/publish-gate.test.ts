@@ -12,49 +12,23 @@ import {
 import { RATIONALE_TEXT_MAX_CHARS, RATIONALE_TEXT_MIN_CHARS } from "@/lib/constants";
 
 describe("filterTitle (plan 07 §5-M1: 無検閲の公開チャネルを閉じる)", () => {
-  it("rejects titles with a full-width PR bracket tag", () => {
-    expect(filterTitle("【PR】理想の結婚式場が見つかる方法")).toEqual({
-      ok: false,
-      reason: "title_filter",
-    });
-  });
-
-  it("rejects titles with a full-width-lettered PR bracket tag (ＰＲ)", () => {
-    expect(filterTitle("［ＰＲ］新作ウェディングドレスのご紹介")).toEqual({
-      ok: false,
-      reason: "title_filter",
-    });
-  });
-
-  it("rejects titles containing タイアップ", () => {
-    expect(filterTitle("【タイアップ】会場からのお知らせ")).toEqual({
-      ok: false,
-      reason: "title_filter",
-    });
-  });
-
-  it("rejects titles containing 広告 / 提供 / スポンサー / プロモーション / sponsored", () => {
+  // 2026-08-29 のゲート緩和: 広告・PR 系キーワード（【PR】【AD】/ タイアップ /
+  // 広告 / 提供 / スポンサー / sponsored 等）による棄却は撤廃した。これらは
+  // 通過する。
+  it("no longer rejects titles carrying an ad / PR marker (2026-08-29 relaxation)", () => {
     for (const title of [
+      "【PR】理想の結婚式場が見つかる方法",
+      "［ＰＲ］新作ウェディングドレスのご紹介",
+      "【タイアップ】会場からのお知らせ",
       "[広告] 式場フェア開催中",
-      "この記事は〇〇株式会社の提供でお送りします",
       "スポンサー企業からのお知らせ",
       "プロモーション企画:結婚式アイデア集",
       "This is a Sponsored post about wedding venues",
-      "第三者提供の写真を使用した会場紹介",
+      "結婚式レポ #PR",
+      "[AD] 憧れの会場を紹介します",
     ]) {
-      expect(filterTitle(title)).toEqual({ ok: false, reason: "title_filter" });
+      expect(filterTitle(title)).toEqual({ ok: true });
     }
-  });
-
-  it("rejects a bare #PR hashtag token", () => {
-    expect(filterTitle("結婚式レポ #PR")).toEqual({ ok: false, reason: "title_filter" });
-  });
-
-  it("rejects a bare AD token in brackets", () => {
-    expect(filterTitle("[AD] 憧れの会場を紹介します")).toEqual({
-      ok: false,
-      reason: "title_filter",
-    });
   });
 
   it("does NOT reject titles where PR/AD appear only as part of a longer English word", () => {
@@ -80,15 +54,15 @@ describe("filterTitle (plan 07 §5-M1: 無検閲の公開チャネルを閉じ�
     });
   });
 
-  it("rejects titles with excessive emoji", () => {
-    expect(filterTitle("結婚式レポート🎉🎉🎉🎉🎉")).toEqual({
+  it("rejects titles with excessive emoji (2026-08-29: 上限 10)", () => {
+    expect(filterTitle("結婚式レポート🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉")).toEqual({
       ok: false,
       reason: "title_filter",
     });
   });
 
   it("accepts titles with a small, reasonable number of emoji", () => {
-    expect(filterTitle("結婚式レポート🎉 会場選びのコツ")).toEqual({ ok: true });
+    expect(filterTitle("結婚式レポート🎉🎉🎉 会場選びのコツ")).toEqual({ ok: true });
   });
 
   it("rejects titles with 4+ repeated symbol characters", () => {
@@ -175,34 +149,30 @@ describe("New Anchor Gate Checks (D2, D3, D4, D6, validateTopicAnchor)", () => {
     expect(checkAnchorGrounding("銀座の会場", "銀座の素敵な会場")).toEqual({ ok: true });
   });
 
-  it("D3: hard denylist", () => {
+  it("D3: hard denylist — 残すのは数値・日付・金額・PII のみ（2026-08-29: clickbait 語群は撤廃）", () => {
+    // 残す: 数値・金額・日付・元号（§10-3「結論・具体的数値を開示しない」）。
     expect(checkAnchorDenylist("30万の節約術").ok).toBe(false);
     expect(checkAnchorDenylist("結婚式は20万円").ok).toBe(false);
     expect(checkAnchorDenylist("令和7年のトレンド").ok).toBe(false);
-    expect(checkAnchorDenylist("衝撃の事実").ok).toBe(false);
-    expect(checkAnchorDenylist("必見のポイント").ok).toBe(false);
-    expect(checkAnchorDenylist("知っておくべきことルート").ok).toBe(false);
-    expect(checkAnchorDenylist("三人で行こうかな").ok).toBe(false);
-    expect(checkAnchorDenylist("結婚式をしたい人ではなかった").ok).toBe(true);
+    expect(checkAnchorDenylist("三人で行こうかな").ok).toBe(false); // 漢数字
+    // 残す: 個人識別情報。
     expect(checkAnchorDenylist("@yamada さんの話").ok).toBe(false);
+    // 撤廃: clickbait 語・語尾パターン（しよう/すべき）は通す。
+    expect(checkAnchorDenylist("衝撃の事実").ok).toBe(true);
+    expect(checkAnchorDenylist("必見のポイント").ok).toBe(true);
+    expect(checkAnchorDenylist("どう準備すべき").ok).toBe(true);
+    expect(checkAnchorDenylist("会場をどう選ぼう").ok).toBe(true);
+    expect(checkAnchorDenylist("結婚式をしたい人ではなかった").ok).toBe(true);
   });
 
   it("D3 可視化対応: checkAnchorDenylist は抵触した denylist 項目を matchedTerms として返す（判定ロジック自体は不変）", () => {
-    // DENYLIST_TERMS の語そのものが matchedTerms に入る。
-    const termHit = checkAnchorDenylist("衝撃の事実");
-    expect(termHit.ok).toBe(false);
-    if (!termHit.ok) {
-      expect(termHit.reason).toBe("anchor_prohibited_term");
-      expect(termHit.matchedTerms).toEqual(["衝撃"]);
-    }
-
     // DENYLIST_PATTERNS 一致時は、マッチした正規表現の source がルール識別子として入る
     // （個々の実測値ではなく、同じルールへ集計できる識別子である点が本命）。
-    const patternHit = checkAnchorDenylist("持ち込み料はすべき");
+    const patternHit = checkAnchorDenylist("持ち込み料は20万円");
     expect(patternHit.ok).toBe(false);
     if (!patternHit.ok) {
       expect(patternHit.reason).toBe("anchor_prohibited_term");
-      expect(patternHit.matchedTerms).toEqual(["すべき$"]);
+      expect(patternHit.matchedTerms).toEqual(["[0-9０-９]"]);
     }
 
     // 個人識別情報パターン（denylist の一部として checkAnchorDenylist 内で先に判定される）
@@ -232,8 +202,10 @@ describe("New Anchor Gate Checks (D2, D3, D4, D6, validateTopicAnchor)", () => {
     ).toBe(true);
   });
 
-  it("D6: length tier", () => {
-    expect(checkAnchorLength("結婚").ok).toBe(false);
+  it("D6: length tier — 下限 6（2026-08-29: 12 から緩和）", () => {
+    expect(checkAnchorLength("あいうえ").ok).toBe(false); // 4 < 6
+    expect(checkAnchorLength("あいうえお").ok).toBe(false); // 5 < 6（境界の直下）
+    expect(checkAnchorLength("あいうえおか").ok).toBe(true); // 6（境界ちょうど）
     expect(checkAnchorLength("式場見学のポイントについて詳しく紹介").ok).toBe(true);
   });
 
@@ -245,25 +217,30 @@ describe("New Anchor Gate Checks (D2, D3, D4, D6, validateTopicAnchor)", () => {
     const good = validateTopicAnchor("館内案内で実際に何が起きているのか", { corpus, title });
     expect(good).toEqual({ ok: true });
 
-    // Redundant with title
+    // 2026-08-29: タイトル冗長性は validateTopicAnchor の合否に用いない。
+    // 接地さえ成立すれば、タイトルと語が丸かぶりでも通す。
     const redundant = validateTopicAnchor("式場見学の件数と決定理由", {
       corpus:
         "本日はホテルの館内案内と実際に何が起きているのかをご案内します。式場見学の件数と決定理由について。",
       title: "式場見学の件数と決定理由",
     });
-    expect(redundant.ok).toBe(false);
-    if (!redundant.ok) {
-      expect(redundant.reason).toBe("anchor_redundant_with_title");
-    }
+    expect(redundant).toEqual({ ok: true });
 
-    // Prohibited term / denylist
-    const badDeny = validateTopicAnchor("衝撃の館内案内で実際に何が起きているのか", {
-      corpus,
+    // Prohibited term / denylist（数値は §10-3 の結論非開示制約として維持）
+    const badDeny = validateTopicAnchor("館内案内で20万円の話がどう出たのか", {
+      corpus: `${corpus}20万円`,
       title,
     });
     expect(badDeny.ok).toBe(false);
     if (!badDeny.ok) {
       expect(badDeny.reason).toBe("anchor_prohibited_term");
+    }
+
+    // 語彙的接地は維持（ハルシネーション防止）。
+    const badGround = validateTopicAnchor("函館旅行の予算をどう組んだのか", { corpus, title });
+    expect(badGround.ok).toBe(false);
+    if (!badGround.ok) {
+      expect(badGround.reason).toBe("anchor_ungrounded");
     }
   });
 });

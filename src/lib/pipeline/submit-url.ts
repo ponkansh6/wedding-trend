@@ -1,6 +1,4 @@
 import {
-  DAILY_PUBLISH_CAP,
-  HOST_DAILY_SHARE_MAX,
   RATIONALE_PROMPT_VERSION,
   RETRY_BACKOFF_HOURS,
   RETRY_MAX_ATTEMPTS,
@@ -8,8 +6,6 @@ import {
 } from "@/lib/constants";
 import {
   completeRetry,
-  countPublishedSince,
-  countPublishedSinceByHost,
   enqueueRetry,
   getPostsByUrls,
   hashUrl,
@@ -25,6 +21,7 @@ import { fetchOEmbed, type OEmbedResult } from "@/lib/embed/oembed";
 import { curateSingle, type CurationResult } from "@/lib/llm/batch";
 import { LLM_MODEL } from "@/lib/llm/client";
 import { computeContentHash, computeCurationSignature } from "@/lib/llm/signature";
+import { isDailyPublishCapReached } from "@/lib/pipeline/rate-cap";
 import { filterTitle } from "@/lib/publish/gate";
 import type { DropReason, EmbedProvider, FeedCard, RetryContext, RetryReason } from "@/lib/types";
 import { canonicalizeUrl } from "@/lib/url";
@@ -71,25 +68,9 @@ function addHoursIso(baseIso: string, hours: number): string {
   return new Date(Date.parse(baseIso) + hours * 60 * 60 * 1000).toISOString();
 }
 
-/** Q4: 1ホストが当日の公開のうち占めてよい最大件数。 */
-function hostShareCapCount(): number {
-  return Math.max(1, Math.floor(DAILY_PUBLISH_CAP * HOST_DAILY_SHARE_MAX));
-}
-
-async function isRateCapped(canonical: string, now: string): Promise<boolean> {
-  let host = "";
-  try {
-    host = new URL(canonical).host;
-  } catch {
-    // 正規化済みのはずだが念のため。host 不明時はグローバル上限のみで判定する。
-  }
-  const sinceIso = jstDayStartIso(now);
-  const [total, byHost] = await Promise.all([
-    countPublishedSince(sinceIso),
-    countPublishedSinceByHost(sinceIso),
-  ]);
-  const hostCount = byHost[host] ?? 0;
-  return total >= DAILY_PUBLISH_CAP || hostCount >= hostShareCapCount();
+async function isRateCapped(_canonical: string, now: string): Promise<boolean> {
+  // spec §11 項4: 日次公開サーキットブレーカーのみ（ホスト別シェア上限は廃止）。
+  return isDailyPublishCapReached(jstDayStartIso(now));
 }
 
 function backoffHoursFor(attempts: number): number {

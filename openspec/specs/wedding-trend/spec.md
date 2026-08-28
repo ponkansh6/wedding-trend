@@ -748,7 +748,7 @@ THEN 1 ELSE 0 END` で判定している。`json_extract` は文字列値をク�
        - 210字という新上限も**撤廃ではなく機械的な強制**であり、`RATIONALE_TEXT_MAX_CHARS = 210`（`src/lib/constants.ts`）を超えた根拠文は公開処理で拒否される。
      - **公開済み5件（id 233〜237）の扱い**: 上記のとおり id 234・235・237 は150字上限の下では違反状態だったが、今回の210字への改定によりいずれも仕様に適合する（実測最大166字 < 210字）。したがってこれら5件の撤回・再公開処理は不要である。
 
-- **トピックアンカー（`topicAnchor`、`post_rationales.topic_anchor`）は 40字以内**とし、記事が扱う**「具体的な判断・場面・選択肢」**を、読者が抱きそうな問いの形（問いを立てる節）で表現するものとする。体言止め（名詞で文を終える形）は禁止する（可: 「席次表で譲れない優先順位に悩む」／不可: 「席次表づくりで迷った優先順位」）。結論・結果・具体的数値を開示してはならない（不可: 「席次表は親族優先で決めた」「持ち込み料〇万円が免除された」）。語句は原則として本文抜粋（コーパス＝タイトル＋抜粋）に実在するもののみとし、機械的検証（`validateTopicAnchor` → 内部で `checkAnchorGrounding`（`src/lib/publish/gate.ts`））で接地を確認する。接地検証は文字種の非対称ルールであり、ひらがなを含む語および接続詞許可リスト（`CONNECTOR_ALLOWLIST`：理由・背景・経緯・決め手）に属する用語は逐語一致の要件から除外するが、漢字・カタカナのみからなる 2 字以上の語はコーパスにそのまま存在しなければならない（非実在の捏造を防ぐ）。あわせて `checkAnchorDenylist` が禁止語句（衝撃・必見・実は・知らないと損・最強・絶対・驚愕・やばい・話題・最高・究極・世界一・史上・神・マスト・感動 等、および数字・漢数字・金額・日付パターン）を、`checkAnchorNovelty` がタイトルとの冗長性（非接続詞の語がすべてタイトルに含まれる場合は冗長＝`anchor_redundant_with_title`）を、`checkAnchorLength` が長さ下限（実装値 12 字）を機械的に検証する。いずれかの検証に失敗した場合は、アンカー生成を 1 回だけフィードバック付きで再試行し、それでも失敗すれば `topicAnchor` を `null` として**投稿を公開（デグレード）**する。公開に至るまで投稿を破棄（ドロップ）することはない。これによりコンテンツ名詞のハルシネーションを厳格に防ぎつつ、クリック率を向上させる自然な表現を可能にする。- **改定の経緯（2026-08-28, shared_plan/16）**: §10-3 のトピックアンカー設計をさらに刷新。`shared_plan/15` が導入した「体言止め（名詞で文を終える）」方針を撤回し、読者が抱く問いの形（問いを立てる節）へ変更。接地検証を `checkAnchorGrounding`（トークンレベル＋接続詞許可リストのみ）から `validateTopicAnchor`（文字種非対称の接地＋禁止リスト `checkAnchorDenylist`＋タイトル冗長性 `checkAnchorNovelty`＋長さ `checkAnchorLength`）の合成ゲートへ置換し、検証失敗時の扱いを「終端棄却（ドロップ）」から「フィードバック付き再試行 1 回 → 失敗時は `topicAnchor=null` で公開（デグレード）」へ変更した。数字・固有名詞の禁止は維持する。
+- **トピックアンカー（`topicAnchor`、`post_rationales.topic_anchor`）は 40字以内**とし、記事が扱う**「具体的な判断・場面・選択肢」**を、読者が抱きそうな問いの形（問いを立てる節）で表現するものとする。体言止め（名詞で文を終える形）は禁止する（可: 「席次表で譲れない優先順位に悩む」／不可: 「席次表づくりで迷った優先順位」）。結論・結果・具体的数値を開示してはならない（不可: 「席次表は親族優先で決めた」「持ち込み料〇万円が免除された」）。語句は原則として本文抜粋（コーパス＝タイトル＋抜粋）に実在するもののみとし、機械的検証（`validateTopicAnchor` → 内部で `checkAnchorGrounding`（`src/lib/publish/gate.ts`））で接地を確認する。接地検証は文字種の非対称ルールであり、ひらがなを含む語および接続詞許可リスト（`CONNECTOR_ALLOWLIST`：理由・背景・経緯・決め手）に属する用語は逐語一致の要件から除外するが、漢字・カタカナのみからなる 2 字以上の語はコーパスにそのまま存在しなければならない（非実在の捏造を防ぐ）。あわせて `checkAnchorDenylist` が禁止パターン（数字・漢数字・金額・日付・元号、および個人識別情報＝SNS ハンドル・敬称付き人名）を、`checkAnchorLength` が長さ下限（実装値 `ANCHOR_MIN_LENGTH = 6` 字）を機械的に検証する。いずれかの検証に失敗した場合は、アンカー生成を 1 回だけフィードバック付きで再試行し、それでも失敗すれば `topicAnchor` を `null` として**投稿を公開（デグレード）**する。公開に至るまで投稿を破棄（ドロップ）することはない。これによりコンテンツ名詞のハルシネーションを厳格に防ぎつつ、クリック率を向上させる自然な表現を可能にする。- **2026-08-29 のゲート大幅緩和（オーナー判断）**: `checkAnchorDenylist` から clickbait 語群（衝撃・必見・やばい・最高・神・感動 等 16 語）と語尾パターン（`しよう$`・`すべき$`・`\d+つの`）を撤廃した。残すのは §10-3 の「結論・具体的数値を開示しない」に直結する数値・日付・金額パターンと、個人識別情報パターンのみ。`checkAnchorLength` の下限を 12 → 6 に緩和。`checkAnchorNovelty`（タイトル冗長性 `anchor_redundant_with_title`）は関数としては残すが `validateTopicAnchor` の合否には用いない（品質上の好みであり公開可否の要件にしない）。**語彙的接地検証（`checkAnchorGrounding`）はハルシネーション防止のため変更しない。**- **改定の経緯（2026-08-28, shared_plan/16）**: §10-3 のトピックアンカー設計をさらに刷新。`shared_plan/15` が導入した「体言止め（名詞で文を終える）」方針を撤回し、読者が抱く問いの形（問いを立てる節）へ変更。接地検証を `checkAnchorGrounding`（トークンレベル＋接続詞許可リストのみ）から `validateTopicAnchor`（文字種非対称の接地＋禁止リスト `checkAnchorDenylist`＋タイトル冗長性 `checkAnchorNovelty`＋長さ `checkAnchorLength`）の合成ゲートへ置換し、検証失敗時の扱いを「終端棄却（ドロップ）」から「フィードバック付き再試行 1 回 → 失敗時は `topicAnchor=null` で公開（デグレード）」へ変更した。数字・固有名詞の禁止は維持する。
   - **判定テスト**: 読者がクリックせずに情報要求を満たせる出力は、原文の代替物になっている。カードあたり事実は最大1つ、否定的評価（`promotional = "heavy"` 等）は公開画面に一切出さない（§9.8 のスコア非公開と一貫させる）。
   - **既知の乖離の解消（2026-08-26）**: `promotional` の boolean → 3 段階 enum 化（`a8d4f0f`）の時点では、`src/components/feed/feed-card.tsx` が `card.usefulness.promotional === "heavy"` のとき「PR要素あり」バッジをカード上に表示しており、否定的評価を公開画面に一切出さないという本項の原則と実装が一致していなかった（旧仕様では `promotional === true` のときに同種のバッジを表示しており、この乖離自体は enum 化以前から存在していた）。**調査の結果、露出経路は2つあることが判明し、いずれも撤去して原則に実装を合わせた**:
     1.  **バッジ（`src/components/feed/feed-card.tsx`）**: 「PR要素あり」バッジそのものを削除した。あわせて、表示すべきバッジが1つも無い場合にバッジコンテナ自体を描画しないよう修正し、空要素・余白の残留を避けた。
@@ -768,6 +768,7 @@ THEN 1 ELSE 0 END` で判定している。`json_extract` は文字列値をク�
    - 決定的ゲートを通過した場合は、`curateSingle` によるキュレーション結果を `published` として保存する。
    - **出典クレジット（第 2 項）の解決規則（エバーグリーン経路）**: 出典名は「運営の明示指定（CLI の `--source-name`、前後空白は trim）→ `og:site_name` → URL ホスト名（`www.` を除去した実在ドメイン）」の順で解決する。いずれも解決できない場合、架空のソース名を捏造せずに保存を拒否する（安定コード `"no_source_name"`）。サイト名を示さない固定文字列へのフォールバック生成は禁止。discovery 経路の `sourceName` は `registrableDomain(url)`（解決できなければ対象ホスト名）で決定する（`src/lib/pipeline/discovery-ingest.ts`）。
 5. **抽出本文の永続化禁止**: discovery 経路で取得した本文（記事本文コンテナ抽出（`extractArticleContainer()`）を経た判定スライスの出力）は LLM 判定の入力としてのみ使用し、**`posts` を含むいかなるカラムにも永続化しない**。`src/lib/pipeline/discovery-ingest.ts` の `upsertPostRow()` は `originalExcerpt: null` を常に渡し、discovery 経路由来の投稿の `originalExcerpt` は常に `null` になる。理由は3つ: (a) §10-3/§10-4 の「取得・判定は情報解析、公開は表現を含まない言明」という二層構造を維持できる、(b) 「他人の著作物のデータベース」を新たに作らない、(c) 本文が DB に存在すると将来誰かがそれを要約の材料に使う drift を構造的に防ぐ（無ければ使えない）。エバーグリーン経路・SNS 経路の `originalExcerpt`（`og:description` やキャプション等、配信者自身が公開用に提供したメタデータ）とは性質が異なるため区別すること——discovery 経路の抽出本文は配信者が要約用に提供したものではなく、記事本文からの機械的な抽出（複製）である。
+   - **バックフィル修復時も非永続**: プロンプト/gate を改善した後、discovery 経路で公開済みの投稿は `originalExcerpt` が空のため通常のバックフィル（`scripts/backfill-usefulness.mjs`、プレフライト `shouldRegenerateAnchor()` が本文なし候補を一律スキップ）では再キュレーションされず、旧基準のトピックアンカーのまま固定される。この救済は `scripts/backfill-mwed-anchors.mjs` が行う——対象は `status = "published"` かつ署名不一致の投稿に限定し、`disciplinedFetch()` で本文を再取得し `extractArticleContainer()` → 判定スライスをメモリ上で復元し、1 回の Gemini バッチリクエストで再キュレーションする。**判定スライスはこの経路でも DB へ書き戻さない**: `markCurated()` へ渡す update は `scripts/lib/mwed-anchor-backfill.mjs` の `assertNoSliceLeak()` がキー許可リスト（`url` / `aiSummary` / `category` / `tag` / `contentHash` / `curationSignature` / `usefulness` / `rationale`）で検証し、違反時は throw して中断する。プレビュー出力もトピックアンカーの新旧のみで本文は表示しない。`originalTitle`・`post_publications`（bodyHash / M4）・`discovery_seen`・公開ゲート（撤回判定）は変更しないため公開状態は変わらない。
 6. **アクセス規律（discovery 経路の本文取得のみに適用。実装 `src/lib/sources/access-discipline.ts`）**:
    - **robots.txt の遵守**: 取得前に必ず確認し、`isAllowed()` が false を返す URL は取得しない（`blocked_robots` として `discovery_seen` を `skipped` にする）。取得結果は 24 時間以内でキャッシュする（RFC 9309 の推奨）。
    - **`Crawl-delay` を下限として尊重**: robots.txt に `Crawl-delay` の指定があれば、ホストあたり最小間隔（既定 `MIN_HOST_INTERVAL_MS` = 5秒）とその値（秒）×1000msの大きい方を実際の間隔とする。
@@ -893,7 +894,13 @@ THEN 1 ELSE 0 END` で判定している。`json_extract` は文字列値をク�
    - **決定的ゲートの指標**: コンテナ抽出後のテキストに対して
      `textLength` / `linkDensity` / `paragraphCount` の3指標を算出し、
      いずれも `src/lib/constants.ts` の閾値（`MIN_EVIDENCE_INPUT_CHARS`・
-     `MAX_LINK_DENSITY`・`MIN_PARAGRAPH_COUNT`）で判定する。**旧指標
+     `MAX_LINK_DENSITY`・`MIN_PARAGRAPH_COUNT`）で判定する。**2026-08-29 の
+     ゲート大幅緩和（オーナー判断）でこの3閾値を `80 / 0.25 / 3` から
+     `30 / 0.70 / 1` に緩めた**——フィード供給量を増やすことを優先し、
+     この決定的ゲートは「判定対象テキストが実質的に存在しない（本文なし・
+     純粋なリンク集約ページ）」ケースだけを弾く水準に位置づけ直した。
+     `container_not_found`（コンテナ抽出自体の失敗）は緩和対象ではなく従来どおり
+     終端棄却する。**旧指標
      `boilerplateLineRatio`（`computeBoilerplateLineRatio()`）は廃止した**
      ——実験により、この指標は本文の内容ではなく HTML ソースの整形
      スタイル（改行位置）に依存することが確定したため（同一内容でも
@@ -908,15 +915,20 @@ THEN 1 ELSE 0 END` で判定している。`json_extract` は文字列値をク�
 
 ### §11-1 MAX_LINK_DENSITY の校正
 
-- **校正日**: 2026-08-25
+- **校正日**: 2026-08-25 → **2026-08-29 に方針変更**
 - **データソース**: www.mwed.jp（5件の公開記事）
 - **link_density 分布**: min=0.003, max=0.177, avg=0.114
-- **設定値**: MAX_LINK_DENSITY = 0.25（max + 40% マージン）
-- **検証**: 閾値 0.10 で排除されることを確認済み
+- **旧設定値**: MAX_LINK_DENSITY = 0.25（max + 40% マージン）
+- **現設定値**: MAX_LINK_DENSITY = 0.70（2026-08-29 のゲート大幅緩和）。実測分布の
+  上限に対する統計マージンではなく、「本文がほぼ無くリンクだけのページ」を弾く
+  ための粗い上限として位置づけ直した。抽出品質ゲート全体（`MIN_EVIDENCE_INPUT_CHARS`・
+  `MAX_LINK_DENSITY`・`MIN_PARAGRAPH_COUNT`）を供給量優先で緩めた一環（§11 項1）。
 
 2. **K2（規約変更検知）と allowlist の関係**: `source_policy.tosUrl` は `HOST_ALLOWLIST`（`src/lib/constants.ts` の各エントリの `tosUrl`）から解決する。**allowlist 側が真実の源（source of truth）であり、DB（`source_policy` テーブル）に格納された古い値は allowlist の値で上書きして解決する**（`src/lib/sources/access-discipline.ts`）。allowlist に未登録、または `tosUrl` が未設定のホストは `tosUrl: null` のまま維持され、K2 の対象にならない。
    - **既知の許容トレードオフ（遅延）**: K2 の実行間隔は「1ホストあたり1日1回」であり、`source_policy.checkedAt` 列を robots.txt チェック側と共有している。そのため **robots.txt の変化を検知した直後は、規約チェックが最大1日遅延しうる**。追加専用（append-only）のマイグレーション制約下では列を新設するだけで解決できず、テーブルを分離すると `tosHash` が再び休眠カラム化するリスクを招くため、この遅延は仕様上許容する。
 3. **記事パスのホワイトリスト（`HOST_ALLOWLIST.articlePathPatterns`）**: discovery 対象の URL パスは `src/lib/constants.ts` の `AllowlistedHost.articlePathPatterns` で定義し、**取得前に**2段階で強制する——sitemap からの URL 収集（seed）段階と、本文取得直前の段階。口コミ投稿ページ（`/hall/{hallId}/rev/{commentId}/` 等、記事とはパス構造が異なる投稿単位のページ）はこのパターンに一致しないため、構造的に discovery 対象から除外される。
-4. **日次公開上限とホスト別シェア上限**: `DAILY_PUBLISH_CAP = 15`・`HOST_DAILY_SHARE_MAX = 0.5`（`src/lib/constants.ts`。plan 10 §2-S0 で 10→15 に引き上げ。目標フィード供給量 15件/日に対応）。当日の公開総数が `DAILY_PUBLISH_CAP` に達している、またはあるホストの当日公開数が `Math.max(1, Math.floor(DAILY_PUBLISH_CAP × HOST_DAILY_SHARE_MAX))` に達している場合、以後そのホストの新規公開を打ち切る。SNS 手動投入・エバーグリーン・discovery の全経路（`src/lib/pipeline/submit-url.ts`・`src/lib/pipeline/evergreen.ts`・`src/lib/pipeline/ingest.ts`・`src/lib/pipeline/discovery-ingest.ts`）で共通の判定関数を用いる。
-5. **目標フィード供給量（plan 10 M1）**: **15 件/日**。plan 10 §2 で意思決定済み（2026-08-26）。根拠: mwed.jp discovery 歩留まり 16.7%（90件中15件公開）を維持するのに最低 15件/日必要。ホスト分散の許容範囲: 単一ホスト最大 `Math.floor(15×0.5) = 7` 件/日（`HOST_DAILY_SHARE_MAX = 0.5`）。この目標値は §9 の編集方針（有用度スコア・重み）とは独立であり、供給量の天井を決める運用パラメータである。
+4. **日次公開サーキットブレーカー**: `DAILY_PUBLISH_CAP = 150`（`src/lib/constants.ts`）。当日 JST の公開総数がこれに達している場合、以後の新規公開を打ち切る（終端棄却ではなく `rate_capped` として再試行キューへ繰り延べる）。SNS 手動投入・エバーグリーン・discovery の全経路（`src/lib/pipeline/submit-url.ts`・`src/lib/pipeline/evergreen.ts`・`src/lib/pipeline/ingest.ts`・`src/lib/pipeline/discovery-ingest.ts`）で共通の判定関数 `isDailyPublishCapReached()`（`src/lib/pipeline/rate-cap.ts`）を用いる。
+   - **2026-08-29 の方針転換（オーナー判断）**: 旧仕様（`DAILY_PUBLISH_CAP = 15` ＋ `HOST_DAILY_SHARE_MAX = 0.5` で単一ホスト最大 7件/日）は、供給スロットルであると同時に「1ホストがフィードを埋めると、個々のカードが正しくても『中立キュレーション』の主張が集約レベルで偽になる」ことを防ぐ安全弁（旧 plan 07 §6-Q4）だった。**集約レベルの中立性を運用ポリシーから外す**ことに伴い、`HOST_DAILY_SHARE_MAX` を廃止し、単一ホストの当日公開シェアは一切制限しない。`DAILY_PUBLISH_CAP` は供給目標（旧 15件/日）から切り離し、DOM 変更等で一晩に数百件を誤公開する相関カスケード事故だけを止める上限（150）として残す。通常運用でこの値に達することは想定しない。
+   - **回帰防止（plan 07 §14）**: この上限を無効値（10^9 等）に戻すと境界テストが素通りした過去の回帰を踏まえ、`tests/pipeline-ingest.test.ts` / `tests/discovery-ingest.test.ts` の境界テストは `149→公開 / 150→rate_capped` をリテラルで固定する。
+5. **目標フィード供給量**: 明示的な数値目標は置かない（2026-08-29 に旧「15件/日」を撤廃）。供給量は抽出品質ゲート（§11 項1）とキュレーションの通過率に委ね、上限は項4 のサーキットブレーカー（150/日）のみとする。
 6. **`RetractionReason` と撤回 CLI**: `RetractionReason`（`src/lib/types.ts`）に `takedown_request` を追加した。4つの客観的トリガ（`source_gone` / `robots_disallowed` / `tos_changed` / `body_changed`）と異なり、**`takedown_request` のみが人間の判断による撤回**であり、自動検知パイプラインからは設定されない。撤回は `pnpm retract`（`scripts/retract.mjs`）で行う——既定は dry-run（対象一覧の表示のみ、DB 変更なし）、接続先を明示し、`--reason` は必須（既定値なし）で人間に毎回明示させる。実際に撤回するには `--yes`（または `--execute`）を要する。

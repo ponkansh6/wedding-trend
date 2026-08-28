@@ -15,7 +15,6 @@ const {
   enqueueRetryMock,
   recordPublicationMock,
   countPublishedSinceMock,
-  countPublishedSinceByHostMock,
   hashUrlMock,
 } = vi.hoisted(() => ({
   upsertPostsMock: vi.fn(),
@@ -26,7 +25,6 @@ const {
   enqueueRetryMock: vi.fn(),
   recordPublicationMock: vi.fn(),
   countPublishedSinceMock: vi.fn(),
-  countPublishedSinceByHostMock: vi.fn(),
   hashUrlMock: vi.fn((url: string) => `hash:${url}`),
 }));
 const { canonicalizeUrlMock } = vi.hoisted(() => ({
@@ -50,7 +48,6 @@ vi.mock("@/lib/db/repository", () => ({
   enqueueRetry: enqueueRetryMock,
   recordPublication: recordPublicationMock,
   countPublishedSince: countPublishedSinceMock,
-  countPublishedSinceByHost: countPublishedSinceByHostMock,
   hashUrl: hashUrlMock,
 }));
 
@@ -133,7 +130,6 @@ describe("curateEvergreenUrl (src/lib/pipeline/evergreen.ts)", () => {
     enqueueRetryMock.mockResolvedValue(undefined);
     recordPublicationMock.mockResolvedValue(undefined);
     countPublishedSinceMock.mockResolvedValue(0);
-    countPublishedSinceByHostMock.mockResolvedValue({});
   });
 
   it("returns reason 'invalid_url' and does not touch DB or LLM for an invalid URL", async () => {
@@ -293,10 +289,12 @@ describe("curateEvergreenUrl (src/lib/pipeline/evergreen.ts)", () => {
   });
 
   // M1-1: 逐語タイトルの無検閲公開フィルタ。恒久棄却（再試行しない）。
-  it("M1: title carrying an ad marker is terminally dropped as title_filter and never published", async () => {
+  // 2026-08-29: 広告マーカー（【PR】等）は棄却対象外。表示が壊れるケース
+  // （記号連打・制御文字・空）のみ棄却する。
+  it("M1: a structurally broken title (symbol spam) is terminally dropped as title_filter and never published", async () => {
     fetchOgpMetadataMock.mockResolvedValueOnce({
       ...BASE_META,
-      title: "【PR】Evergreen Article Title",
+      title: "会場選び〜〜〜〜のポイント",
     });
 
     const outcome = await curateEvergreenUrl("https://example.com/article");

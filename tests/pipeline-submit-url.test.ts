@@ -17,7 +17,6 @@ const {
   enqueueRetryMock,
   recordPublicationMock,
   countPublishedSinceMock,
-  countPublishedSinceByHostMock,
   hashUrlMock,
 } = vi.hoisted(() => ({
   upsertPostsMock: vi.fn(),
@@ -29,7 +28,6 @@ const {
   enqueueRetryMock: vi.fn(),
   recordPublicationMock: vi.fn(),
   countPublishedSinceMock: vi.fn(),
-  countPublishedSinceByHostMock: vi.fn(),
   hashUrlMock: vi.fn((url: string) => `hash:${url}`),
 }));
 
@@ -55,7 +53,6 @@ vi.mock("@/lib/db/repository", () => ({
   enqueueRetry: enqueueRetryMock,
   recordPublication: recordPublicationMock,
   countPublishedSince: countPublishedSinceMock,
-  countPublishedSinceByHost: countPublishedSinceByHostMock,
   hashUrl: hashUrlMock,
 }));
 
@@ -132,7 +129,6 @@ describe("runSubmitUrl (src/lib/pipeline/submit-url.ts)", () => {
     enqueueRetryMock.mockResolvedValue(undefined);
     recordPublicationMock.mockResolvedValue(undefined);
     countPublishedSinceMock.mockResolvedValue(0);
-    countPublishedSinceByHostMock.mockResolvedValue({});
   });
 
   it('returns reason "invalid_url" and does not touch the DB or LLM for a syntactically invalid URL', async () => {
@@ -225,13 +221,14 @@ describe("runSubmitUrl (src/lib/pipeline/submit-url.ts)", () => {
   });
 
   // M1-1: 逐語タイトルの無検閲公開フィルタ。恒久棄却（再試行しない）。
-  it("M1: an oEmbed caption carrying an ad marker is terminally dropped as title_filter and never published", async () => {
+  // 2026-08-29: 広告マーカー（【PR】等）は棄却対象外。表示が壊れるケースのみ棄却。
+  it("M1: a structurally broken caption (symbol spam) is terminally dropped as title_filter and never published", async () => {
     fetchOEmbedMock.mockResolvedValue({
       provider: "instagram",
       html: "<blockquote>ig</blockquote>",
       thumbnailUrl: null,
       authorName: null,
-      title: "【PR】キャンペーン投稿",
+      title: "キャンペーン投稿！！！！",
     });
 
     const outcome = await runSubmitUrl("https://www.instagram.com/p/ABC123/");

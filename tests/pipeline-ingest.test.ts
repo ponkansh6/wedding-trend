@@ -31,12 +31,10 @@ vi.mock("@/lib/db/repository", async (importOriginal) => {
   return {
     ...actual,
     countPublishedSince: vi.fn(),
-    countPublishedSinceByHost: vi.fn(),
   };
 });
 
 const mockedCountPublishedSince = vi.mocked(countPublishedSince);
-const mockedCountPublishedSinceByHost = vi.mocked(countPublishedSinceByHost);
 
 // title/excerpt から機械的に結果を組み立てる。入力件数に関わらず 1 件も
 // 取りこぼさないことをテストするため、固定件数の応答ではなく入力に追従する形にする。
@@ -77,7 +75,6 @@ import {
   markDropped,
   upsertPosts,
   countPublishedSince,
-  countPublishedSinceByHost,
 } from "@/lib/db/repository";
 import { DAILY_PUBLISH_CAP, RETRY_MAX_ATTEMPTS } from "@/lib/constants";
 import { db } from "@/lib/db";
@@ -93,7 +90,6 @@ describe("runIngest (src/lib/pipeline/ingest.ts)", () => {
     await setupTestDb();
 
     mockedCountPublishedSince.mockResolvedValue(0);
-    mockedCountPublishedSinceByHost.mockResolvedValue({});
 
     hatenaFetch.mockResolvedValue([{ title: "Blog Post 1", link: "https://example.com/blog1" }]);
     hatenaToPost.mockReturnValue({
@@ -253,13 +249,14 @@ describe("runIngest (src/lib/pipeline/ingest.ts)", () => {
   });
 
   // M1-1: 逐語タイトルの無検閲公開フィルタ。恒久棄却（LLM は呼ばれる）。
-  it("M1: a title carrying an ad marker is terminally dropped as title_filter and never published", async () => {
+  // 2026-08-29: 広告マーカーは棄却対象外。表示が壊れるケース（記号連打）のみ棄却。
+  it("M1: a structurally broken title (symbol spam) is terminally dropped as title_filter and never published", async () => {
     hatenaToPost.mockReturnValue({
       url: "https://example.com/blog1",
       sourceType: "blog",
       sourceId: "hatena-bookmark",
       sourceName: "はてなブックマーク",
-      originalTitle: "【PR】Blog Post 1",
+      originalTitle: "Blog Post 1〜〜〜〜",
       originalExcerpt: "Excerpt",
       author: "Author",
       thumbnailUrl: null,
@@ -452,21 +449,22 @@ describe("runIngest (src/lib/pipeline/ingest.ts)", () => {
     expect(rateCappedUrls).toContain("https://example.com/news1");
   });
 
-  // 以下 3 件は上のテストと異なり、DAILY_PUBLISH_CAP / HOST_DAILY_SHARE_MAX
-  // から動的に期待値を導出せず、具体的な数値をリテラルで固定する。定数の値
-  // が変わった場合にテストが自動追随せず落ちることが目的（AGENTS.md「ゲート
-  // が緑であることと機能していることは別」）。
+  // 以下 2 件は上のテストと異なり、DAILY_PUBLISH_CAP から動的に期待値を
+  // 導出せず、具体的な数値をリテラルで固定する。定数の値が変わった場合に
+  // テストが自動追随せず落ちることが目的（AGENTS.md「ゲートが緑であること
+  // と機能していることは別」／ plan 07 §14 の回帰＝上限を無効値にしても
+  // テストが素通りした件）。
 
-  it("Q4: 日次公開上限は 15 件に固定されている（plan 10 §2-S0: 目標供給量 15件/日に対応）", () => {
+  it("Q4: 日次公開サーキットブレーカーは 150 件に固定されている（供給スロットルではなく暴走検知。spec §11 項4）", () => {
     // 値を変えたい場合は openspec/specs/wedding-trend/spec.md §11.4 と
     // shared_plan/10-publication-policy-review.md を更新したうえで、このテストの
     // リテラル値も合わせて更新すること。
-    expect(DAILY_PUBLISH_CAP).toBe(15);
+    expect(DAILY_PUBLISH_CAP).toBe(150);
   });
 
-  it("Q4: 境界値 — 当日 14 件公開済みから開始すると、同一ラン内でカウンタが加算され 2 件中ちょうど 1 件が公開・ちょうど 1 件が rate_capped になる（off-by-one固定、処理順には依存しない）", async () => {
-    // 14 件済み（リテラル 14）で開始。同一ラン内でローカルカウンタが加算される
-    // ため、2 件のうち 15 件目に当たる方は公開、16 件目に当たる方は
+  it("Q4: 境界値 — 当日 149 件公開済みから開始すると、同一ラン内でカウンタが加算され 2 件中ちょうど 1 件が公開・ちょうど 1 件が rate_capped になる（off-by-one固定、処理順には依存しない）", async () => {
+    // 149 件済み（リテラル 149）で開始。同一ラン内でローカルカウンタが加算される
+    // ため、2 件のうち 150 件目に当たる方は公開、151 件目に当たる方は
     // rate_capped になる。runIngest の処理順（フィクスチャの並び順やレーンの
     // 取り出し順）はテストが依存してよい保証ではないため、どちらの URL が
     // 先に処理されるかは固定せず、「ちょうど1件公開・ちょうど1件
@@ -478,7 +476,7 @@ describe("runIngest (src/lib/pipeline/ingest.ts)", () => {
     // status="published" で残る。実際にキュレーションが完了し公開面に出た
     // ことの信号として、getFeedCards() が実際に返すカードで判定する
     // （本番のフィード表示条件そのものに追随する、最も本番に近い検証）。
-    mockedCountPublishedSince.mockResolvedValue(14);
+    mockedCountPublishedSince.mockResolvedValue(149);
 
     const summary = await runIngest();
 
@@ -554,20 +552,18 @@ describe("runIngest (src/lib/pipeline/ingest.ts)", () => {
     expect(feedUrls).not.toContain("https://example.com/news1");
   });
 
-  it("Q4: ホストシェア上限は 7 件に固定されている（DAILY_PUBLISH_CAP=15 × HOST_DAILY_SHARE_MAX=0.5）。単一ホストが既に 7 件公開済みなら 8 件目は抑止される", async () => {
-    // blog1 / news1 は共に example.com ホスト。hostCounts をリテラル 7 に
-    // 固定し、hostShareCapCount() の実装（floor(15*0.5)=7）を式からではなく
-    // 具体的な数値で検証する。
+  it("Q4: ホスト別シェア上限は廃止されている（2026-08-29 の方針転換。spec §11 項4）。単一ホストが同日に多数公開済みでも抑止しない", async () => {
+    // 旧仕様では単一ホストが日次上限×0.5 件に達すると以後そのホストの公開を
+    // 止めていた。廃止後は日次サーキットブレーカー（150）にのみ従う。
+    // 日次総数が上限未満である限り、同一ホストの何件目でも公開される。
     mockedCountPublishedSince.mockResolvedValue(0);
-    mockedCountPublishedSinceByHost.mockResolvedValue({ "example.com": 7 });
 
     const summary = await runIngest();
 
-    expect(summary.curated).toBe(0);
+    expect(summary.curated).toBeGreaterThan(0);
     const retryRows = await db.select().from(postRetryQueue);
     const rateCappedUrls = retryRows.filter((r) => r.reason === "rate_capped").map((r) => r.url);
-    expect(rateCappedUrls).toContain("https://example.com/blog1");
-    expect(rateCappedUrls).toContain("https://example.com/news1");
+    expect(rateCappedUrls).toHaveLength(0);
   });
 
   // D5: runIngest() の入口に配線した rss/evergreen/submit レーン分の

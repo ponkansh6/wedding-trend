@@ -11,7 +11,6 @@ import {
 import {
   countDiscoverySeenByStatus,
   countPublishedSince,
-  countPublishedSinceByHost,
   getHostGateState,
   getPostsByUrls,
   getRationaleByPostId,
@@ -32,11 +31,7 @@ import {
 import { curateSingle } from "@/lib/llm/batch";
 import type { CurationResult } from "@/lib/llm/batch";
 import { __resetStateForTests, __setSleepForTests } from "@/lib/sources/access-discipline";
-import {
-  DAILY_PUBLISH_CAP,
-  DAILY_REQUEST_CAP_PER_HOST,
-  HOST_DAILY_SHARE_MAX,
-} from "@/lib/constants";
+import { DAILY_PUBLISH_CAP, DAILY_REQUEST_CAP_PER_HOST } from "@/lib/constants";
 
 vi.mock("@/lib/llm/batch", () => ({
   curateSingle: vi.fn(),
@@ -47,13 +42,11 @@ vi.mock("@/lib/db/repository", async (importOriginal) => {
   return {
     ...actual,
     countPublishedSince: vi.fn(),
-    countPublishedSinceByHost: vi.fn(),
   };
 });
 
 const mockedCurate = vi.mocked(curateSingle);
 const mockedCountPublishedSince = vi.mocked(countPublishedSince);
-const mockedCountPublishedSinceByHost = vi.mocked(countPublishedSinceByHost);
 
 const HOST = "www.mwed.jp";
 const DISALLOWED_HOST = "not-on-the-allowlist.example.com";
@@ -156,7 +149,6 @@ describe("ingestDiscoveredUrls", () => {
     __setSleepForTests(async () => {});
     mockedCurate.mockReset();
     mockedCountPublishedSince.mockResolvedValue(0);
-    mockedCountPublishedSinceByHost.mockResolvedValue({});
   });
 
   it("Q3: allowlist 外ホストはネットワーク I/O ゼロで一切処理しない", async () => {
@@ -325,7 +317,12 @@ describe("ingestDiscoveredUrls", () => {
       vi.fn(async (input: string | URL) => {
         const u = String(input);
         if (u.endsWith("/robots.txt")) return resp({ status: 200, body: ALLOW_ALL_ROBOTS });
-        if (u === url) return resp({ status: 200, body: articleHtml("短い話", { bodyChars: 30 }) });
+        // MIN_EVIDENCE_INPUT_CHARS=30（2026-08-29 緩和）未満にするため極端に短くする。
+        if (u === url)
+          return resp({
+            status: 200,
+            body: articleHtml("短い話", { bodyChars: 5, includeAnchor: false }),
+          });
         throw new Error(`unexpected fetch: ${u}`);
       }),
     );
@@ -424,15 +421,17 @@ describe("ingestDiscoveredUrls", () => {
     expect(removal[0]?.reason).toBe("extraction_insufficient:container_not_found");
   });
 
-  it("M1: タイトルフィルタ不合格は title_filter で終端棄却する", async () => {
-    const url = `https://${HOST}/story/cases/ad-title`;
+  it("M1: タイトルフィルタ不合格（記号連打）は title_filter で終端棄却する", async () => {
+    // 2026-08-29: 広告マーカー（【PR】等）は棄却対象外。表示が壊れるケースのみ棄却。
+    const url = `https://${HOST}/story/cases/broken-title`;
     await seedPending(HOST, url);
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: string | URL) => {
         const u = String(input);
         if (u.endsWith("/robots.txt")) return resp({ status: 200, body: ALLOW_ALL_ROBOTS });
-        if (u === url) return resp({ status: 200, body: articleHtml("【PR】演出の予算配分の話") });
+        if (u === url)
+          return resp({ status: 200, body: articleHtml("演出の予算配分の話！！！！") });
         throw new Error(`unexpected fetch: ${u}`);
       }),
     );
@@ -522,21 +521,20 @@ describe("ingestDiscoveredUrls", () => {
     expect(queued[0]?.reason).toBe("rate_capped");
   });
 
-  it("Q4: ホストシェア上限に達したら公開せず rate_capped として再試行キューに入る", async () => {
-    // 日次上限ではなくホストシェアのみ到達させるため、total は上限未満を返す。
-    // byHost[HOST] = hostCap でホストシェア上限到達を再現する。
-    const hostCap = Math.floor(DAILY_PUBLISH_CAP * HOST_DAILY_SHARE_MAX);
-    mockedCountPublishedSince.mockResolvedValue(hostCap - 1);
-    mockedCountPublishedSinceByHost.mockResolvedValue({ [HOST]: hostCap });
+  it("Q4: ホスト別シェア上限は廃止されている（2026-08-29 の方針転換。spec §11 項4）。同一ホストが同日に多数公開済みでも公開される", async () => {
+    // 旧仕様では単一ホストが日次上限×0.5 件に達すると rate_capped にしていた。
+    // 廃止後は日次サーキットブレーカー（150）にのみ従う。日次総数が上限未満
+    // である限り、同一ホストの何件目でも公開される。
+    mockedCountPublishedSince.mockResolvedValue(100);
 
-    const url = `https://${HOST}/story/cases/over-host-share`;
+    const url = `https://${HOST}/story/cases/no-host-share-cap`;
     await seedPending(HOST, url);
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: string | URL) => {
         const u = String(input);
         if (u.endsWith("/robots.txt")) return resp({ status: 200, body: ALLOW_ALL_ROBOTS });
-        if (u === url) return resp({ status: 200, body: articleHtml("ホストシェア超過の話") });
+        if (u === url) return resp({ status: 200, body: articleHtml("ホスト偏りを気にしない話") });
         throw new Error(`unexpected fetch: ${u}`);
       }),
     );
@@ -544,26 +542,25 @@ describe("ingestDiscoveredUrls", () => {
 
     const stats = await ingestDiscoveredUrls(HOST);
 
-    expect(stats.rateCapped).toBe(1);
-    expect(stats.published).toBe(0);
+    expect(stats.rateCapped).toBe(0);
+    expect(stats.published).toBe(1);
   });
 
-  // 以下 3 件は上の2件と異なり、DAILY_PUBLISH_CAP / HOST_DAILY_SHARE_MAX から
-  // 動的に期待値を導出せず、具体的な数値をリテラルで固定する。定数の値が
-  // 変わった場合にテストが自動追随せず落ちることが目的（AGENTS.md「ゲートが
-  // 緑であることと機能していることは別」）。
+  // 以下 2 件は上のテストと異なり、DAILY_PUBLISH_CAP から動的に期待値を
+  // 導出せず、具体的な数値をリテラルで固定する。定数の値が変わった場合に
+  // テストが自動追随せず落ちることが目的（AGENTS.md「ゲートが緑であること
+  // と機能していることは別」／ plan 07 §14 の回帰）。
 
-  it("Q4: 日次公開上限は 15 件に固定されている（plan 10 §2-S0: 目標供給量 15件/日に対応）", () => {
+  it("Q4: 日次公開サーキットブレーカーは 150 件に固定されている（供給スロットルではなく暴走検知。spec §11 項4）", () => {
     // 値を変えたい場合は openspec/specs/wedding-trend/spec.md §11.4 と
     // shared_plan/10-publication-policy-review.md を更新したうえで、このテストの
     // リテラル値も合わせて更新すること。
-    expect(DAILY_PUBLISH_CAP).toBe(15);
+    expect(DAILY_PUBLISH_CAP).toBe(150);
   });
 
-  it("Q4: 境界値 — 当日 14 件公開済みなら 15 件目は公開され、15 件公開済みなら 16 件目は rate_capped になる（off-by-one固定）", async () => {
-    // 14 件済み（リテラル 14）→ 15 件目は上限未到達として公開される。
-    mockedCountPublishedSince.mockResolvedValue(14);
-    mockedCountPublishedSinceByHost.mockResolvedValue({});
+  it("Q4: 境界値 — 当日 149 件公開済みなら 150 件目は公開され、150 件公開済みなら 151 件目は rate_capped になる（off-by-one固定）", async () => {
+    // 149 件済み（リテラル 149）→ 150 件目は上限未到達として公開される。
+    mockedCountPublishedSince.mockResolvedValue(149);
 
     const urlOk = `https://${HOST}/story/cases/boundary-ok`;
     await seedPending(HOST, urlOk);
@@ -582,9 +579,8 @@ describe("ingestDiscoveredUrls", () => {
     expect(statsOk.rateCapped).toBe(0);
     expect(statsOk.published).toBe(1);
 
-    // 15 件済み（リテラル 15）→ 16 件目は上限到達として rate_capped。
-    mockedCountPublishedSince.mockResolvedValue(15);
-    mockedCountPublishedSinceByHost.mockResolvedValue({});
+    // 150 件済み（リテラル 150）→ 151 件目は上限到達として rate_capped。
+    mockedCountPublishedSince.mockResolvedValue(150);
 
     const urlOver = `https://${HOST}/story/cases/boundary-over`;
     await seedPending(HOST, urlOver);
@@ -601,32 +597,6 @@ describe("ingestDiscoveredUrls", () => {
     const statsOver = await ingestDiscoveredUrls(HOST);
     expect(statsOver.rateCapped).toBe(1);
     expect(statsOver.published).toBe(0);
-  });
-
-  it("Q4: ホストシェア上限は 7 件に固定されている（DAILY_PUBLISH_CAP=15 × HOST_DAILY_SHARE_MAX=0.5）。単一ホスト 8 件目は抑止される", async () => {
-    // HOST_DAILY_SHARE_MAX が 0.5 であることも合わせて固定する。
-    expect(HOST_DAILY_SHARE_MAX).toBe(0.5);
-    // hostShareCapCount() の実装（floor(15*0.5)=7）を式からではなくリテラル
-    // 7/8 で直接検証する。
-    mockedCountPublishedSince.mockResolvedValue(7);
-    mockedCountPublishedSinceByHost.mockResolvedValue({ [HOST]: 7 });
-
-    const url = `https://${HOST}/story/cases/host-share-literal-6`;
-    await seedPending(HOST, url);
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: string | URL) => {
-        const u = String(input);
-        if (u.endsWith("/robots.txt")) return resp({ status: 200, body: ALLOW_ALL_ROBOTS });
-        if (u === url) return resp({ status: 200, body: articleHtml("8件目の話") });
-        throw new Error(`unexpected fetch: ${u}`);
-      }),
-    );
-    mockedCurate.mockResolvedValue(sufficientCuration());
-
-    const stats = await ingestDiscoveredUrls(HOST);
-    expect(stats.rateCapped).toBe(1);
-    expect(stats.published).toBe(0);
   });
 
   it("§7: 一時的失敗（5xx）は再試行キューに積み、TTL 超過分は retry_exhausted で終端棄却する", async () => {

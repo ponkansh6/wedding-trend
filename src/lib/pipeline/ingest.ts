@@ -1,7 +1,6 @@
 import {
   CURATION_BUDGET,
   DAILY_PUBLISH_CAP,
-  HOST_DAILY_SHARE_MAX,
   RATIONALE_PROMPT_VERSION,
   RETRY_BACKOFF_HOURS,
   RETRY_MAX_ATTEMPTS,
@@ -11,7 +10,6 @@ import {
 import {
   completeRetry,
   countPublishedSince,
-  countPublishedSinceByHost,
   dueRetries,
   enqueueRetry,
   expireRetries,
@@ -34,6 +32,7 @@ import { LLM_MODEL } from "@/lib/llm/client";
 import { computeContentHash, computeCurationSignature } from "@/lib/llm/signature";
 import { filterTitle } from "@/lib/publish/gate";
 import { curateEvergreenUrl, terminateEvergreenRetry } from "@/lib/pipeline/evergreen";
+import { isDailyPublishCapReached } from "@/lib/pipeline/rate-cap";
 import { runSubmitUrl, terminateSubmitRetry } from "@/lib/pipeline/submit-url";
 import { SOURCE_IDS, SOURCE_REGISTRY, type SourceAdapter } from "@/lib/sources/registry";
 import type { PostStatus, RetryContext, RetryLane, RetryReason } from "@/lib/types";
@@ -154,11 +153,6 @@ function addHoursIso(baseIso: string, hours: number): string {
   return new Date(Date.parse(baseIso) + hours * 60 * 60 * 1000).toISOString();
 }
 
-/** Q4: 1ホストが当日の公開のうち占めてよい最大件数。 */
-function hostShareCapCount(): number {
-  return Math.max(1, Math.floor(DAILY_PUBLISH_CAP * HOST_DAILY_SHARE_MAX));
-}
-
 function backoffHoursFor(attempts: number): number {
   const idx = Math.min(attempts, RETRY_BACKOFF_HOURS.length - 1);
   return RETRY_BACKOFF_HOURS[idx] ?? RETRY_BACKOFF_HOURS[RETRY_BACKOFF_HOURS.length - 1];
@@ -245,19 +239,8 @@ async function reprocessRssRetry(url: string, ctx: RetryContext, now: string): P
 
   // D5 (shared_plan/16): topicAnchor の検証・再生成・degrade は curateSingle/curateBatch 内で行われる。失敗時は null で公開し、棄却しない。
 
-  let host = "";
-  try {
-    host = new URL(url).host;
-  } catch {
-    // 正規化済み URL のはずだが念のため。
-  }
-  const sinceIso = jstDayStartIso(now);
-  const [total, byHost] = await Promise.all([
-    countPublishedSince(sinceIso),
-    countPublishedSinceByHost(sinceIso),
-  ]);
-  const hostCount = byHost[host] ?? 0;
-  if (total >= DAILY_PUBLISH_CAP || hostCount >= hostShareCapCount()) {
+  // Q4: 日次公開サーキットブレーカーのみ（ホスト別シェア上限は廃止。spec §11 項4）。
+  if (await isDailyPublishCapReached(jstDayStartIso(now))) {
     const gaveUp = await enqueueRssRetry(url, "rate_capped", now, ctx);
     if (gaveUp) await markDropped(postId, "retry_exhausted", now);
     return;
@@ -549,13 +532,11 @@ export async function runIngest(trigger: IngestTrigger = "manual"): Promise<Inge
       );
       geminiCalls = calls;
 
-      // Q4: 公開レート上限（当日 JST 基準）。バッチ内で複数件を公開判定する
-      // ため、承認するたびにローカルのカウンタを増やして同一ラン内でも
-      // 上限を守る。
+      // Q4: 日次公開サーキットブレーカー（当日 JST 基準）。バッチ内で複数件を
+      // 公開判定するため、承認するたびにローカルのカウンタを増やして同一ラン内
+      // でも上限を守る。ホスト別シェア上限は廃止（spec §11 項4）。
       const sinceIso = jstDayStartIso(now);
       let totalPublishedToday = await countPublishedSince(sinceIso);
-      const hostCounts = await countPublishedSinceByHost(sinceIso);
-      const hostCap = hostShareCapCount();
 
       const updates: CurationUpdate[] = [];
       const publishedByUrl = new Map<string, { postId: number; bodyHash: string }>();
@@ -585,15 +566,7 @@ export async function runIngest(trigger: IngestTrigger = "manual"): Promise<Inge
 
         // D5 (shared_plan/16): topicAnchor の検証・再生成・degrade は curateSingle/curateBatch 内で行われる。失敗時は null で公開し、棄却しない。
 
-        let host = "";
-        try {
-          host = new URL(post.url).host;
-        } catch {
-          // 正規化済み URL のはずだが念のため。host 不明時はグローバル上限
-          // のみで判定される。
-        }
-        const hostPublishedToday = hostCounts[host] ?? 0;
-        if (totalPublishedToday >= DAILY_PUBLISH_CAP || hostPublishedToday >= hostCap) {
+        if (totalPublishedToday >= DAILY_PUBLISH_CAP) {
           // Q4: 上限到達は終端棄却ではなく再試行キューへの繰り延べ。ただし
           // 最大試行数を超えていれば諦めて retry_exhausted で終端棄却する
           // （plan 07 D5）。
@@ -649,7 +622,6 @@ export async function runIngest(trigger: IngestTrigger = "manual"): Promise<Inge
           publishedByUrl.set(post.url, { postId: post.id, bodyHash });
         }
         totalPublishedToday++;
-        hostCounts[host] = hostPublishedToday + 1;
       }
 
       if (updates.length > 0) {

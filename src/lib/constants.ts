@@ -82,8 +82,12 @@ export const AI_SUMMARY_TARGET_MAX_CHARS = 150;
 export const AI_SUMMARY_VALIDATE_MIN_CHARS = 60;
 export const AI_SUMMARY_VALIDATE_MAX_CHARS = 200;
 
-/** 最低限の証拠テキスト長（これ未満は证据不十分として弾く）。 */
-export const MIN_EVIDENCE_INPUT_CHARS = 80;
+/**
+ * 最低限の証拠テキスト長（これ未満は証拠不十分として弾く）。
+ * 2026-08-29 のゲート緩和で 80 → 30。これ未満は LLM の判定材料も
+ * トピックアンカーの語彙的接地も成立しないため下限として残す。
+ */
+export const MIN_EVIDENCE_INPUT_CHARS = 30;
 
 // ── 判定根拠文（renderRationaleText）の文字数上下限 ──────────────
 /**
@@ -133,24 +137,21 @@ export const RETRY_BACKOFF_HOURS: readonly number[] = [1, 6, 24];
  */
 export const STALE_NON_TERMINAL_HOURS = 72;
 
-// ── 公開レート上限（plan 07 §6-Q4 / plan 10 S0）──────────────────────────
+// ── 公開レート上限（暴走検知サーキットブレーカー。spec §11 項4）────────────
 /**
- * 1 日あたりの公開上限件数。
+ * 1 日あたりの公開上限件数。**供給スロットルではなくサーキットブレーカー**。
  *
- * plan 10 §2-S0: 目標フィード供給量を 15 件/日と定め、`DAILY_PUBLISH_CAP`
- * を 10 → 15 に引き上げる。根拠:
- * - 現在の pending=242 + retry(rate_capped)=91 に対して CAP=10 は供給不足
- * - mwed.jp の discovery 歩留まり 16.7%（90件中15件）を維持するには
- *   最低でも 15件/日必要（90件×16.7%÷6日 ≒ 15件/日）
- * - 変更前の影響: rate_capped 91件が毎日 5件ずつ解放されるだけの状態
- * - ホスト分散: HOST_DAILY_SHARE_MAX=0.5 により単一ホスト最大 7件/日
- *   （Math.floor(15×0.5)=7）。mwed.jp の 242 pending を吸収するのに十分
- * - 守っている失敗モード: 単一ホストへの偏り（HOST_DAILY_SHARE_MAX で制御）、
- *   低品質記事の量産（extraction_insufficient ゲートが 96% を通過前棄却）
+ * 2026-08-29 の方針転換（オーナー判断）: 旧来この上限は「1 ホストがフィードを
+ * 埋めると集約レベルで中立キュレーションの主張が偽になる」ことを防ぐ安全弁
+ * （plan 07 §6-Q4）と位置づけられ、`HOST_DAILY_SHARE_MAX` と組で運用していた。
+ * 集約レベルの中立性を運用ポリシーから外すことに伴い:
+ * - `HOST_DAILY_SHARE_MAX` を廃止（単一ホスト偏りの抑止は行わない）。
+ * - `DAILY_PUBLISH_CAP` は供給目標（旧 15 件/日）から切り離し、DOM 変更等で
+ *   一晩に数百件を誤公開する相関カスケード事故だけを止める上限として 150 に
+ *   設定する。通常運用でこの値に達することは想定しない。
+ * - 到達時の挙動は従来どおり「公開せず rate_capped リトライキューへ繰り延べ」。
  */
-export const DAILY_PUBLISH_CAP = 15;
-/** 1 日の公開のうち単一ホストが占めてよい最大割合。 */
-export const HOST_DAILY_SHARE_MAX = 0.5;
+export const DAILY_PUBLISH_CAP = 150;
 
 // ── ホスト allowlist（plan 07 §6-Q3）────────────────────────
 /**
@@ -250,12 +251,12 @@ export function isAllowedArticleUrl(url: string): boolean {
  * この値はページ全体を測っていた旧実装時代のもの。`computeEvidenceSignals()`
  * は今はホストの `articleContainerSelectors` で切り出したコンテナ HTML の
  * 内側でのみリンク密度を計算する（ナビ・フッターは既にサブツリー除外済み）。
- * コンテナ内基準へ変更済みだが、実測に基づく再校正はまだ行っていない
- * （当面この値のまま据え置く。実データ収集後に見直すこと）。
+ * コンテナ内基準へ変更済み。2026-08-29 のゲート緩和で 0.25 → 0.70 に緩め、
+ * 純粋なリンク集約ページ・ナビだけを弾く水準にした（§11-1）。
  */
-export const MAX_LINK_DENSITY = 0.25;
-/** 本文と判定するために必要な最小段落数。 */
-export const MIN_PARAGRAPH_COUNT = 3;
+export const MAX_LINK_DENSITY = 0.7;
+/** 本文と判定するために必要な最小段落数。2026-08-29 のゲート緩和で 3 → 1。 */
+export const MIN_PARAGRAPH_COUNT = 1;
 
 // ── yield 崩壊検知（plan 07 §6-Q2 / K8）─────────────────────
 /** ホストのベースライン算出に必要な最小日数。これ未満は小標本ノイズとして扱わない。 */

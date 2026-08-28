@@ -395,18 +395,21 @@ describe("curatePosts", () => {
     it("追加の可視化対応: anchor_prohibited_term で落ちた場合、gate の matchedTerms がそのまま伝播する", async () => {
       const generate = vi.fn().mockResolvedValue({
         ...baseItem,
-        topicAnchor: "衝撃の会場選びの理由と工夫について", // DENYLIST_TERMS「衝撃」に抵触 -> anchor_prohibited_term（12字以上で length gate は通す）
+        // 2026-08-29: clickbait 語群は撤廃。数値パターン（§10-3 の結論非開示）で
+        // anchor_prohibited_term を再現する。
+        topicAnchor: "会場選びで20万円をどう捻出したのか",
       });
 
       const res = await curateAnchorWithRetry(generate, {
         title: "ウェディングドレスの選び方",
-        excerpt: "会場選びの理由と実際の工夫についての詳細な記事です。ウェディングドレス。",
+        excerpt:
+          "会場選びで20万円を捻出した実際の工夫についての詳細な記事です。ウェディングドレス。",
       });
 
       expect(res).not.toBeNull();
       expect(res?.topicAnchor).toBeNull();
       expect(res?.degradeReason).toBe("anchor_prohibited_term");
-      expect(res?.firstAttemptMatchedTerms).toEqual(["衝撃"]);
+      expect(res?.firstAttemptMatchedTerms).toEqual(["[0-9０-９]"]);
     });
 
     it("欠陥3の回帰防止: generate() が null を返す（LLM 呼び出し失敗）場合、捏造したプレースホルダではなく null を返す", async () => {

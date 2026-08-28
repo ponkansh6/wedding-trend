@@ -38,34 +38,6 @@ export type GateResult =
 // ─────────────────────────────────────────────────────────────
 
 /**
- * 全角/半角・大文字小文字を問わない部分一致で検知する広告・PR 系キーワード。
- * "PR" / "AD" はここに含めない —— 単語の一部（PRESS, ADVICE 等）に誤爆する
- * ため、専用のトークン境界チェック（`containsStrictAdToken`）で扱う。
- */
-const LOOSE_AD_KEYWORDS = [
-  "広告",
-  "プロモーション",
-  "スポンサー",
-  "sponsored",
-  "タイアップ",
-  "提供",
-  "第三者提供",
-];
-
-/**
- * NFKC 正規化後のタイトルから英字の「連続した塊」だけを取り出し、その塊が
- * 大文字化して厳密に "PR" または "AD" と一致する場合のみ検知する。
- * これにより「【PR】」「[AD]」「#PR」のような単独トークン／括弧内の用法だけを
- * 拾い、"PRESS" "ADVICE" のような語の一部には反応しない
- * （英字の塊は非英字文字——括弧・記号・空白・日本語——で自然に区切られるため、
- * 単語境界チェックを別途実装する必要がない）。
- */
-function containsStrictAdToken(normalizedTitle: string): boolean {
-  const letterRuns = normalizedTitle.match(/[A-Za-z]+/g) ?? [];
-  return letterRuns.some((run) => run.toUpperCase() === "PR" || run.toUpperCase() === "AD");
-}
-
-/**
  * 制御文字（タブ・改行は `normalizeTitle` により取り込み段階ですでに単一スペースに正規化されることを
  * 前提とするためここではチェックから除外し、その他の C0/C1 制御文字・DEL のみを検知する）。
  * なお、正規化漏れ等の最終防衛線として一律拒否する設計（Option A）も考えられるが、本プロジェクトでは
@@ -74,8 +46,11 @@ function containsStrictAdToken(normalizedTitle: string): boolean {
 // oxlint-disable-next-line no-control-regex -- 制御文字の検知そのものが目的で意図的。
 const CONTROL_CHAR_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/;
 
-/** 絵文字・記号ピクトグラフの許容上限（これを超えるタイトルは過剰装飾として棄却）。 */
-const MAX_EMOJI_COUNT = 3;
+/**
+ * 絵文字・記号ピクトグラフの許容上限（これを超えるタイトルは過剰装飾として棄却）。
+ * 2026-08-29 のゲート緩和で 3 → 10。
+ */
+const MAX_EMOJI_COUNT = 10;
 const EMOJI_RE = /\p{Extended_Pictographic}/gu;
 
 /** 同一の記号文字が 4 連以上続く記号連打（英数字・空白・日本語文字は対象外）。 */
@@ -89,6 +64,11 @@ const TITLE_FILTER_FAIL: GateResult = { ok: false, reason: "title_filter" };
  * タイトル公開フィルタ（plan 07 §5-M1）。第三者が書いた文字列を無検閲で
  * 公開しないための関門。棄却しても取り込み自体は妨げない
  * （呼び出し側が `status` を published にしない、という運用）。
+ *
+ * 2026-08-29 のゲート緩和: 広告・PR 系キーワード（広告・タイアップ・提供・
+ * 【PR】【AD】等）による棄却を撤廃した。残すのは、そもそも表示が壊れる／
+ * 空タイトルという機械的に明白なケースのみ（制御文字・記号連打・過剰絵文字・
+ * 最小文字数）。
  */
 export function filterTitle(title: string): GateResult {
   const trimmed = title.trim();
@@ -100,15 +80,6 @@ export function filterTitle(title: string): GateResult {
   if (emojiMatches && emojiMatches.length > MAX_EMOJI_COUNT) return TITLE_FILTER_FAIL;
 
   if (SYMBOL_REPEAT_RE.test(title)) return TITLE_FILTER_FAIL;
-
-  const normalized = trimmed.normalize("NFKC");
-  const lower = normalized.toLowerCase();
-
-  if (LOOSE_AD_KEYWORDS.some((kw) => lower.includes(kw.toLowerCase()))) {
-    return TITLE_FILTER_FAIL;
-  }
-
-  if (containsStrictAdToken(normalized)) return TITLE_FILTER_FAIL;
 
   return { ok: true };
 }
@@ -159,24 +130,12 @@ function isHiraganaContaining(s: string): boolean {
   return /[ぁ-ゟ]/.test(s);
 }
 
-const DENYLIST_TERMS: string[] = [
-  "衝撃",
-  "必見",
-  "実は",
-  "知らないと損",
-  "最強",
-  "絶対",
-  "驚愕",
-  "やばい",
-  "話題",
-  "最高",
-  "究極",
-  "世界一",
-  "史上",
-  "神",
-  "マスト",
-  "感動",
-];
+/**
+ * 2026-08-29 のゲート緩和: clickbait 語群（衝撃・必見・やばい・最高・神・感動 等）の
+ * denylist を撤廃した。残すのは「結論・具体的数値の開示禁止」（§10-3）に直結する
+ * 数値・日付・金額パターンと、個人識別情報パターン（`findPersonalInfoMatchRule`）のみ。
+ */
+const DENYLIST_TERMS: string[] = [];
 
 const DENYLIST_PATTERNS: RegExp[] = [
   /[0-9０-９]/,
@@ -185,9 +144,6 @@ const DENYLIST_PATTERNS: RegExp[] = [
   /\d{4}年/,
   /\d{1,2}月\d{1,2}日/,
   /(平成|昭和|令和)\d+年/,
-  /\d+つの/,
-  /しよう$/,
-  /すべき$/,
 ];
 
 /**
@@ -257,8 +213,11 @@ export function checkAnchorNovelty(topicAnchor: string, title: string): GateResu
   return { ok: true };
 }
 
+/** アンカー長の下限。2026-08-29 のゲート緩和で 12 → 6。 */
+export const ANCHOR_MIN_LENGTH = 6;
+
 export function checkAnchorLength(topicAnchor: string): GateResult {
-  if (topicAnchor.trim().length < 12) {
+  if (topicAnchor.trim().length < ANCHOR_MIN_LENGTH) {
     return { ok: false, reason: "anchor_too_short", missingTerms: [] };
   }
   return { ok: true };
@@ -277,8 +236,9 @@ export function validateTopicAnchor(
   const groundRes = checkAnchorGrounding(topicAnchor, opts.corpus);
   if (!groundRes.ok) return groundRes;
 
-  const novelRes = checkAnchorNovelty(topicAnchor, opts.title);
-  if (!novelRes.ok) return novelRes;
+  // 2026-08-29 のゲート緩和: タイトル冗長性（`checkAnchorNovelty` /
+  // `anchor_redundant_with_title`）は品質上の好みであり公開可否には用いない。
+  // 関数は他所（ログ・将来の再導入）のために残す。
 
   return { ok: true };
 }
