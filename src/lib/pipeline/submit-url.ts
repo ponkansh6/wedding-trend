@@ -25,7 +25,7 @@ import { fetchOEmbed, type OEmbedResult } from "@/lib/embed/oembed";
 import { curateSingle, type CurationResult } from "@/lib/llm/batch";
 import { LLM_MODEL } from "@/lib/llm/client";
 import { computeContentHash, computeCurationSignature } from "@/lib/llm/signature";
-import { checkAnchorGrounding, filterTitle } from "@/lib/publish/gate";
+import { filterTitle } from "@/lib/publish/gate";
 import type { DropReason, EmbedProvider, FeedCard, RetryContext, RetryReason } from "@/lib/types";
 import { canonicalizeUrl } from "@/lib/url";
 
@@ -404,23 +404,7 @@ export async function runSubmitUrl(
     return dropSubmit(canonical, provider, embed, sourceTitle, excerpt, "title_filter", now);
   }
 
-  // M1-2: topicAnchor の語彙的接地（plan 07 D4 是正）。submit-url レーンは
-  // 記事本文を取得せず oEmbed キャプション＋運営メモしか持たないが、比較
-  // 対象は本文である必要はない。LLM に実際に渡した入力（sourceTitle+excerpt、
-  // curateSingle() への入力そのもの）に対して検証すれば、プロンプト
-  // インジェクションと幻覚の両方に対する関門として機能する。
-  const anchorGate = checkAnchorGrounding(
-    curationResult.topicAnchor,
-    `${sourceTitle}\n${excerpt ?? ""}`,
-  );
-  if (!anchorGate.ok) {
-    console.warn(
-      `[submit-url] anchor ungrounded for ${canonical}: missingTerms=${JSON.stringify(
-        anchorGate.missingTerms ?? [],
-      )}`,
-    );
-    return dropSubmit(canonical, provider, embed, sourceTitle, excerpt, "anchor_ungrounded", now);
-  }
+  // D5 (shared_plan/16): topicAnchor の検証・再生成・degrade は curateSingle 内で行われる。失敗時は null で公開し、棄却しない。
 
   // Q4: 公開レート上限（日次上限・ホストシェア上限）。上限到達は終端棄却では
   // なく再試行キューへの繰り延べ（良い記事を上限で捨てない）。ただし最大

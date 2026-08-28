@@ -21,7 +21,7 @@ import {
   type CurationInput,
   type CurationItem,
 } from "./schemas";
-import { renderRationaleText } from "@/lib/publish/gate";
+import { validateTopicAnchor, extractFeatureTerms, renderRationaleText } from "@/lib/publish/gate";
 
 /**
  * キュレーション結果本体（LLM が実際に決めた部分。index はバッチ内の整列にのみ
@@ -31,7 +31,10 @@ import { renderRationaleText } from "@/lib/publish/gate";
  * 廃止したため、この型からは削除されている
  * （破壊的変更。呼び出し元での結線は別レーンが行う。詳細はタスク完了報告を参照）。
  */
-export type CurationResult = Omit<CurationItem, "index"> & { rationaleText: string | null };
+export type CurationResult = Omit<CurationItem, "index" | "topicAnchor"> & {
+  topicAnchor: string | null;
+  rationaleText: string | null;
+};
 
 /** `renderRationaleText()` に渡す 6 boolean を item から取り出すヘルパ。 */
 function usefulnessFlagsOf(item: Omit<CurationItem, "index" | "topicAnchor">) {
@@ -49,9 +52,15 @@ function usefulnessFlagsOf(item: Omit<CurationItem, "index" | "topicAnchor">) {
  * LLM が返した boolean 群から `rationaleText` を決定的に付与する
  * （plan 07 §6-Q5: LLM の自由生成文は一切使わない）。
  */
-function attachRationale<T extends Omit<CurationItem, "index">>(
-  item: T,
-): T & { rationaleText: string | null } {
+function attachRationale<
+  T extends Omit<CurationItem, "index" | "topicAnchor"> & { topicAnchor: string | null },
+>(item: T): T & { rationaleText: string | null } {
+  if (!item.topicAnchor) {
+    return {
+      ...item,
+      rationaleText: null,
+    };
+  }
   try {
     const rationaleText = renderRationaleText({
       topicAnchor: item.topicAnchor,
@@ -141,17 +150,19 @@ const SingleCurationSchema = CurationItemSchema.omit({ index: true });
  */
 export async function curateSingle(
   input: CurationInput,
-  opts?: { timeoutMs?: number; onGeminiCall?: () => void },
+  opts?: { timeoutMs?: number; onGeminiCall?: () => void; feedback?: string },
 ): Promise<CurationResult | null> {
-  const prompt = buildSingleCurationPrompt(input);
-  const parsed = await callAndParse(
-    () => callGemini(prompt, LLM_SINGLE_MAX_TOKENS, opts?.timeoutMs ?? LLM_SINGLE_TIMEOUT_MS),
-    SingleCurationSchema,
-    "single curation",
-    opts?.onGeminiCall,
-  );
-  if (!parsed) return null;
-  return attachRationale(parsed);
+  const generate: AnchorGenerateFn = async (inp, fb) => {
+    const prompt = buildSingleCurationPrompt(inp, fb ?? opts?.feedback);
+    return callAndParse(
+      () => callGemini(prompt, LLM_SINGLE_MAX_TOKENS, opts?.timeoutMs ?? LLM_SINGLE_TIMEOUT_MS),
+      SingleCurationSchema,
+      "single curation",
+      opts?.onGeminiCall,
+    );
+  };
+  const gated = await curateAnchorWithRetry(generate, input);
+  return attachRationale(gated);
 }
 
 /**
@@ -190,23 +201,60 @@ export async function curateBatch(
     if (!byIndex.has(item.index)) byIndex.set(item.index, item);
   }
 
-  const aligned = inputs.map((_, i): CurationResult | null => {
-    const item = byIndex.get(i + 1);
-    if (!item) return null;
-    return attachRationale({
-      title: item.title,
-      summary: item.summary,
-      topicAnchor: item.topicAnchor,
-      category: item.category,
-      tag: item.tag,
-      firsthand: item.firsthand,
-      ceremonyDecision: item.ceremonyDecision,
-      specific: item.specific,
-      weddingDayContent: item.weddingDayContent,
-      promotional: item.promotional,
-      preDecisionOrPhotoShoot: item.preDecisionOrPhotoShoot,
-    });
-  });
+  const aligned = await Promise.all(
+    inputs.map(async (input, i): Promise<CurationResult | null> => {
+      const item = byIndex.get(i + 1);
+      if (!item) return null;
+
+      const corpus = `タイトル: ${input.title}\n本文抜粋: ${input.excerpt ?? "（本文抜粋なし）"}`;
+      const title = input.title;
+
+      const gateRes = validateTopicAnchor(item.topicAnchor, { corpus, title });
+      let finalAnchor: string | null = item.topicAnchor;
+
+      if (!gateRes.ok) {
+        const reason = "reason" in gateRes ? gateRes.reason : "unknown";
+        const titleTerms = extractFeatureTerms(title).join("、");
+        const feedback = `このアンカーは検証に失敗しました（理由: ${reason}）。タイトルに無い語を1つ以上使い、許可されるひらがな述語で『問いを立てる節』にしなさい。タイトル語彙参考: [${titleTerms}]`;
+
+        const retryRes = await curateSingle(input, { onGeminiCall: opts?.onGeminiCall, feedback });
+        if (retryRes && retryRes.topicAnchor) {
+          const retryGateRes = validateTopicAnchor(retryRes.topicAnchor, { corpus, title });
+          if (retryGateRes.ok) {
+            // Use fields from retryRes
+            return attachRationale({
+              title: retryRes.title,
+              summary: retryRes.summary,
+              topicAnchor: retryRes.topicAnchor,
+              category: retryRes.category,
+              tag: retryRes.tag,
+              firsthand: retryRes.firsthand,
+              ceremonyDecision: retryRes.ceremonyDecision,
+              specific: retryRes.specific,
+              weddingDayContent: retryRes.weddingDayContent,
+              promotional: retryRes.promotional,
+              preDecisionOrPhotoShoot: retryRes.preDecisionOrPhotoShoot,
+            });
+          }
+        }
+        finalAnchor = null;
+      }
+
+      return attachRationale({
+        title: item.title,
+        summary: item.summary,
+        topicAnchor: finalAnchor,
+        category: item.category,
+        tag: item.tag,
+        firsthand: item.firsthand,
+        ceremonyDecision: item.ceremonyDecision,
+        specific: item.specific,
+        weddingDayContent: item.weddingDayContent,
+        promotional: item.promotional,
+        preDecisionOrPhotoShoot: item.preDecisionOrPhotoShoot,
+      });
+    }),
+  );
 
   if (aligned.every((r) => r === null)) {
     console.warn(
@@ -218,6 +266,63 @@ export async function curateBatch(
   }
 
   return aligned;
+}
+
+export type AnchorGenerateFn = (
+  input: CurationInput,
+  feedback?: string,
+) => Promise<Omit<CurationItem, "index"> | null>;
+
+export async function curateAnchorWithRetry(
+  generate: AnchorGenerateFn,
+  input: CurationInput,
+): Promise<{ topicAnchor: string | null } & Omit<CurationItem, "index" | "topicAnchor">> {
+  const corpus = `タイトル: ${input.title}\n本文抜粋: ${input.excerpt ?? "（本文抜粋なし）"}`;
+  const title = input.title;
+
+  const item = await generate(input);
+  if (!item) {
+    return {
+      topicAnchor: null,
+      title: input.title,
+      summary: "",
+      category: "準備・段取り",
+      tag: "trend",
+      firsthand: false,
+      ceremonyDecision: false,
+      specific: false,
+      weddingDayContent: false,
+      promotional: "none",
+      preDecisionOrPhotoShoot: false,
+    };
+  }
+
+  const gateRes = validateTopicAnchor(item.topicAnchor, { corpus, title });
+  if (gateRes.ok) {
+    return item;
+  }
+
+  const reason = "reason" in gateRes ? gateRes.reason : "unknown";
+  const titleTerms = extractFeatureTerms(title).join("、");
+  const feedback = `このアンカーは検証に失敗しました（理由: ${reason}）。タイトルに無い語を1つ以上使い、許可されるひらがな述語で『問いを立てる節』にしなさい。タイトル語彙参考: [${titleTerms}]`;
+
+  const retryItem = await generate(input, feedback);
+  if (!retryItem) {
+    return {
+      ...item,
+      topicAnchor: null,
+    };
+  }
+
+  const retryGateRes = validateTopicAnchor(retryItem.topicAnchor, { corpus, title });
+  if (retryGateRes.ok) {
+    return retryItem;
+  }
+
+  return {
+    ...retryItem,
+    topicAnchor: null,
+  };
 }
 
 /**

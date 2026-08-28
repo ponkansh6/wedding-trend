@@ -114,59 +114,16 @@ const PARTICLE_SPLIT_RE =
   /(?:の|を|に|は|が|で|と|も|や|から|まで|より|へ|・|、|。|「|」|【|】|\[|\]|\(|\)|\s+)/g;
 
 /**
- * Grounding allowlist: connectors / framing nouns that may appear in an anchor
- * WITHOUT needing a verbatim source match. Content nouns (everything else) MUST
- * still appear verbatim in the source — this preserves the no-fabrication guarantee.
+ * Grounding allowlist: kanji-only functional nouns that are genuinely a closed class
+ * and may appear in an anchor WITHOUT needing a verbatim source match.
+ * Content nouns and other tokens must be grounded per the asymmetric character-type rules.
  */
-const CONNECTOR_ALLOWLIST = new Set<string>([
-  // particles / basic connectors
-  "の",
-  "に",
-  "を",
-  "と",
-  "から",
-  "で",
-  "が",
-  "は",
-  "や",
-  "か",
-  "も",
-  "について",
-  "ため",
-  "へ",
-  "まで",
-  "より",
-  "など",
-  "しか",
-  "ばかり",
-  // framing nouns that indicate decision/scene naming (click-inviting)
-  "理由",
-  "経緯",
-  "きっかけ",
-  "背景",
-  "決め手",
-  "ポイント",
-  "こだわり",
-  "選び方",
-  "迷い",
-  "悩み",
-  "相談",
-  "話し合い",
-  "決断",
-  "結果",
-  "変化",
-  "したい",
-  "したいか",
-  "するか",
-  "された",
-  "なった",
-  "なる",
-]);
+const CONNECTOR_ALLOWLIST = new Set<string>(["理由", "背景", "経緯", "決め手"]);
 
 /** 記号・数字のみで構成される語（特徴語として無意味）を除外する判定。 */
 const SYMBOL_OR_DIGIT_ONLY_RE = /^[\p{P}\p{S}0-9０-９\s]+$/u;
 
-function extractFeatureTerms(topicAnchor: string): string[] {
+export function extractFeatureTerms(topicAnchor: string): string[] {
   const normalized = topicAnchor.normalize("NFKC");
   const rawTerms = normalized.split(PARTICLE_SPLIT_RE);
   const terms = rawTerms
@@ -178,6 +135,105 @@ function extractFeatureTerms(topicAnchor: string): string[] {
 
 function normalizeForGrounding(s: string): string {
   return s.normalize("NFKC").replace(/\s+/g, "").toLowerCase();
+}
+
+// ─────────────────────────────────────────────────────────────
+// checkAnchorPersonalInfo / D3 Denylist / D4 Novelty / D6 Length / validateTopicAnchor
+// ─────────────────────────────────────────────────────────────
+
+function isHiraganaContaining(s: string): boolean {
+  return /[ぁ-ゟ]/.test(s);
+}
+
+const DENYLIST_TERMS: string[] = [
+  "衝撃",
+  "必見",
+  "実は",
+  "知らないと損",
+  "最強",
+  "絶対",
+  "驚愕",
+  "やばい",
+  "話題",
+  "最高",
+  "究極",
+  "世界一",
+  "史上",
+  "神",
+  "マスト",
+  "感動",
+];
+
+const DENYLIST_PATTERNS: RegExp[] = [
+  /[0-9０-９]/,
+  /[一二三四五六七八九十百千万億零]/,
+  /[円万％%割ドルユーロ¥$£€]/,
+  /\d{4}年/,
+  /\d{1,2}月\d{1,2}日/,
+  /(平成|昭和|令和)\d+年/,
+  /\d+つの/,
+  /しよう$/,
+  /すべき$/,
+];
+
+export function checkAnchorDenylist(topicAnchor: string): GateResult {
+  const normalized = topicAnchor.normalize("NFKC");
+  if (containsPersonalInfoPattern(topicAnchor)) {
+    return { ok: false, reason: "anchor_prohibited_term", missingTerms: [] };
+  }
+  for (const term of DENYLIST_TERMS) {
+    if (normalized.includes(term)) {
+      return { ok: false, reason: "anchor_prohibited_term", missingTerms: [] };
+    }
+  }
+  for (const pat of DENYLIST_PATTERNS) {
+    if (pat.test(normalized)) {
+      return { ok: false, reason: "anchor_prohibited_term", missingTerms: [] };
+    }
+  }
+  return { ok: true };
+}
+
+export function checkAnchorNovelty(topicAnchor: string, title: string): GateResult {
+  const anchorTerms = extractFeatureTerms(topicAnchor).filter(
+    (t) => t.length >= 2 && !CONNECTOR_ALLOWLIST.has(t),
+  );
+  if (anchorTerms.length === 0) {
+    return { ok: true };
+  }
+  const titleTerms = new Set(extractFeatureTerms(title).map(normalizeForGrounding));
+  const normalizedAnchorTerms = anchorTerms.map(normalizeForGrounding);
+  const allInTitle = normalizedAnchorTerms.every((term) => titleTerms.has(term));
+  if (allInTitle) {
+    return { ok: false, reason: "anchor_redundant_with_title", missingTerms: [] };
+  }
+  return { ok: true };
+}
+
+export function checkAnchorLength(topicAnchor: string): GateResult {
+  if (topicAnchor.trim().length < 12) {
+    return { ok: false, reason: "anchor_too_short", missingTerms: [] };
+  }
+  return { ok: true };
+}
+
+export function validateTopicAnchor(
+  topicAnchor: string,
+  opts: { corpus: string; title: string },
+): GateResult {
+  const lenRes = checkAnchorLength(topicAnchor);
+  if (!lenRes.ok) return lenRes;
+
+  const denyRes = checkAnchorDenylist(topicAnchor);
+  if (!denyRes.ok) return denyRes;
+
+  const groundRes = checkAnchorGrounding(topicAnchor, opts.corpus);
+  if (!groundRes.ok) return groundRes;
+
+  const novelRes = checkAnchorNovelty(topicAnchor, opts.title);
+  if (!novelRes.ok) return novelRes;
+
+  return { ok: true };
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -273,10 +329,19 @@ export function checkAnchorGrounding(topicAnchor: string, bodyText: string): Gat
   }
 
   const normalizedBody = normalizeForGrounding(bodyText);
-  const requiredTerms = terms.filter((term) => !CONNECTOR_ALLOWLIST.has(term));
-  const missingTerms = requiredTerms.filter(
-    (term) => !normalizedBody.includes(normalizeForGrounding(term)),
-  );
+  const missingTerms: string[] = [];
+
+  for (const term of terms) {
+    if (CONNECTOR_ALLOWLIST.has(term)) continue;
+    if (term.length < 2) continue;
+    // D2: hiragana-containing tokens (predicates, connectors, quoted frames) are
+    // free — they carry no fabrication-prone content word. Only kanji-only /
+    // katakana-only / other content tokens must literally exist in the corpus.
+    if (isHiraganaContaining(term)) continue;
+    if (!normalizedBody.includes(normalizeForGrounding(term))) {
+      missingTerms.push(term);
+    }
+  }
 
   if (missingTerms.length > 0) {
     return { ok: false, reason: "anchor_ungrounded", missingTerms };

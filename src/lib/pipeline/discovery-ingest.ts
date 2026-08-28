@@ -79,7 +79,7 @@ import {
   selectJudgmentSlice,
   type EvidenceFailedCondition,
 } from "@/lib/sources/article-text";
-import { checkAnchorGrounding, filterTitle } from "@/lib/publish/gate";
+import { filterTitle } from "@/lib/publish/gate";
 import type { DropReason, RetryQueueEntry, RetryReason, TrendTag } from "@/lib/types";
 
 /** `ingestDiscoveredUrls()` の実行統計。run-discovery.mjs のログ出力と Actions 監視に使う。 */
@@ -739,20 +739,7 @@ async function processUrl(
     return { abortedByKillGate: false, abortedByBudget: false, abortedByRetryAfter: false };
   }
 
-  // M1-2: topicAnchor の語彙的接地（取得本文全体に対して検証する）。
-  const anchorGate = checkAnchorGrounding(curation.topicAnchor, bodyText);
-  if (!anchorGate.ok) {
-    console.warn(
-      `[discovery-ingest] anchor ungrounded for ${url}: missingTerms=${JSON.stringify(
-        anchorGate.missingTerms ?? [],
-      )}`,
-    );
-    if (retryCtx) await completeRetry(retryCtx.urlHash);
-    await dropPost(host, url, originalTitle, "anchor_ungrounded", now);
-    await setDiscoverySeenStatus(host, url, "fetched");
-    stats.anchorUngroundedDropped++;
-    return { abortedByKillGate: false, abortedByBudget: false, abortedByRetryAfter: false };
-  }
+  // D5 (shared_plan/16): topicAnchor の検証・再生成・degrade は curateSingle 内で行われる。失敗時は null で公開し、棄却しない。
 
   // M1-3: sticky removal。同一 URL が過去に自動撤回（retracted）済みなら、
   // 再発見されても公開しない（撤回は自動・復帰は人間。ここで上書きしない）。

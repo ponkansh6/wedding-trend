@@ -192,9 +192,8 @@ describe("curateEvergreenUrl (src/lib/pipeline/evergreen.ts)", () => {
     );
   });
 
-  // D4: M1-2 の語彙的接地は evergreen レーンでも、LLM に実際に渡した入力
-  // （title + og:description）に対して適用される。
-  it("D4: drops as anchor_ungrounded when the LLM's topicAnchor contains a term absent from title+og:description", async () => {
+  // D5 (plan 16): 接地失敗は棄却せず、topicAnchor を null にして公開する。
+  it("D5: degrades topicAnchor to null and publishes (does not drop) when the LLM's anchor is ungrounded", async () => {
     curateSingleMock.mockResolvedValueOnce({
       title: "AI Curated Title",
       summary: "AI Curated Summary",
@@ -206,19 +205,20 @@ describe("curateEvergreenUrl (src/lib/pipeline/evergreen.ts)", () => {
       weddingDayContent: true,
       promotional: "none",
       preDecisionOrPhotoShoot: false,
-      // BASE_META の title/description には一切現れない語（プロンプト
-      // インジェクション/幻覚を模擬）。
-      topicAnchor: "架空の温泉旅行特集",
-      rationaleText:
-        "実際の体験に基づく会場選びや進行プロセスにおける具体的な工夫と背景についての客観的な振り返りを行う非常に有用な記事内容である",
+      // D5 (plan 16): LLM が 2 回目も接地しない場合の degrade 結果（null）を模擬。
+      topicAnchor: null,
+      rationaleText: null,
     });
 
     const outcome = await curateEvergreenUrl("https://example.com/article");
 
-    expect(outcome.reason).toBe("anchor_ungrounded");
-    expect(outcome.card).toBeNull();
-    expect(markCuratedMock).not.toHaveBeenCalled();
-    expect(recordPublicationMock).not.toHaveBeenCalled();
+    // D5: 終端棄却せず、topicAnchor=null で公開する。
+    expect(outcome.ok).toBe(true);
+    expect(outcome.reason).toBeNull();
+    expect(outcome.card).not.toBeNull();
+    expect(outcome.card?.topicAnchor).toBeNull();
+    expect(markCuratedMock).toHaveBeenCalled();
+    expect(recordPublicationMock).toHaveBeenCalled();
   });
 
   it("returns reason 'no_metadata' if fetchOgpMetadata returns null or no title", async () => {

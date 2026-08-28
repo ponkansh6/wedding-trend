@@ -366,9 +366,9 @@ describe("runIngest (src/lib/pipeline/ingest.ts)", () => {
     expect(retryRows[0].lane).toBe("rss");
   });
 
-  // D4: M1-2 の語彙的接地は RSS レーンでも、LLM に実際に渡した入力
-  // （タイトル+抜粋）に対して適用される。
-  it("D4: drops a post as anchor_ungrounded when the LLM's topicAnchor contains a term absent from the RSS input (title+excerpt)", async () => {
+  // D5 (plan 16): 接地失敗は棄却せず、topicAnchor を null にして公開する。
+  // RSS レーンでも、LLM に実際に渡した入力（タイトル+抜粋）に対して適用される。
+  it("D5: degrades topicAnchor to null (publishes) when the LLM's anchor is ungrounded, instead of dropping as anchor_ungrounded", async () => {
     (
       curatePosts as unknown as { mockImplementationOnce: (fn: unknown) => void }
     ).mockImplementationOnce((inputs: Array<{ title: string; excerpt: string | null }>) =>
@@ -384,11 +384,12 @@ describe("runIngest (src/lib/pipeline/ingest.ts)", () => {
           weddingDayContent: false,
           promotional: "none",
           preDecisionOrPhotoShoot: false,
-          // Blog Post 1 の入力（title="Blog Post 1", excerpt="Excerpt"）には
-          // 一切現れない語（プロンプトインジェクション/幻覚を模擬）。
-          topicAnchor: input.title === "Blog Post 1" ? "架空の温泉旅行特集" : input.title,
+          // D5 (plan 16): 2 回目も接地しないアンカーを LLM が返したケースを模擬 → degrade to null。
+          topicAnchor: input.title === "Blog Post 1" ? null : input.title,
           rationaleText:
-            "実際の体験に基づく会場選びや進行プロセスにおける具体的な工夫と背景についての客観的な振り返りを行う非常に有用な記事内容である",
+            input.title === "Blog Post 1"
+              ? null
+              : "実際の体験に基づく会場選びや進行プロセスにおける具体的な工夫と背景についての客観的な振り返りを行う非常に有用な記事内容である",
         })),
         geminiCalls: 1,
       }),
@@ -396,18 +397,20 @@ describe("runIngest (src/lib/pipeline/ingest.ts)", () => {
 
     const summary = await runIngest();
 
-    // News 1 の方は接地するため公開される。Blog Post 1 だけ棄却される。
-    expect(summary.curated).toBe(1);
+    // D5: 両方公開される（Blog Post 1 はアンカー棄却せず、topicAnchor=null で公開）。
+    expect(summary.curated).toBe(2);
 
     const blogRow = (
       await db.select().from(posts).where(eq(posts.url, "https://example.com/blog1"))
     )[0];
-    expect(blogRow.status).toBe("rejected");
+    // 終端棄却されていない（status は "published" のまま）。
+    expect(blogRow.status).toBe("published");
 
+    // anchor_ungrounded での棄却は発生しない。
     const removal = (
       await db.select().from(postRemovals).where(eq(postRemovals.postId, blogRow.id))
     )[0];
-    expect(removal?.reason).toBe("anchor_ungrounded");
+    expect(removal?.reason).toBeUndefined();
 
     const newsRow = (
       await db.select().from(posts).where(eq(posts.url, "https://example.com/news1"))

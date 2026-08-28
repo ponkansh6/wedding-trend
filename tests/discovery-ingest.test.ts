@@ -453,7 +453,7 @@ describe("ingestDiscoveredUrls", () => {
     expect(removal[0]?.reason).toBe("title_filter");
   });
 
-  it("M1: topicAnchor が本文に接地しない場合は anchor_ungrounded で終端棄却する", async () => {
+  it("M1/D5: topicAnchor が本文に接地しない場合は anchor_ungrounded で棄却せず、topicAnchor=null で公開する", async () => {
     const url = `https://${HOST}/story/cases/ungrounded`;
     await seedPending(HOST, url);
     vi.stubGlobal(
@@ -470,20 +470,22 @@ describe("ingestDiscoveredUrls", () => {
         throw new Error(`unexpected fetch: ${u}`);
       }),
     );
-    // topicAnchor に本文中に存在しない特徴語を返させる（プロンプトインジェクション対策の想定シナリオ）。
-    mockedCurate.mockResolvedValue(sufficientCuration({ topicAnchor: "架空の海外挙式レポート" }));
+    // D5 (plan 16): LLM が 2 回目も接地しない場合、curateSingle が topicAnchor を null に
+    // degrade する。ここではその結果（null）を模擬して呼び出し側の公開挙動を検証する。
+    mockedCurate.mockResolvedValue(sufficientCuration({ topicAnchor: null }));
 
     const stats = await ingestDiscoveredUrls(HOST);
 
-    expect(stats.anchorUngroundedDropped).toBe(1);
-    expect(stats.published).toBe(0);
+    // D5: 棄却せず公開する。
+    expect(stats.anchorUngroundedDropped).toBe(0);
+    expect(stats.published).toBe(1);
 
     const post = (await getPostsByUrls([url])).get(url);
-    expect(post?.status).toBe("rejected");
+    expect(post?.status).toBe("published");
     if (post?.id == null) throw new Error("post id should exist");
     const removal = await db.select().from(postRemovals).where(eq(postRemovals.postId, post.id));
-    expect(removal[0]?.reason).toBe("anchor_ungrounded");
-    // rationale は保存されない（評価未成立のため公開経路に乗らない）。
+    expect(removal).toHaveLength(0);
+    // topicAnchor が null のため、rationale 行は書き込まれない（markCurated がスキップ）。
     const rationale = await getRationaleByPostId(post.id);
     expect(rationale).toBeNull();
   });

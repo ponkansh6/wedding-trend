@@ -23,7 +23,7 @@ import {
 } from "@/lib/db/repository";
 import { curateSingle, type CurationResult } from "@/lib/llm/batch";
 import { computeContentHash, computeCurationSignature } from "@/lib/llm/signature";
-import { checkAnchorGrounding, filterTitle } from "@/lib/publish/gate";
+import { filterTitle } from "@/lib/publish/gate";
 import { fetchOgpMetadata, type OgpMetadata } from "@/lib/sources/ogp";
 import type { DropReason, FeedCard, RetryContext, RetryReason, TrendTag } from "@/lib/types";
 import { canonicalizeUrl } from "@/lib/url";
@@ -386,21 +386,7 @@ export async function curateEvergreenUrl(
     return dropEvergreen(canonical, sourceTitle, meta, sourceName, "title_filter", now);
   }
 
-  // M1-2: topicAnchor の語彙的接地（plan 07 D4 是正）。evergreen レーンは
-  // 記事本文全体を保持しない（`fetchOgpMetadata` が og:description のみ返す）
-  // ため「取得本文」への接地は検証できないが、比較対象は本文である必要は
-  // ない。LLM に実際に渡した入力（タイトル+og:description、curateSingle() へ
-  // の入力そのもの）に対して検証すれば、プロンプトインジェクションと幻覚の
-  // 両方に対する関門として機能する。
-  const anchorGate = checkAnchorGrounding(curationResult.topicAnchor, `${sourceTitle}\n${excerpt}`);
-  if (!anchorGate.ok) {
-    console.warn(
-      `[evergreen] anchor ungrounded for ${canonical}: missingTerms=${JSON.stringify(
-        anchorGate.missingTerms ?? [],
-      )}`,
-    );
-    return dropEvergreen(canonical, sourceTitle, meta, sourceName, "anchor_ungrounded", now);
-  }
+  // D5 (shared_plan/16): topicAnchor の検証・再生成・degrade は curateSingle 内で行われる。失敗時は null で公開し、棄却しない。
 
   // TODO(plan07-Q3): evergreen は管理者が手動投入した任意ホストの URL から
   // OGP メタデータを取得する（HTML 自体は取得している）。HOST_ALLOWLIST

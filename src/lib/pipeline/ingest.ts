@@ -32,7 +32,7 @@ import {
 import { curatePosts } from "@/lib/llm/batch";
 import { LLM_MODEL } from "@/lib/llm/client";
 import { computeContentHash, computeCurationSignature } from "@/lib/llm/signature";
-import { checkAnchorGrounding, filterTitle } from "@/lib/publish/gate";
+import { filterTitle } from "@/lib/publish/gate";
 import { curateEvergreenUrl, terminateEvergreenRetry } from "@/lib/pipeline/evergreen";
 import { runSubmitUrl, terminateSubmitRetry } from "@/lib/pipeline/submit-url";
 import { SOURCE_IDS, SOURCE_REGISTRY, type SourceAdapter } from "@/lib/sources/registry";
@@ -243,18 +243,7 @@ async function reprocessRssRetry(url: string, ctx: RetryContext, now: string): P
     return;
   }
 
-  const groundingInput = `${title}\n${excerpt ?? ""}`;
-  const anchorGate = checkAnchorGrounding(result.topicAnchor, groundingInput);
-  if (!anchorGate.ok) {
-    console.warn(
-      `[ingest] anchor ungrounded (retry) for ${url}: missingTerms=${JSON.stringify(
-        anchorGate.missingTerms ?? [],
-      )}`,
-    );
-    await completeRetry(ctx.urlHash);
-    await markDropped(postId, "anchor_ungrounded", now);
-    return;
-  }
+  // D5 (shared_plan/16): topicAnchor の検証・再生成・degrade は curateSingle/curateBatch 内で行われる。失敗時は null で公開し、棄却しない。
 
   let host = "";
   try {
@@ -594,26 +583,7 @@ export async function runIngest(trigger: IngestTrigger = "manual"): Promise<Inge
           continue;
         }
 
-        // M1-2: topicAnchor の語彙的接地（plan 07 D4 是正）。
-        // RSS レーンは記事本文を取得しないため「取得本文」への接地は検証
-        // できないが、M1 の趣旨は「LLM が入力に無い語を出力していないか」の
-        // 検証であり、比較対象が本文である必要はない。LLM に実際に渡した
-        // 入力（タイトル+抜粋、curatePosts() への入力そのもの）に対して検証
-        // すれば、プロンプトインジェクションと幻覚の両方に対する関門として
-        // 機能する。
-        const groundingInput = `${post.originalTitle}\n${post.originalExcerpt ?? ""}`;
-        const anchorGate = checkAnchorGrounding(result.topicAnchor, groundingInput);
-        if (!anchorGate.ok) {
-          console.warn(
-            `[ingest] anchor ungrounded for ${post.url}: missingTerms=${JSON.stringify(
-              anchorGate.missingTerms ?? [],
-            )}`,
-          );
-          if (post.id !== null) {
-            await markDropped(post.id, "anchor_ungrounded", now);
-          }
-          continue;
-        }
+        // D5 (shared_plan/16): topicAnchor の検証・再生成・degrade は curateSingle/curateBatch 内で行われる。失敗時は null で公開し、棄却しない。
 
         let host = "";
         try {

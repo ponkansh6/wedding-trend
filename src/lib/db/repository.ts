@@ -205,7 +205,7 @@ export interface CurationUpdate {
   };
   rationale?: {
     postId: number;
-    topicAnchor: string;
+    topicAnchor: string | null;
     rationaleText: string | null;
     evidenceSufficient: boolean;
     modelId: string;
@@ -298,7 +298,10 @@ export async function markCurated(
       );
     }
     const rationaleValues =
-      u.rationale && u.rationale.evidenceSufficient && u.rationale.rationaleText !== null
+      u.rationale &&
+      u.rationale.evidenceSufficient &&
+      u.rationale.topicAnchor !== null &&
+      u.rationale.rationaleText !== null
         ? {
             postId: u.rationale.postId,
             topicAnchor: u.rationale.topicAnchor,

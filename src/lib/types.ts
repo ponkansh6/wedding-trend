@@ -44,6 +44,9 @@ export type DropReason =
   | "extraction_insufficient" // Q1 決定的ゲート不合格（`EvidenceFailedCondition` の詳細内訳は `src/lib/sources/article-text.ts` 参照）
   | "title_filter" // M1 タイトルフィルタ
   | "anchor_ungrounded" // M1 topicAnchor の語彙的接地に失敗
+  | "anchor_prohibited_term" // topicAnchor に禁止用語・煽り・数値等が含まれる
+  | "anchor_redundant_with_title" // topicAnchor がタイトルと完全に重複している
+  | "anchor_too_short" // topicAnchor が短すぎる
   | "not_useful" // LLM が有用でないと判定
   | "host_not_allowed" // Q3 allowlist 外
   | "retry_exhausted" // 再試行キューの TTL/回数超過

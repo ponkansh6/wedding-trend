@@ -61,7 +61,8 @@ const { computeContentHash, computeCurationSignature } =
   await import("../src/lib/llm/signature.ts");
 const { LLM_MODEL } = await import("../src/lib/llm/client.ts");
 const { RATIONALE_PROMPT_VERSION } = await import("../src/lib/constants.ts");
-const { checkAnchorGrounding } = await import("../src/lib/publish/gate.ts");
+const { validateTopicAnchor } = await import("../src/lib/publish/gate.ts");
+const { shouldRegenerateAnchor } = await import("./lib/backfill-anchor-gate.mjs");
 
 // 本番の対象件数（数十件想定）を十分に上回る上限。無限に伸びないための保険。
 const BACKFILL_LIMIT = 1000;
@@ -88,24 +89,72 @@ if (candidates.length === 0) {
 }
 
 console.log("Gemini によるキュレーションを開始します...");
-const { results, geminiCalls } = await curatePosts(
-  candidates.map((c) => ({ title: c.originalTitle, excerpt: c.originalExcerpt })),
+// 1. プレフライト: shouldRegenerateAnchor が false の候補は、LLM 呼び出し時の入力から除外するか、
+// あるいは結果処理時に topicAnchor を設定しない。ここでは curatePosts に渡す入力自体をフィルタするか、
+// まとめて処理しつつ結果構築時に適用する。
+// プラン要求: "if shouldRegenerateAnchor is false → skip the record (keep existing topicAnchor, do NOT call the LLM, do NOT overwrite)"
+// 注意: curatePosts は一括配列を受け取るため、ここで候補を 2 つのグループ（再生成する候補 / スキップする候補）に分けるのがクリーン。
+const runnableCandidates = [];
+const skippedIndicesMap = new Map();
+
+candidates.forEach((c, index) => {
+  if (shouldRegenerateAnchor({ title: c.originalTitle, excerpt: c.originalExcerpt })) {
+    runnableCandidates.push({ candidate: c, originalIndex: index });
+  } else {
+    skippedIndicesMap.set(index, c);
+  }
+});
+
+console.log(
+  `プレフライト判定: 再生成対象 ${runnableCandidates.length} 件 / スキップ（タイトルのみ等） ${skippedIndicesMap.size} 件`,
 );
+
+let resultsMap = new Map();
+let geminiCalls = 0;
+
+if (runnableCandidates.length > 0) {
+  const curationRes = await curatePosts(
+    runnableCandidates.map((rc) => ({
+      title: rc.candidate.originalTitle,
+      excerpt: rc.candidate.originalExcerpt,
+    })),
+  );
+  geminiCalls = curationRes.geminiCalls;
+  curationRes.results.forEach((res, idx) => {
+    resultsMap.set(runnableCandidates[idx].originalIndex, res);
+  });
+}
 
 const updates = candidates
   .map((c, i) => {
-    const result = results[i];
-    if (!result) return null;
+    const isSkipped = skippedIndicesMap.has(i);
+    const result = resultsMap.get(i);
+    if (!isSkipped && !result) return null;
+
+    let finalTopicAnchor = isSkipped ? null : result.topicAnchor;
+
+    if (!isSkipped && finalTopicAnchor) {
+      const corpus = `${c.originalTitle ?? ""}\n${c.originalExcerpt ?? ""}`;
+      const gateRes = validateTopicAnchor(finalTopicAnchor, {
+        corpus,
+        title: c.originalTitle ?? "",
+      });
+      if (!gateRes.ok) {
+        // ポストフライト安全フィルター: 失敗した場合は topicAnchor を null に劣化させる
+        finalTopicAnchor = null;
+      }
+    }
+
     return {
       url: c.url,
-      aiTitle: result.title,
-      aiSummary: result.summary,
-      category: result.category,
-      tag: result.tag,
+      aiTitle: isSkipped ? null : result.title,
+      aiSummary: isSkipped ? null : result.summary,
+      category: isSkipped ? null : result.category,
+      tag: isSkipped ? null : result.tag,
       contentHash: computeContentHash(c.originalTitle, c.originalExcerpt),
       curationSignature: currentSignature,
       usefulness:
-        c.id !== null
+        c.id !== null && !isSkipped
           ? {
               postId: c.id,
               modelId: LLM_MODEL,
@@ -120,14 +169,10 @@ const updates = candidates
             }
           : undefined,
       rationale:
-        c.id !== null &&
-        checkAnchorGrounding(
-          result.topicAnchor ?? "",
-          `${c.originalTitle ?? ""}\n${c.originalExcerpt ?? ""}`,
-        ).ok
+        c.id !== null && !isSkipped && finalTopicAnchor !== null
           ? {
               postId: c.id,
-              topicAnchor: result.topicAnchor,
+              topicAnchor: finalTopicAnchor,
               rationaleText: result.rationaleText,
               evidenceSufficient: true,
               modelId: LLM_MODEL,
