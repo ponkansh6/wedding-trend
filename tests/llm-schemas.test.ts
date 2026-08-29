@@ -209,9 +209,10 @@ describe("topicAnchor validation (plan 07 §5-M1 / §6-Q1,Q5: rationaleText / ev
     }
   });
 
-  it("asserts prompt contains new topic anchor rules and few-shot examples", () => {
+  it("asserts prompt contains topic anchor rules and few-shot examples", () => {
     const prompt = buildSingleCurationPrompt({ title: "テスト", excerpt: "テスト本文" });
-    expect(prompt).toContain("問いを立てる節");
+    expect(prompt).toContain("topicAnchor のルール");
+    expect(prompt).toContain("クリック誘引");
     expect(prompt).toContain("結婚式をしたい人ではなかった");
     expect(prompt).not.toContain("rationaleText");
     expect(prompt).not.toContain("evidenceSufficient");
