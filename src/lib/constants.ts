@@ -57,8 +57,9 @@ export const LLM_SINGLE_MAX_TOKENS = 800;
  * `computeCurationSignature` の対象であるプロンプトそのものの変更であり、
  * bump により全投稿の curationSignature が不一致になり再キュレーションされる）。
  * v8 (2026-08-27, shared_plan/15): topicAnchor を「結論を出さずに記事が扱う具体的な判断・場面・選択肢を体言止めで名指しする」よう RATIONALE_RULES を書き換えた。bump により全投稿の curationSignature が不一致になり、backfill-usefulness.mjs で再キュレーションされる。
+ * v10 (2026-08-29, オーナー判断): topicAnchor のゲート大幅緩和に伴い RATIONALE_RULES を再設計。(a) 本文語句の逐語使用指定を削除（記事内容に即していれば自然な言い換えを許容）、(b) 文型指定（「問いを立てる節にする・体言止め禁止」）を削除、(c) 「この記事ならではの独自性を続きを読みたくなる形で提示する」クリック誘引ルールを追加。数値・PII・煽り語の禁止は維持。bump により全投稿の curationSignature が不一致になり、backfill-usefulness.mjs --force で一括再キュレーションできる（spec §10-3）。
  */
-export const CURATION_PROMPT_VERSION = 9;
+export const CURATION_PROMPT_VERSION = 10;
 export const RATIONALE_PROMPT_VERSION = "rationale-v2";
 /** フィード表示条件のフェーズ。phase1: 移行期（レガシー対 OR 根拠存在）/ phase2: 根拠のみ。 */
 export const RATIONALE_DISPLAY_PHASE = "phase1" as const;
