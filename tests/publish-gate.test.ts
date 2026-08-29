@@ -229,19 +229,18 @@ describe("New Anchor Gate Checks (D2, D3, D4, D6, validateTopicAnchor)", () => {
       expect(badDeny.reason).toBe("anchor_prohibited_term");
     }
 
-    // 2026-08-29 第2段: 数値・金額はアンカーの denylist 対象外（接地すれば通る）。
+    // 2026-08-29 第2段: 数値・金額はアンカーの denylist 対象外。
     const numeric = validateTopicAnchor("館内案内で20万円がどう出たのか", {
       corpus: `${corpus}20万円`,
       title,
     });
     expect(numeric).toEqual({ ok: true });
 
-    // 語彙的接地は維持（ハルシネーション防止）。
-    const badGround = validateTopicAnchor("函館旅行の予算をどう組んだのか", { corpus, title });
-    expect(badGround.ok).toBe(false);
-    if (!badGround.ok) {
-      expect(badGround.reason).toBe("anchor_ungrounded");
-    }
+    // 2026-08-29: 語彙的接地検証（コーパス許可制度）はオーナー判断で撤廃。
+    // 元記事本文に無い漢字・カタカナ語を含んでいても validateTopicAnchor は通す
+    // （checkAnchorGrounding 関数自体は残るが合否には用いない）。
+    const ungrounded = validateTopicAnchor("函館旅行の予算をどう組んだのか", { corpus, title });
+    expect(ungrounded).toEqual({ ok: true });
   });
 });
 

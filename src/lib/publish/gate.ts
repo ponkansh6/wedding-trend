@@ -186,7 +186,7 @@ export function checkAnchorLength(topicAnchor: string): GateResult {
 
 export function validateTopicAnchor(
   topicAnchor: string,
-  opts: { corpus: string; title: string },
+  _opts: { corpus: string; title: string },
 ): GateResult {
   const lenRes = checkAnchorLength(topicAnchor);
   if (!lenRes.ok) return lenRes;
@@ -194,12 +194,15 @@ export function validateTopicAnchor(
   const denyRes = checkAnchorDenylist(topicAnchor);
   if (!denyRes.ok) return denyRes;
 
-  const groundRes = checkAnchorGrounding(topicAnchor, opts.corpus);
-  if (!groundRes.ok) return groundRes;
-
-  // 2026-08-29 のゲート緩和: タイトル冗長性（`checkAnchorNovelty` /
-  // `anchor_redundant_with_title`）は品質上の好みであり公開可否には用いない。
-  // 関数は他所（ログ・将来の再導入）のために残す。
+  // 2026-08-29 のゲート緩和:
+  // - 語彙的接地検証（`checkAnchorGrounding` / コーパス許可制度）はオーナー判断で
+  //   `validateTopicAnchor` から外した。アンカーの語が元記事本文に逐語で存在する
+  //   ことは要求しない。ハルシネーション抑制はプロンプト指示（`RATIONALE_RULES`
+  //   で本文語句を使うよう明示）と有用度評価タグに委ねる。
+  // - タイトル冗長性（`checkAnchorNovelty` / `anchor_redundant_with_title`）も
+  //   公開可否には用いない。
+  // 両関数（`checkAnchorGrounding` / `checkAnchorNovelty`）はログ・将来の再導入・
+  // 単体テストのために export されたまま残す。
 
   return { ok: true };
 }
