@@ -62,7 +62,7 @@ export const LLM_SINGLE_MAX_TOKENS = 800;
  * v12 (2026-08-30, オーナー判断): v11 再キュレーションで小モデルが 5 項目ほぼすべて 2 を返し、上位 21 件が同点（score 34）で掲載順が実質新着順になっていた。USEFULNESS_CRITERIA_RULES の「スケールの使い方」を書き換え、`1 = 該当する（標準）` / `2 = 例外的に突出している場合のみ（目安: 上位 2〜3 割）` / 迷ったら低い方、を明示。bump により全投稿再キュレーション。
  * v13 (2026-08-30, オーナー判断): v12 の 0-2 でも小モデルの分解能が不足したため、判定レンジを 0-2 → 0〜9 の整数に拡張（スケール帯を明示）。あわせて weddingDayContent を「厳密に挙式・披露宴が実際に行われた当日の実施内容」と強調し、前撮り・リハーサル・準備・式場探し・後日談のみは 0 とする指示を追加。重み定数据え置き、USEFULNESS_GATE_BONUS 16→70。bump により全投稿再キュレーション。
  */
-export const CURATION_PROMPT_VERSION = 13;
+export const CURATION_PROMPT_VERSION = 14;
 export const RATIONALE_PROMPT_VERSION = "rationale-v2";
 /** フィード表示条件のフェーズ。phase1: 移行期（レガシー対 OR 根拠存在）/ phase2: 根拠のみ。 */
 export const RATIONALE_DISPLAY_PHASE = "phase1" as const;
