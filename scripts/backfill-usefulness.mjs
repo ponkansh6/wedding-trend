@@ -46,6 +46,7 @@ const FORCE = process.argv.includes("--force");
 const HELP = process.argv.includes("--help") || process.argv.includes("-h");
 const STATS_ONLY =
   process.argv.includes("--stats-only") || process.argv.includes("--preflight-only");
+const NO_FETCH = process.argv.includes("--no-fetch");
 
 if (HELP) {
   console.log(`
@@ -61,6 +62,7 @@ if (HELP) {
   --limit N        対象件数の上限を指定する
   --source X       URL に特定の文字列を含む候補に絞る
   --max-requests N Gemini API のリクエスト回数の上限を指定する
+  --no-fetch       discovery 由来（originalExcerpt が空）の本文再取得バイパスを無効化する
 
 環境変数:
   BACKFILL_CHUNK_SIZE     チャンクあたりの候補数（デフォルト 30）
@@ -167,6 +169,15 @@ const { LLM_MODEL } = await import("../src/lib/llm/client.ts");
 const { RATIONALE_PROMPT_VERSION } = await import("../src/lib/constants.ts");
 const { validateTopicAnchor } = await import("../src/lib/publish/gate.ts");
 const { shouldRegenerateAnchor } = await import("./lib/backfill-anchor-gate.mjs");
+const { disciplinedFetch } = await import("../src/lib/sources/access-discipline.ts");
+const {
+  extractArticleContainer,
+  extractVisibleText,
+  selectJudgmentSlice,
+  computeEvidenceSignals,
+  computeEvidenceSufficiency,
+} = await import("../src/lib/sources/article-text.ts");
+const { assertNoSliceLeak } = await import("./lib/mwed-anchor-backfill.mjs");
 const {
   partitionCandidates,
   selectCandidatesForRun,
@@ -244,11 +255,112 @@ console.log(
   `プレフライト判定: 再生成対象（＝ LLM を呼ぶ件数） ${runnableCandidates.length} 件 / スキップ（タイトルのみ等） ${skippedCandidates.length} 件`,
 );
 
+// ── discovery 経路等（originalExcerpt が空の候補）の本文メモリ上再取得バイパス ──
+// spec §10-5: 本文の永続化禁止。メモリ上でのみ一時取得し、LLM 入力に使う。
+let finalRunnableCandidates = runnableCandidates;
+let bypassedCount = 0;
+let bypassFailedCount = 0;
+
+if (!NO_FETCH && skippedCandidates.length > 0) {
+  const slicelessSkipped = skippedCandidates.filter(
+    (sc) =>
+      sc.candidate.originalExcerpt === null ||
+      sc.candidate.originalExcerpt === undefined ||
+      sc.candidate.originalExcerpt === "" ||
+      sc.candidate.originalExcerpt === "null",
+  );
+
+  if (slicelessSkipped.length > 0) {
+    console.log(
+      `\n[discovery バイパス] originalExcerpt が空のスキップ候補 ${slicelessSkipped.length} 件について、本文をメモリ上で一時取得して再スコア対象にバイパスします...`,
+    );
+
+    const newlyRunnable = [];
+    const remainingSkipped = [];
+
+    for (const sc of skippedCandidates) {
+      const isSliceless =
+        sc.candidate.originalExcerpt === null ||
+        sc.candidate.originalExcerpt === undefined ||
+        sc.candidate.originalExcerpt === "" ||
+        sc.candidate.originalExcerpt === "null";
+
+      if (!isSliceless) {
+        remainingSkipped.push(sc);
+        continue;
+      }
+
+      const url = sc.candidate.url;
+      // ホスト名の抽出（例: https://www.mwed.jp/... -> www.mwed.jp）
+      let host = "www.mwed.jp";
+      try {
+        host = new URL(url).hostname;
+      } catch {
+        // ignore
+      }
+
+      const verdict = await disciplinedFetch(url, { purpose: "article" });
+      if (verdict.kind === "kill_gate") {
+        console.error(`  🛑 kill gate 発火（${verdict.gate}）: ${verdict.detail}`);
+        console.error("  ホスト停止状態のため処理を中断します。");
+        process.exit(1);
+      }
+      if (verdict.kind !== "ok") {
+        bypassFailedCount++;
+        remainingSkipped.push(sc);
+        console.log(`  skip ${url}（fetch: ${verdict.kind}）`);
+        continue;
+      }
+
+      const html = await verdict.response.text();
+      const containerHtml = extractArticleContainer(html, host);
+      if (containerHtml === null) {
+        bypassFailedCount++;
+        remainingSkipped.push(sc);
+        console.log(`  skip ${url}（container_not_found）`);
+        continue;
+      }
+
+      const signals = computeEvidenceSignals(containerHtml);
+      const gate = computeEvidenceSufficiency(signals);
+      if (!gate.ok) {
+        bypassFailedCount++;
+        remainingSkipped.push(sc);
+        console.log(`  skip ${url}（extraction_insufficient: ${gate.failedConditions.join(",")}）`);
+        continue;
+      }
+
+      const slice = selectJudgmentSlice(extractVisibleText(containerHtml));
+      bypassedCount++;
+      // runnableCandidates に追加する。ここで candidate に slice を持たせるが、
+      // slice はメモリ上のみの保持であり、DB やマークアップには書き出されない。
+      newlyRunnable.push({
+        candidate: {
+          ...sc.candidate,
+          originalExcerpt: slice, // 一時的なメモリ上スライス
+        },
+        originalIndex: sc.originalIndex,
+      });
+      console.log(`  bypass ok ${url}（slice ${slice.length} 字）`);
+    }
+
+    if (bypassedCount > 0) {
+      finalRunnableCandidates = [...runnableCandidates, ...newlyRunnable];
+      // skippedCandidates も再構成
+      skippedCandidates.length = 0;
+      skippedCandidates.push(...remainingSkipped);
+      console.log(
+        `  → バイパス成功: ${bypassedCount} 件を runnable に追加しました（バイパス失敗・維持: ${bypassFailedCount} 件）。最終 runnable: ${finalRunnableCandidates.length} 件`,
+      );
+    }
+  }
+}
+
 // Gemini 無料枠（15 req/min）への配慮: curatePosts() 自体の内部リトライ・並行数
 // 制御（src/lib/llm/batch.ts, src/lib/llm/client.ts）は変更せず、このスクリプト側で
 // 「一度に curatePosts() へ渡す件数を CHUNK_SIZE 件に抑え、チャンク間に
 // CHUNK_DELAY_MS のウェイトを挟む」ことでバースト的なリクエスト集中を避ける。
-const runnableChunks = chunkArray(runnableCandidates, CHUNK_SIZE);
+const runnableChunks = chunkArray(finalRunnableCandidates, CHUNK_SIZE);
 if (runnableChunks.length > 1) {
   console.log(
     `チャンク分割: ${runnableChunks.length} チャンク（1チャンクあたり最大 ${CHUNK_SIZE} 件、間隔 ${CHUNK_DELAY_MS}ms）`,
@@ -322,7 +434,7 @@ for (let chunkIdx = 0; chunkIdx < runnableChunks.length; chunkIdx++) {
 // R4: dry-run 表示用に、実行対象候補の既存 topicAnchor（旧値）をまとめて引く。
 const oldAnchorByPostId = new Map();
 await Promise.all(
-  runnableCandidates
+  finalRunnableCandidates
     .filter((rc) => rc.candidate.id !== null)
     .map(async (rc) => {
       const existing = await getRationaleByPostId(rc.candidate.id);
@@ -333,7 +445,9 @@ await Promise.all(
 // 3状態への分類本体は scripts/lib/backfill-plan.mjs の classifyBackfillOutcomes()。
 // 「LLM 呼び出し自体が失敗した（結果なし）」候補と「LLM は成功したが gate に
 // 落ちた」候補を明確に区別する（このスクリプトが直す対象の退行）。
-const outcomes = classifyBackfillOutcomes(runnableCandidates, resultsMap, { validateTopicAnchor });
+const outcomes = classifyBackfillOutcomes(finalRunnableCandidates, resultsMap, {
+  validateTopicAnchor,
+});
 const outcomeSummary = summarizeBackfillOutcomes(outcomes);
 
 // updates 構築本体は scripts/lib/backfill-plan.mjs の buildBackfillUpdates()。
@@ -355,6 +469,14 @@ console.log("");
 console.log("── サマリー ──");
 console.log(`候補総数（今回の対象プール）: ${candidates.length} 件`);
 console.log(`LLM を呼んだ件数（プレフライト通過分）: ${runnableCandidates.length} 件`);
+if (bypassedCount > 0) {
+  console.log(
+    `discovery バイパスによる追加件数: ${bypassedCount} 件（失敗: ${bypassFailedCount} 件）`,
+  );
+  console.log(
+    `最終 LLM 対象件数（プレフライト通過 + バイパス）: ${finalRunnableCandidates.length} 件`,
+  );
+}
 console.log(`スキップ（材料不足のため posts は一切更新しない）: ${skippedCandidates.length} 件`);
 if (skippedCandidates.length > 0) {
   console.log("  スキップ対象 URL:", skippedCandidates.map((rc) => rc.candidate.url).join(", "));
@@ -438,6 +560,11 @@ if (!APPLY) {
 
 // markCurated に渡す前に dry-run 専用フィールドを取り除く。
 const applyUpdates = toMarkCuratedInput(updates);
+
+// §10-5 漏洩防止の保証: applyUpdates の各要素が許可リスト外のキーや slice／本文を含まないことを機械的にアサート
+for (const u of applyUpdates) {
+  assertNoSliceLeak(u);
+}
 
 const markResult = await markCurated(applyUpdates);
 

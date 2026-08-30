@@ -19,7 +19,7 @@ Next.js 16 (App Router), React 19, TypeScript strict, Tailwind CSS v4, Drizzle O
 - **自動巡回コレクター**:
   - RSS フィードに基づくブログ・体験談の収集 (`src/lib/sources/hatena-bookmark.ts`, `src/lib/sources/google-news.ts`, `src/lib/sources/note.ts`, `src/lib/sources/ameblo.ts`, `src/lib/sources/base/rss-fetcher.ts`, `src/lib/sources/base/feed-parser.ts`, `src/lib/sources/registry.ts`)
 - **sitemap 差分による発見・本文取得（discovery 経路）**:
-  - RSS フィードが存在しないセクション（第1対象: `mwed.jp` 体験談）を sitemap の差分から発見し、アクセス規律レイヤー経由で本文を取得して判定する。本文は判定後に破棄し永続化しない (`src/lib/sources/sitemap-discovery.ts`, `src/lib/sources/access-discipline.ts`, `src/lib/sources/article-text.ts`, `src/lib/pipeline/discovery-ingest.ts`, `scripts/run-discovery.mjs`)。詳細は §6.3 を参照。
+  - RSS フィードが存在しないセクション（第1対象: `mwed.jp` 体験談）を sitemap の差分から発見し、アクセス規律レイヤー経由で本文を取得して判定する。本文は判定後に破棄し永続化しない (`src/lib/sources/sitemap-discovery.ts`, `src/lib/sources/access-discipline.ts`, `src/lib/sources/article-text.ts`, `src/lib/pipeline/discovery-ingest.ts`, `scripts/run-discovery.mjs`)。また、有用度スコア等の全件バックフィルスクリプト `scripts/backfill-usefulness.mjs` にも discovery 経路由来のプレフライト・バイパス機能が統合されており、本文をメモリ上で一時取得して再スコア対象にルーティングする。詳細は §6.3 を参照。
 - **管理者による URL 投入 API**:
   - SNS 投稿等の URL を受け取り、oEmbed を取得してカード化 (`src/app/api/submit-url/route.ts`, `src/lib/pipeline/submit-url.ts`, `src/lib/embed/oembed.ts`, `src/lib/embed/providers.ts`)
 - **AI による見出し・要約生成**:

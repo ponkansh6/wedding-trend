@@ -23,6 +23,7 @@
 /** markCurated() に渡してよい update のキー許可リスト（不変条件1）。 */
 export const ALLOWED_UPDATE_KEYS = Object.freeze([
   "url",
+  "aiTitle",
   "aiSummary",
   "category",
   "tag",
