@@ -20,7 +20,7 @@ function textResponse(text: string) {
   return { response: { text: () => text } };
 }
 
-/** 有用度判定 5 項目（すべて 0/1/2）のデフォルト値（テストの主眼ではないため固定値で埋める）。 */
+/** 有用度判定 6 項目のデフォルト値（テストの主眼ではないため固定値で埋める）。 */
 const USEFULNESS_FIELDS = {
   firsthand: 2,
   ceremonyDecision: 2,
@@ -109,35 +109,11 @@ describe("curateBatch", () => {
     expect(results[0]?.rationaleText).not.toMatch(/[0-9０-９]/);
   });
 
-  it("falls back to single-item curation when the batch response is invalid JSON", async () => {
+  it("returns null array when the batch response is invalid JSON instead of falling back", async () => {
     mockGenerateContent
       .mockResolvedValueOnce(textResponse("not json"))
       .mockResolvedValueOnce(textResponse("still not json"))
-      .mockResolvedValueOnce(textResponse("nope"))
-      .mockResolvedValueOnce(
-        textResponse(
-          JSON.stringify({
-            title: "個別1",
-            summary: "あ".repeat(80),
-            category: "その他",
-            tag: "trend",
-            ...USEFULNESS_FIELDS,
-            ...RATIONALE_FIELDS,
-          }),
-        ),
-      )
-      .mockResolvedValueOnce(
-        textResponse(
-          JSON.stringify({
-            title: "個別2",
-            summary: "い".repeat(80),
-            category: "その他",
-            tag: "classic",
-            ...USEFULNESS_FIELDS,
-            ...RATIONALE_FIELDS,
-          }),
-        ),
-      );
+      .mockResolvedValueOnce(textResponse("nope"));
 
     const results = await curateBatch([
       { title: "投稿1", excerpt: null },
@@ -145,8 +121,8 @@ describe("curateBatch", () => {
     ]);
 
     expect(results).toHaveLength(2);
-    expect(results[0]?.title).toBe("個別1");
-    expect(results[1]?.title).toBe("個別2");
+    expect(results[0]).toBeNull();
+    expect(results[1]).toBeNull();
   });
 
   it("aligns results by index even when the LLM returns them out of order", async () => {
@@ -248,45 +224,22 @@ describe("curatePosts", () => {
     expect(mockGenerateContent).not.toHaveBeenCalled();
   });
 
-  it("counts a Gemini call even when the batch response is unusable and it falls back to single-item curation", async () => {
-    // バッチ呼び出し 1 回（失敗）+ 単体フォールバック 2 回 = 合計 3 回。
+  it("returns null results and counts gemini calls when the batch response is unusable", async () => {
+    // バッチ呼び出し 1 回（失敗、リトライ3回含む）で null 配列を返す。フォールバックしないため単体呼び出しは発生しない。
     mockGenerateContent
       .mockResolvedValueOnce(textResponse("not json"))
       .mockResolvedValueOnce(textResponse("still not json"))
-      .mockResolvedValueOnce(textResponse("nope"))
-      .mockResolvedValueOnce(
-        textResponse(
-          JSON.stringify({
-            title: "個別1",
-            summary: "あ".repeat(80),
-            category: "その他",
-            tag: "trend",
-            ...USEFULNESS_FIELDS,
-            ...RATIONALE_FIELDS,
-          }),
-        ),
-      )
-      .mockResolvedValueOnce(
-        textResponse(
-          JSON.stringify({
-            title: "個別2",
-            summary: "い".repeat(80),
-            category: "その他",
-            tag: "classic",
-            ...USEFULNESS_FIELDS,
-            ...RATIONALE_FIELDS,
-          }),
-        ),
-      );
+      .mockResolvedValueOnce(textResponse("nope"));
 
     const { results, geminiCalls } = await curatePosts([
       { title: "投稿1", excerpt: null },
       { title: "投稿2", excerpt: null },
     ]);
 
-    expect(results[0]?.title).toBe("個別1");
-    expect(results[1]?.title).toBe("個別2");
-    expect(geminiCalls).toBe(5);
+    expect(results).toHaveLength(2);
+    expect(results[0]).toBeNull();
+    expect(results[1]).toBeNull();
+    expect(geminiCalls).toBe(3);
   });
 
   describe("curateAnchorWithRetry (plan D5: degrade-to-null on anchor failure with 1 retry)", () => {
@@ -490,96 +443,31 @@ describe("curateBatch gate integration (D5 degrade)", () => {
     );
   });
 
-  it("degrades to null when batch anchor fails gate and retry also fails", async () => {
-    // batch returns invalid anchor "短" -> retry via curateSingle also returns invalid
-    mockGenerateContent
-      .mockResolvedValueOnce(
-        textResponse(
-          JSON.stringify({
-            items: [
-              {
-                index: 1,
-                title: "バッチ1",
-                summary: "て".repeat(80),
-                category: "その他",
-                tag: "trend",
-                ...USEFULNESS_FIELDS,
-                topicAnchor: "短",
-              },
-            ],
-          }),
-        ),
-      )
-      .mockResolvedValueOnce(
-        textResponse(
-          JSON.stringify({
-            title: "リトライ1",
-            summary: "て".repeat(80),
-            category: "その他",
-            tag: "trend",
-            ...USEFULNESS_FIELDS,
-            topicAnchor: "短",
-          }),
-        ),
-      )
-      .mockResolvedValueOnce(
-        textResponse(
-          JSON.stringify({
-            title: "リトライ2",
-            summary: "て".repeat(80),
-            category: "その他",
-            tag: "trend",
-            ...USEFULNESS_FIELDS,
-            topicAnchor: "短",
-          }),
-        ),
-      );
+  it("degrades to null when batch anchor fails gate without retry", async () => {
+    // batch returns invalid anchor "短" -> since retry is abolished, it immediately degrades to null
+    mockGenerateContent.mockResolvedValueOnce(
+      textResponse(
+        JSON.stringify({
+          items: [
+            {
+              index: 1,
+              title: "バッチ1",
+              summary: "て".repeat(80),
+              category: "その他",
+              tag: "trend",
+              ...USEFULNESS_FIELDS,
+              topicAnchor: "短",
+            },
+          ],
+        }),
+      ),
+    );
     const results = await curateBatch([{ title: "投稿1", excerpt: "本文1" }]);
     expect(results).toHaveLength(1);
     expect(results[0]?.topicAnchor).toBeNull();
     expect(results[0]?.rationaleText).toBeNull();
     expect(results[0]?.title).toBe("バッチ1");
-    // 欠陥2対応: なぜ degrade したかの理由コードが伝播していること。
     expect(results[0]?.degradeReason).toBe("anchor_too_short");
-  });
-
-  it("recovers with retry anchor when retry passes gate", async () => {
-    mockGenerateContent
-      .mockResolvedValueOnce(
-        textResponse(
-          JSON.stringify({
-            items: [
-              {
-                index: 1,
-                title: "バッチ1",
-                summary: "て".repeat(80),
-                category: "その他",
-                tag: "trend",
-                ...USEFULNESS_FIELDS,
-                topicAnchor: "短",
-              },
-            ],
-          }),
-        ),
-      )
-      .mockResolvedValueOnce(
-        textResponse(
-          JSON.stringify({
-            title: "リトライ成功タイトル",
-            summary: "て".repeat(80),
-            category: "その他",
-            tag: "trend",
-            ...USEFULNESS_FIELDS,
-            ...RATIONALE_FIELDS,
-          }),
-        ),
-      );
-    const results = await curateBatch([{ title: "投稿1", excerpt: "本文1" }]);
-    expect(results).toHaveLength(1);
-    expect(results[0]?.topicAnchor).toBe(RATIONALE_FIELDS.topicAnchor);
-    expect(results[0]?.title).toBe("リトライ成功タイトル");
-    expect(results[0]?.rationaleText).toContain(RATIONALE_FIELDS.topicAnchor);
-    expect(results[0]?.degradeReason).toBeNull();
   });
 
   it("欠陥3の回帰防止: バッチ・単体フォールバックとも LLM 呼び出しが尽きて失敗したら、捏造したカテゴリ等を持つ結果ではなく null を返す", async () => {

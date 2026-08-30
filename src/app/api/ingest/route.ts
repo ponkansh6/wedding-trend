@@ -33,6 +33,14 @@ export const maxDuration = 60;
  * 記録される値であり、パイプラインの挙動そのものを変えない。
  */
 async function handleTrigger(request: Request): Promise<Response> {
+  if (process.env.VERCEL_ENV && process.env.VERCEL_ENV !== "production") {
+    console.log(`Ingest skipped in VERCEL_ENV=${process.env.VERCEL_ENV}`);
+    return NextResponse.json(
+      { skipped: true, reason: "preview env - ingest disabled" },
+      { status: 200 },
+    );
+  }
+
   if (!isBearerAuthorized(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

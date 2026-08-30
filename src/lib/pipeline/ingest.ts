@@ -369,6 +369,18 @@ async function fetchAndNormalize(id: (typeof SOURCE_IDS)[number]): Promise<PostU
  * `"manual"`（UI ボタン経路）を既定値とする。
  */
 export async function runIngest(trigger: IngestTrigger = "manual"): Promise<IngestSummary> {
+  if (process.env.VERCEL_ENV && process.env.VERCEL_ENV !== "production") {
+    console.log(`Ingest skipped in VERCEL_ENV=${process.env.VERCEL_ENV}`);
+    return {
+      fetched: 0,
+      inserted: 0,
+      curated: 0,
+      skipped: 0,
+      errors: [],
+      geminiCalls: 0,
+    };
+  }
+
   const startedAt = new Date().toISOString();
   // ラン開始時点でプレースホルダーを保存しておく。finishedAt が null のまま
   // このレコードが残っていれば、前回のランが完了しなかった（タイムアウト・

@@ -31,7 +31,7 @@ import {
 /**
  * キュレーション結果本体（LLM が実際に決めた部分。index はバッチ内の整列にのみ
  * 使うため除く）。`rationaleText` は plan 07 §6-Q5 により LLM 出力ではなく
- * `renderRationaleText()`（`topicAnchor` + 5 つの 0-2 判定値からの決定的テンプレート）
+ * `renderRationaleText()`（`topicAnchor` + 5 つの 0-9 判定値からの決定的テンプレート）
  * で付与する。`evidenceSufficient` は plan 07 §6-Q1 により LLM の自己申告を
  * 廃止したため、この型からは削除されている
  * （破壊的変更。呼び出し元での結線は別レーンが行う。詳細はタスク完了報告を参照）。
@@ -70,7 +70,7 @@ export type CurationResult = Omit<CurationItem, "index" | "topicAnchor"> & {
   retryAttemptMatchedTerms?: string[];
 };
 
-/** `renderRationaleText()` に渡す 5 つの 0-2 判定値を item から取り出すヘルパ。 */
+/** `renderRationaleText()` に渡す 5 つの 0-9 判定値を item から取り出すヘルパ。 */
 function usefulnessFlagsOf(item: Omit<CurationItem, "index" | "topicAnchor">) {
   return {
     firsthand: item.firsthand,
@@ -82,7 +82,7 @@ function usefulnessFlagsOf(item: Omit<CurationItem, "index" | "topicAnchor">) {
 }
 
 /**
- * LLM が返した 0-2 判定値から `rationaleText` を決定的に付与する
+ * LLM が返した boolean 群から `rationaleText` を決定的に付与する
  * （plan 07 §6-Q5: LLM の自由生成文は一切使わない）。
  */
 function attachRationale<
@@ -130,8 +130,21 @@ async function callAndParse<T>(
   schema: ZodType<T>,
   contextName: string,
   onGeminiCall?: () => void,
+  maxRequests?: number,
+  getCurrentRequests?: () => number,
 ): Promise<T | null> {
   for (let attempt = 0; attempt <= LLM_MAX_PARSE_RETRIES; attempt++) {
+    if (
+      maxRequests !== undefined &&
+      getCurrentRequests?.() !== undefined &&
+      getCurrentRequests()! >= maxRequests
+    ) {
+      console.log(
+        `[llm] Aborting retry: max requests reached (${getCurrentRequests()} >= ${maxRequests})`,
+      );
+      return null;
+    }
+
     let text: string | null;
     try {
       onGeminiCall?.();
@@ -151,6 +164,16 @@ async function callAndParse<T>(
         text.slice(0, DEBUG_LOG_TRUNCATE_LENGTH),
       );
       if (attempt < LLM_MAX_PARSE_RETRIES) {
+        if (
+          maxRequests !== undefined &&
+          getCurrentRequests?.() !== undefined &&
+          getCurrentRequests()! >= maxRequests
+        ) {
+          console.log(
+            `[llm] Aborting retry: max requests reached (${getCurrentRequests()} >= ${maxRequests})`,
+          );
+          return null;
+        }
         await new Promise((r) => setTimeout(r, backoffMs(attempt)));
         continue;
       }
@@ -162,9 +185,19 @@ async function callAndParse<T>(
 
     console.warn(
       `[llm] ${contextName} schema validation failed (attempt ${attempt + 1}/${LLM_MAX_PARSE_RETRIES + 1}):`,
-      result.error.issues,
+      JSON.stringify(result.error.issues, null, 2),
     );
     if (attempt < LLM_MAX_PARSE_RETRIES) {
+      if (
+        maxRequests !== undefined &&
+        getCurrentRequests?.() !== undefined &&
+        getCurrentRequests()! >= maxRequests
+      ) {
+        console.log(
+          `[llm] Aborting retry: max requests reached (${getCurrentRequests()} >= ${maxRequests})`,
+        );
+        return null;
+      }
       await new Promise((r) => setTimeout(r, backoffMs(attempt)));
       continue;
     }
@@ -211,7 +244,13 @@ export async function curateSingle(
  */
 export async function curateBatch(
   inputs: CurationInput[],
-  opts?: { timeoutMs?: number; retries?: number; onGeminiCall?: () => void },
+  opts?: {
+    timeoutMs?: number;
+    retries?: number;
+    onGeminiCall?: () => void;
+    maxRequests?: number;
+    getCurrentRequests?: () => number;
+  },
 ): Promise<(CurationResult | null)[]> {
   if (inputs.length === 0) return [];
 
@@ -224,15 +263,13 @@ export async function curateBatch(
     CurationBatchResponseSchema,
     "batch curation",
     opts?.onGeminiCall,
+    opts?.maxRequests,
+    opts?.getCurrentRequests,
   );
 
   if (!parsed) {
-    console.warn(
-      `[llm] batch curation failed for ${inputs.length} items, falling back to single-item curation`,
-    );
-    return Promise.all(
-      inputs.map((input) => curateSingle(input, { onGeminiCall: opts?.onGeminiCall })),
-    );
+    console.warn(`[llm] batch curation failed for ${inputs.length} items, returning null array`);
+    return inputs.map(() => null);
   }
 
   // index（1 始まり）で入力配列の位置に揃える。欠落・重複・範囲外は null で埋める。
@@ -268,47 +305,9 @@ export async function curateBatch(
         const firstGateDetails = gateDetails(gateRes);
         firstAttemptMissingTerms = firstGateDetails.missingTerms;
         firstAttemptMatchedTerms = firstGateDetails.matchedTerms;
-        const titleTerms = extractFeatureTerms(title).join("、");
-        const feedback = `このアンカーは検証に失敗しました（理由: ${reason}）。タイトルに無い語を1つ以上使い、許可されるひらがな述語で『問いを立てる節』にしなさい。タイトル語彙参考: [${titleTerms}]`;
 
-        // 欠陥3: curateSingle は LLM 呼び出し失敗時に null を返すようになった
-        // （プレースホルダは捏造しない）。retryRes が null の場合は「リトライも
-        // LLM 呼び出し自体が失敗した」ことを意味し、以下では finalAnchor = null
-        // （1回目の理由で degrade）にフォールバックする。1回目の item 自体は
-        // 有効な結果のため、これは「LLM 失敗」ではなく「gate degrade」として扱う。
-        const retryRes = await curateSingle(input, { onGeminiCall: opts?.onGeminiCall, feedback });
-        if (retryRes && retryRes.topicAnchor) {
-          retryAttemptAnchor = retryRes.topicAnchor;
-          const retryGateRes = validateTopicAnchor(retryRes.topicAnchor, { corpus, title });
-          if (retryGateRes.ok) {
-            // Use fields from retryRes
-            return attachRationale({
-              title: retryRes.title,
-              summary: retryRes.summary,
-              topicAnchor: retryRes.topicAnchor,
-              category: retryRes.category,
-              tag: retryRes.tag,
-              firsthand: retryRes.firsthand,
-              ceremonyDecision: retryRes.ceremonyDecision,
-              specific: retryRes.specific,
-              weddingDayContent: retryRes.weddingDayContent,
-              promotional: retryRes.promotional,
-              degradeReason: null,
-              firstAttemptReason: reason,
-              retryAttemptReason: null,
-              firstAttemptAnchor,
-              firstAttemptMissingTerms,
-              firstAttemptMatchedTerms,
-            });
-          }
-          const retryGateDetails = gateDetails(retryGateRes);
-          retryAttemptMissingTerms = retryGateDetails.missingTerms;
-          retryAttemptMatchedTerms = retryGateDetails.matchedTerms;
-          retryAttemptReason =
-            "reason" in retryGateRes ? (retryGateRes.reason ?? "unknown") : "unknown";
-        }
         finalAnchor = null;
-        degradeReason = retryAttemptReason ?? reason;
+        degradeReason = reason;
       }
 
       return attachRationale({
@@ -337,11 +336,9 @@ export async function curateBatch(
 
   if (aligned.every((r) => r === null)) {
     console.warn(
-      `[llm] batch curation returned no usable items for ${inputs.length} items, falling back to single-item curation`,
+      `[llm] batch curation returned no usable items for ${inputs.length} items, returning null array`,
     );
-    return Promise.all(
-      inputs.map((input) => curateSingle(input, { onGeminiCall: opts?.onGeminiCall })),
-    );
+    return inputs.map(() => null);
   }
 
   return aligned;
@@ -490,12 +487,14 @@ export async function curateAnchorWithRetry(
  */
 export async function curatePosts(
   inputs: CurationInput[],
+  opts?: { onGeminiCall?: () => void; maxRequests?: number; getCurrentRequests?: () => number },
 ): Promise<{ results: (CurationResult | null)[]; geminiCalls: number }> {
   if (inputs.length === 0) return { results: [], geminiCalls: 0 };
 
   const geminiCallCounter = { count: 0 };
   const onGeminiCall = () => {
     geminiCallCounter.count += 1;
+    opts?.onGeminiCall?.();
   };
 
   const batches: CurationInput[][] = [];
@@ -506,29 +505,42 @@ export async function curatePosts(
   const deadline = Date.now() + CURATION_DEADLINE_MS;
   const limit = pLimit(LLM_BATCH_CONCURRENCY);
 
-  const settled = await Promise.allSettled(
-    batches.map((batch) =>
-      limit((): Promise<(CurationResult | null)[]> => {
-        const remaining = deadline - Date.now();
-        if (remaining < CURATION_MIN_SLICE_MS) {
-          console.warn(
-            `[llm] curatePosts: deadline exceeded, skipping batch of ${batch.length} items`,
-          );
-          return Promise.resolve(batch.map((): CurationResult | null => null));
-        }
-        return curateBatch(batch, {
-          timeoutMs: Math.min(LLM_BATCH_TIMEOUT_MS, remaining),
-          onGeminiCall,
-        });
-      }),
-    ),
-  );
+  const results: (CurationResult | null)[] = [];
+  for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
+    if (
+      opts?.maxRequests !== undefined &&
+      opts?.getCurrentRequests?.() !== undefined &&
+      opts.getCurrentRequests()! >= opts.maxRequests
+    ) {
+      console.log(
+        `[llm] Aborting retry/batch: max requests reached (${opts.getCurrentRequests()} >= ${opts.maxRequests})`,
+      );
+      for (let i = 0; i < batches[batchIdx].length; i++) {
+        results.push(null);
+      }
+      continue;
+    }
 
-  const results = settled.flatMap((s, i) => {
-    if (s.status === "fulfilled") return s.value;
-    console.error(`[llm] batch ${i} rejected unexpectedly:`, s.reason);
-    return batches[i].map((): CurationResult | null => null);
-  });
+    const batch = batches[batchIdx];
+    const remaining = deadline - Date.now();
+    if (remaining < CURATION_MIN_SLICE_MS) {
+      console.warn(`[llm] curatePosts: deadline exceeded, skipping batch of ${batch.length} items`);
+      for (let i = 0; i < batch.length; i++) {
+        results.push(null);
+      }
+      continue;
+    }
+
+    const batchRes = await limit(() =>
+      curateBatch(batch, {
+        timeoutMs: Math.min(LLM_BATCH_TIMEOUT_MS, remaining),
+        onGeminiCall,
+        maxRequests: opts?.maxRequests,
+        getCurrentRequests: opts?.getCurrentRequests,
+      }),
+    );
+    results.push(...batchRes);
+  }
 
   return { results, geminiCalls: geminiCallCounter.count };
 }

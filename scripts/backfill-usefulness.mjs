@@ -35,13 +35,40 @@
  *     # URL に "note.com" を含む候補（プラン16 Stage 6 のコホート順）に絞った上で先頭 20 件
  *
  * 環境変数（バッチ投入間隔の調整。Gemini 無料枠 15 req/min を踏まえたデフォルト値）:
- *   BACKFILL_CHUNK_SIZE      : curatePosts() 1 回あたりに渡す候補数（デフォルト 5）
+ *   BACKFILL_CHUNK_SIZE      : curatePosts() 1 回あたりに渡す候補数（デフォルト 30）
  *   BACKFILL_CHUNK_DELAY_MS  : チャンク間のウェイト（ミリ秒、デフォルト 15000）
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, mkdirSync, appendFileSync } from "node:fs";
+import { join } from "node:path";
 
 const APPLY = process.argv.includes("--apply");
 const FORCE = process.argv.includes("--force");
+const HELP = process.argv.includes("--help") || process.argv.includes("-h");
+const STATS_ONLY =
+  process.argv.includes("--stats-only") || process.argv.includes("--preflight-only");
+
+if (HELP) {
+  console.log(`
+有用度スコア バックフィルスクリプト
+\n使い方:
+  pnpm exec tsx scripts/backfill-usefulness.mjs [オプション]
+
+オプション:
+  --help, -h       このヘルプを表示する（Gemini / DB に接続しません）
+  --stats-only     Gemini API を呼び出さず、バックフィル対象件数とシグネチャ別内訳をプレビューする
+  --apply          実際に DB へ書き込む（デフォルトは dry-run）
+  --force          署名に関わらず全ブログ投稿を再スコア
+  --limit N        対象件数の上限を指定する
+  --source X       URL に特定の文字列を含む候補に絞る
+  --max-requests N Gemini API のリクエスト回数の上限を指定する
+
+環境変数:
+  BACKFILL_CHUNK_SIZE     チャンクあたりの候補数（デフォルト 30）
+  BACKFILL_CHUNK_DELAY_MS チャンク間のウェイト（ミリ秒、デフォルト 30000）
+  MAX_GEMINI_REQUESTS     最大 Gemini リクエスト数
+`);
+  process.exit(0);
+}
 
 /** `--limit N` / `--source X` のような `--flag value` 形式の値を argv から取り出す。 */
 function readFlagValue(flag) {
@@ -58,12 +85,25 @@ if (LIMIT_RAW !== undefined && (!Number.isFinite(LIMIT) || LIMIT < 0)) {
 }
 const SOURCE = readFlagValue("--source");
 
+const MAX_REQUESTS_RAW =
+  readFlagValue("--max-requests") ||
+  readFlagValue("--maxRequests") ||
+  process.env.MAX_GEMINI_REQUESTS;
+const MAX_REQUESTS =
+  MAX_REQUESTS_RAW !== undefined ? Number.parseInt(MAX_REQUESTS_RAW, 10) : undefined;
+if (MAX_REQUESTS_RAW !== undefined && (!Number.isFinite(MAX_REQUESTS) || MAX_REQUESTS < 0)) {
+  console.error(`--max-requests の値が不正です: ${MAX_REQUESTS_RAW}`);
+  process.exit(1);
+}
+
 const CHUNK_SIZE = process.env.BACKFILL_CHUNK_SIZE
   ? Number.parseInt(process.env.BACKFILL_CHUNK_SIZE, 10)
-  : 5;
+  : 30;
 const CHUNK_DELAY_MS = process.env.BACKFILL_CHUNK_DELAY_MS
   ? Number.parseInt(process.env.BACKFILL_CHUNK_DELAY_MS, 10)
-  : 15_000;
+  : 30_000;
+
+const GEMINI_REQUEST_LOG_PATH = process.env.GEMINI_REQUEST_LOG_PATH || "logs/gemini-requests.log";
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -97,6 +137,24 @@ for (const key of ["TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN", "GOOGLE_API_KEY"]) 
 
 // 秘密情報を出力しないよう、接続先はスキームのみ表示する。
 console.log(`接続先スキーム: ${process.env.TURSO_DATABASE_URL.split(":")[0]}`);
+
+// Gemini リクエスト測定ログの初期化
+const logDir = join(process.cwd(), "logs");
+if (!existsSync(logDir)) {
+  mkdirSync(logDir, { recursive: true });
+}
+const logFilePath = join(process.cwd(), GEMINI_REQUEST_LOG_PATH);
+const backfillStartTime = new Date();
+const sessionHeader = `\n=== Backfill Session Started at ${backfillStartTime.toISOString()} ===\n`;
+appendFileSync(logFilePath, sessionHeader, "utf-8");
+
+function logGeminiRequest(reqNumber, chunkIdx, totalChunks, articleCount) {
+  const now = new Date();
+  const timeStr = now.toTimeString().split(" ")[0];
+  const msg = `[Gemini #${reqNumber}] ${timeStr} - chunk ${chunkIdx}/${totalChunks} (${articleCount} articles) -> 1 request`;
+  console.log(`  📊 ${msg}`);
+  appendFileSync(logFilePath, `${now.toISOString()} ${msg}\n`, "utf-8");
+}
 
 // env を設定した後に import する（src/lib/db/index.ts はモジュール読み込み時に
 // process.env を読んで接続を作るため）。
@@ -146,6 +204,19 @@ if (SOURCE || LIMIT !== undefined) {
   );
 }
 
+if (STATS_ONLY) {
+  console.log("\n[--stats-only モード] Gemini API は呼び出さずに終了します。");
+  const { runnableCandidates, skippedCandidates } = partitionCandidates(
+    candidates,
+    shouldRegenerateAnchor,
+  );
+  console.log(`- バックフィル対象総数: ${allCandidates.length} 件`);
+  console.log(`- フィルタ適用後対象数: ${candidates.length} 件`);
+  console.log(`- プレフライト再生成対象（LLM対象）: ${runnableCandidates.length} 件`);
+  console.log(`- プレフライトスキップ対象: ${skippedCandidates.length} 件`);
+  process.exit(0);
+}
+
 if (candidates.length === 0) {
   console.log("対象なし。終了します。");
   process.exit(0);
@@ -186,27 +257,66 @@ if (runnableChunks.length > 1) {
 
 let resultsMap = new Map();
 let geminiCalls = 0;
+let totalGeminiRequestsCount = 0;
+let stoppedEarly = false;
 
 for (let chunkIdx = 0; chunkIdx < runnableChunks.length; chunkIdx++) {
+  if (MAX_REQUESTS !== undefined && totalGeminiRequestsCount >= MAX_REQUESTS) {
+    console.log(
+      `\n🛑 規定のリクエスト数制限（--max-requests / MAX_GEMINI_REQUESTS = ${MAX_REQUESTS}）に達したため、処理を中断します。`,
+    );
+    stoppedEarly = true;
+    break;
+  }
   const chunk = runnableChunks[chunkIdx];
   if (chunk.length === 0) continue;
   if (chunkIdx > 0) {
     console.log(`  ...チャンク間ウェイト ${CHUNK_DELAY_MS}ms...`);
     await sleep(CHUNK_DELAY_MS);
   }
+
+  if (MAX_REQUESTS !== undefined && totalGeminiRequestsCount >= MAX_REQUESTS) {
+    console.log(
+      `\n🛑 規定のリクエスト数制限（--max-requests / MAX_GEMINI_REQUESTS = ${MAX_REQUESTS}）に達したため、処理を中断します。`,
+    );
+    stoppedEarly = true;
+    break;
+  }
+
   console.log(
     `  チャンク ${chunkIdx + 1}/${runnableChunks.length}（${chunk.length} 件）を処理中...`,
   );
+
   const curationRes = await curatePosts(
     chunk.map((rc) => ({
       title: rc.candidate.originalTitle,
       excerpt: rc.candidate.originalExcerpt,
     })),
+    {
+      onGeminiCall: () => {
+        totalGeminiRequestsCount++;
+        logGeminiRequest(
+          totalGeminiRequestsCount,
+          chunkIdx + 1,
+          runnableChunks.length,
+          chunk.length,
+        );
+      },
+      maxRequests: MAX_REQUESTS,
+      getCurrentRequests: () => totalGeminiRequestsCount,
+    },
   );
   geminiCalls += curationRes.geminiCalls;
   curationRes.results.forEach((res, idx) => {
     resultsMap.set(chunk[idx].originalIndex, res);
   });
+  if (MAX_REQUESTS !== undefined && totalGeminiRequestsCount >= MAX_REQUESTS) {
+    console.log(
+      `\n🛑 規定のリクエスト数制限（--max-requests / MAX_GEMINI_REQUESTS = ${MAX_REQUESTS}）に達したため、処理を中断します。`,
+    );
+    stoppedEarly = true;
+    break;
+  }
 }
 
 // R4: dry-run 表示用に、実行対象候補の既存 topicAnchor（旧値）をまとめて引く。
@@ -331,7 +441,33 @@ const applyUpdates = toMarkCuratedInput(updates);
 
 const markResult = await markCurated(applyUpdates);
 
-console.log(`Gemini 呼び出し回数: ${geminiCalls}`);
+const backfillEndTime = new Date();
+const durationSec = ((backfillEndTime.getTime() - backfillStartTime.getTime()) / 1000).toFixed(1);
+const summaryJson = {
+  startedAt: backfillStartTime.toISOString(),
+  endedAt: backfillEndTime.toISOString(),
+  durationSeconds: Number.parseFloat(durationSec),
+  maxRequests: MAX_REQUESTS ?? null,
+  stoppedEarly,
+  totalGeminiRequests: totalGeminiRequestsCount,
+  totalArticlesProcessed: runnableCandidates.length,
+  avgRequestsPerMinute:
+    durationSec > 0
+      ? Number.parseFloat(
+          ((totalGeminiRequestsCount / Number.parseFloat(durationSec)) * 60).toFixed(2),
+        )
+      : 0,
+};
+appendFileSync(
+  logFilePath,
+  `\n=== Backfill Summary ===\n${JSON.stringify(summaryJson, null, 2)}\n==========================\n`,
+  "utf-8",
+);
+console.log(
+  `  📝 Gemini リクエストログを ${logFilePath} に保存しました（合計 ${totalGeminiRequestsCount} リクエスト）`,
+);
+
+console.log(`Gemini 呼び出し回数: ${geminiCalls} (実測ログカウント: ${totalGeminiRequestsCount})`);
 console.log(`更新成功: ${markResult.succeeded.length} 件 / 失敗: ${markResult.failed.length} 件`);
 if (markResult.failed.length > 0) {
   console.log("失敗した URL:", markResult.failed.join(", "));

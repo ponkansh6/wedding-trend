@@ -7,6 +7,6 @@ export function shouldRegenerateAnchor(input) {
   const excerpt = input?.excerpt;
   if (!excerpt) return false;
   const trimmed = typeof excerpt === "string" ? excerpt.trim() : String(excerpt).trim();
-  if (trimmed.length < 5) return false;
+  if (trimmed === "null" || trimmed.length < 5) return false;
   return true;
 }

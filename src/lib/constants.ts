@@ -19,7 +19,7 @@ export const LLM_MODEL = "gemini-3.1-flash-lite";
  */
 export const LLM_GEN_TEMPERATURE = 0;
 /** バッチキュレーション 1 回あたりの投稿数。 */
-export const LLM_BATCH_SIZE = 12;
+export const LLM_BATCH_SIZE = 30;
 /** バッチ処理の並列実行数（p-limit）。 */
 export const LLM_BATCH_CONCURRENCY = 4;
 /** バッチ 1 回あたりのタイムアウト。 */
