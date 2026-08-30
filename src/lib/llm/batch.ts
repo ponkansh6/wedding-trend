@@ -290,7 +290,7 @@ export async function curateBatch(
       let finalAnchor: string | null = item.topicAnchor;
       let degradeReason: string | null = null;
       let firstAttemptReason: string | null = null;
-      let retryAttemptReason: string | null = null;
+      const retryAttemptReason: string | null = null;
       let firstAttemptAnchor: string | null = null;
       let firstAttemptMissingTerms: string[] | undefined;
       let firstAttemptMatchedTerms: string[] | undefined;
