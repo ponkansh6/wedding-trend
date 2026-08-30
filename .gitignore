@@ -52,3 +52,17 @@ local.db-*
 
 # topicAnchor 再生成前の復元用スナップショット（scripts/snapshot-anchors.mjs）
 snapshots/
+
+# バックフィル等の Gemini リクエスト計測ログ（作業ログ。成果物ではない）
+/logs/
+
+# 一時的な検証・デバッグ用スクリプト（コミット対象外）
+/check-*.ts
+scripts/calc-sig.ts
+scripts/check-db.mjs
+scripts/check-mwed.ts
+scripts/check-sigs.ts
+scripts/count-gemini-requests.mjs
+scripts/inspect-db.ts
+scripts/test-stale-candidates.ts
+scripts/verify-stale-logic.ts
