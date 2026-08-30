@@ -118,8 +118,8 @@ describe("CurationItemSchema", () => {
     expect(result.success).toBe(false);
   });
 
-  it("rejects a usefulness field outside 0/1/2 (boolean, 3, negative)", () => {
-    for (const bad of [true, 3, -1, 1.5]) {
+  it("rejects a usefulness field outside 0-9 (boolean, 10, negative, fractional)", () => {
+    for (const bad of [true, 10, -1, 1.5]) {
       const result = CurationItemSchema.safeParse({
         index: 1,
         title: "テスト",
@@ -134,8 +134,8 @@ describe("CurationItemSchema", () => {
     }
   });
 
-  it("accepts all three levels 0 / 1 / 2 for every usefulness field", () => {
-    for (const level of [0, 1, 2] as const) {
+  it("accepts every level 0-9 for every usefulness field", () => {
+    for (const level of [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] as const) {
       const result = CurationItemSchema.safeParse({
         index: 1,
         title: "テスト",

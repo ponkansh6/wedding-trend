@@ -29,16 +29,17 @@ const TitleSchema = z
   );
 
 /**
- * 有用度判定 5 項目。点数（重み）は一切ここに含めない —— LLM には 0/1/2 の
+ * 有用度判定 5 項目。点数（重み）は一切ここに含めない —— LLM には 0〜9 の
  * 整数だけを出させ、重み付けは `src/lib/scoring/usefulness.ts` の
  * `computeUsefulnessScore()` がコード側で行う（定義は
  * openspec/specs/wedding-trend/spec.md §9.3 を参照。プロンプト側の指示文は
  * `src/lib/llm/prompts.ts` の `USEFULNESS_CRITERIA_RULES` を参照）。
  *
- * 2026-08-30: 全項目 boolean → 0/1/2 の整数。旧 `preDecisionOrPhotoShoot` は
- * 廃止（`weddingDayContent = 0` に吸収）。
+ * 2026-08-30: 全項目 boolean → 0-2 の整数、旧 `preDecisionOrPhotoShoot` は
+ * 廃止（`weddingDayContent = 0` に吸収）。2026-08-30 later: 0-2 → 0-9 に拡張
+ * （小モデルの degree 判定の解像度を上げる試み）。
  */
-const CriterionLevelSchema = z.union([z.literal(0), z.literal(1), z.literal(2)]);
+const CriterionLevelSchema = z.number().int().min(0).max(9);
 
 export const CurationItemSchema = z.object({
   index: z.number().int(),

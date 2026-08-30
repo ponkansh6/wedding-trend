@@ -304,8 +304,8 @@ describe("renderRationaleText (plan 07 §6-Q5: rationaleText のテンプレー�
   const baseInput: RationaleTemplateInput = {
     topicAnchor: "会場選びのコツ",
     usefulness: {
-      firsthand: 2,
-      ceremonyDecision: 2,
+      firsthand: 9,
+      ceremonyDecision: 9,
       specific: 0,
       weddingDayContent: 0,
       promotional: 0,
@@ -356,7 +356,7 @@ describe("renderRationaleText (plan 07 §6-Q5: rationaleText のテンプレー�
   it("changes output when a usefulness flag changes (not a constant string)", () => {
     const withWeddingDayContent = renderRationaleText({
       ...baseInput,
-      usefulness: { ...baseInput.usefulness, weddingDayContent: 2 },
+      usefulness: { ...baseInput.usefulness, weddingDayContent: 9 },
     });
     const without = renderRationaleText(baseInput);
     expect(withWeddingDayContent).not.toBe(without);
@@ -397,10 +397,10 @@ describe("renderRationaleText (plan 07 §6-Q5: rationaleText のテンプレー�
     const overLongInput: RationaleTemplateInput = {
       topicAnchor: "あ".repeat(120),
       usefulness: {
-        firsthand: 2,
-        ceremonyDecision: 2,
-        specific: 2,
-        weddingDayContent: 2,
+        firsthand: 9,
+        ceremonyDecision: 9,
+        specific: 9,
+        weddingDayContent: 9,
         promotional: 2,
       },
     };
@@ -416,10 +416,10 @@ describe("renderRationaleText (plan 07 §6-Q5: rationaleText のテンプレー�
     const structuralMaxInput: RationaleTemplateInput = {
       topicAnchor: "あ".repeat(40),
       usefulness: {
-        firsthand: 2,
-        ceremonyDecision: 2,
-        specific: 2,
-        weddingDayContent: 2,
+        firsthand: 9,
+        ceremonyDecision: 9,
+        specific: 9,
+        weddingDayContent: 9,
         promotional: 2,
       },
     };
@@ -439,10 +439,10 @@ describe("renderRationaleText (plan 07 §6-Q5: rationaleText のテンプレー�
     const structuralMaxInput: RationaleTemplateInput = {
       topicAnchor: "あ".repeat(40),
       usefulness: {
-        firsthand: 2,
-        ceremonyDecision: 2,
-        specific: 2,
-        weddingDayContent: 2,
+        firsthand: 9,
+        ceremonyDecision: 9,
+        specific: 9,
+        weddingDayContent: 9,
         promotional: 2,
       },
     };
@@ -459,10 +459,10 @@ describe("renderRationaleText (plan 07 §6-Q5: rationaleText のテンプレー�
     const fiveTrueInput: RationaleTemplateInput = {
       topicAnchor: "会場選びのコツ",
       usefulness: {
-        firsthand: 2,
-        ceremonyDecision: 2,
-        specific: 2,
-        weddingDayContent: 2,
+        firsthand: 9,
+        ceremonyDecision: 9,
+        specific: 9,
+        weddingDayContent: 9,
         promotional: 0,
       },
     };
@@ -479,10 +479,10 @@ describe("renderRationaleText (plan 07 §6-Q5: rationaleText のテンプレー�
     const realDataScaleInput: RationaleTemplateInput = {
       topicAnchor: "あ".repeat(29),
       usefulness: {
-        firsthand: 2,
-        ceremonyDecision: 2,
-        specific: 2,
-        weddingDayContent: 2,
+        firsthand: 9,
+        ceremonyDecision: 9,
+        specific: 9,
+        weddingDayContent: 9,
         promotional: 2,
       },
     };

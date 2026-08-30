@@ -105,7 +105,7 @@ const USEFULNESS_SCORE_SQL = sql<number>`CASE
   + ${USEFULNESS_WEIGHT_FIRSTHAND} * COALESCE(json_extract(${postUsefulnessCriteria.criteriaJson}, '$.firsthand'), 0)
   + ${USEFULNESS_WEIGHT_SPECIFIC} * COALESCE(json_extract(${postUsefulnessCriteria.criteriaJson}, '$.specific'), 0)
   + ${USEFULNESS_WEIGHT_WEDDING_DAY} * COALESCE(json_extract(${postUsefulnessCriteria.criteriaJson}, '$.weddingDayContent'), 0)
-  - ${USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY} * (CASE WHEN json_extract(${postUsefulnessCriteria.criteriaJson}, '$.promotional') = 2 OR json_extract(${postUsefulnessCriteria.criteriaJson}, '$.promotional') = 'heavy' THEN 1 ELSE 0 END)
+  - ${USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY} * (CASE WHEN json_extract(${postUsefulnessCriteria.criteriaJson}, '$.promotional') = 'heavy' OR (json_extract(${postUsefulnessCriteria.criteriaJson}, '$.promotional') + 0) >= 7 THEN 1 ELSE 0 END)
 END`;
 
 /**
@@ -191,8 +191,8 @@ export async function getFeedCards(params: {
       if (row.criteriaJson) {
         try {
           const parsed = JSON.parse(row.criteriaJson);
-          // 新レコードは 0/1/2 の整数、旧レコードは boolean（`promotional` は文字列）。
-          // `normalizeCriterion` / `normalizePromotional` が両方を 0-2 に吸収する。
+          // 新レコードは 0〜9 の整数、旧レコードは boolean / 0-2（`promotional` は文字列）。
+          // `normalizeCriterion` / `normalizePromotional` が両方を 0-9 に吸収する。
           const isScorable = (v: unknown) =>
             typeof v === "number" || typeof v === "boolean" || typeof v === "string";
           if (

@@ -339,7 +339,7 @@ export function checkAnchorGrounding(topicAnchor: string, bodyText: string): Gat
 // renderRationaleText（Q5: rationaleText のテンプレート化）
 // ─────────────────────────────────────────────────────────────
 
-/** LLM の有用度判定 5 つ（すべて 0-2）。フィールド名は `src/lib/llm/schemas.ts` の
+/** LLM の有用度判定 5 つ（すべて 0-9）。フィールド名は `src/lib/llm/schemas.ts` の
  * `CurationItemSchema` と一致させること。 */
 export interface RationaleUsefulnessFlags {
   firsthand: number;
@@ -379,11 +379,11 @@ const FLAG_ORDER: (keyof typeof USEFULNESS_LABELS)[] = [
 /**
  * Q5: 構造化フィールド（`topicAnchor` + ラベル対象の 4 判定値）から根拠文を決定的に
  * 生成する。LLM の自由文は一切受け取らない。同一入力からは常に同一出力に
- * なる純粋関数。2026-08-30 の 0-2 化以降、ラベルを付けるのは値が `>= 2`
- * （明確に該当）の項目のみ。
+ * なる純粋関数。2026-08-30 の 0-9 化以降、ラベルを付けるのは値が `>= 6`
+ * （はっきり該当）の項目のみ。
  */
 export function renderRationaleText(input: RationaleTemplateInput): string {
-  const activeLabels = FLAG_ORDER.filter((flag) => input.usefulness[flag] >= 2).map(
+  const activeLabels = FLAG_ORDER.filter((flag) => input.usefulness[flag] >= 6).map(
     (flag) => USEFULNESS_LABELS[flag],
   );
 

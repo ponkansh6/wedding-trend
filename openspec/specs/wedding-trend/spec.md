@@ -134,7 +134,7 @@ Next.js 16 (App Router), React 19, TypeScript strict, Tailwind CSS v4, Drizzle O
 して保存する設計（shared_plan/02 案C）を採用している。
 
 - `post_id`: `posts.id` と同じ型（Integer）の主キー。採点対象の投稿。
-- `criteria_json`: 5つの判定項目（`UsefulnessCriteria` 型。すべて 0/1/2 の整数）の
+- `criteria_json`: 5つの判定項目（`UsefulnessCriteria` 型。すべて 0〜9 の整数）の
   オブジェクトを `JSON.stringify()` したテキスト（`firsthand`, `ceremonyDecision`,
   `specific`, `weddingDayContent`, `promotional`）。2026-08-30 に旧仕様
   （5 boolean ＋ `promotional` の `"none"/"light"/"heavy"` 3段階 enum ＋
@@ -503,66 +503,70 @@ spec.md とで想定読者の定義が乖離しないようにするため）。
 ### §9.3 判定項目とスコア計算
 
 **2026-08-30 のモデル改訂（オーナー判断）**: 全判定項目を boolean → 0/1/2 の
-三段階（degree）へ。`specific` を「当日の実施内容の具体性」、`weddingDayContent`
-を「フルパッケージ結婚式（挙式＋披露宴）の当日内容か」に再定義し、旧
+三段階（degree）へ、さらに同日 **0〜9 の整数**へ拡張（小モデルが 0-2 では
+ほぼ全項目に上限値を付けて掲載順が実質新着順になったため、分解能を上げる）。
+`specific` を「当日の実施内容の具体性」、`weddingDayContent` を「厳密に
+挙式・披露宴が実際に行われた当日の実施内容か」に再定義し、旧
 `preDecisionOrPhotoShoot` を廃止して `weddingDayContent = 0` に吸収した
-（フォト婚・前撮り・式場探し・準備段階のみの記事は `weddingDayContent = 0`）。
-判定項目は 5 つ。
+（フォト婚・前撮り・リハーサル・式場探し・準備段階・後日談のみの記事は
+`weddingDayContent = 0`）。判定項目は 5 つ。
 
-LLM には次の 5 項目を **0（該当しない）/ 1（部分的・弱い）/ 2（明確に該当）**
-で判定させ、点数（合計）そのものは出させない（点数は
-`src/lib/scoring/usefulness.ts` の純関数 `computeUsefulnessScore()` がコード側で
-計算する。この分離により、重み調整が再課金ゼロのコード変更で済む）。
+LLM には次の 5 項目を **0〜9 の整数**で判定させ（0=完全に該当しない、
+1〜3=わずかに、4〜6=はっきり該当（標準的な良記事）、7〜8=同種記事の中で
+明確に上位、9=ほぼ完璧で滅多に付けない）、点数（合計）そのものは出させない
+（点数は `src/lib/scoring/usefulness.ts` の純関数 `computeUsefulnessScore()` が
+コード側で計算する。この分離により、重み調整が再課金ゼロのコード変更で済む）。
 
-| 項目                | 定義（0-2）                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `firsthand`         | 書き手が実際に挙式・披露宴を経験した立場から書いているか。新婦本人に限らず、新郎・両家家族、およびプランナー・司会者・カメラマン・装花担当など式に立ち会う職能者の実務経験も含む。2=当事者本人／近しい当事者の実体験、1=経験に触れつつ伝聞や一般論が中心、0=第三者・まとめ・伝聞のみ                                                                                                                                                                        |
-| `ceremonyDecision`  | 挙式・披露宴の**中身**の意思決定（進行・タイムライン・演出・席次・席札・余興・スピーチ・BGM・装花・料理・引出物・ペーパーアイテム・挙式当日の写真/映像・ゲストの過ごしやすさ・当日段取り）に効くか。2=直接効く判断材料が中心、1=間接的に触れる程度、0=ほぼ無関係                                                                                                                                                                                            |
-| `specific`          | **当日の実施内容の具体性**。固有の選択・数値・実際にやったこと／やらなかった理由・現場でどう進んだかの明確さ。2=具体的な選択と理由・数値・場面が明確、1=一部具体的だが要点は抽象的、0=心構え・一般論・感想のみ                                                                                                                                                                                                                                              |
-| `weddingDayContent` | **フルパッケージ結婚式（挙式＋披露宴）の当日の実施内容**を扱っているか。進行の実際の流れ・演出・余興・料理・装花・衣装の着用感・BGMと当日の展開・ゲストの反応・当日のトラブルと対応など。2=当日の実施内容が具体的に描写、1=当日に触れるが準備寄り／断片的、**0=フォトウェディング・前撮り・後撮り等の別撮影、式場探し・見積もり比較・日取り決定・規模や形式の合意形成といった準備段階のみ、あるいは挙式披露宴を伴わない内容**。語彙の有無ではなく実質で判定 |
-| `promotional`       | 事業者の集客・自社サービスへの誘導の度合い。判別基準は「読者が別の会場・別の業者で式を挙げる場合にも役立つか」。0=集客要素が実質的にない、1=言及や導線はあるが主目的は情報提供で他式場でも役立つ（実例紹介・予算感・アイデア等。**減点なし**）、2=文章中で過剰かつ明確に自社サービス・特定式場への誘導（**減点対象**。実例紹介に安易に 2 を付けない）                                                                                                       |
+| 項目                | 定義（0-9）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `firsthand`         | 書き手が実際に挙式・披露宴を経験した立場から書いているか。新婦本人に限らず、新郎・両家家族、およびプランナー・司会者・カメラマン・装花担当など式に立ち会う職能者の実務経験も含む。9に近い=当事者本人が固有のエピソードを多数交えて書いている、中位=当事者だが概説的または近しい立場からの一般論、0=第三者・まとめ・伝聞のみ                                                                                                                                                                                                                               |
+| `ceremonyDecision`  | 挙式・披露宴の**中身**の意思決定（進行・タイムライン・演出・席次・席札・余興・スピーチ・BGM・装花・料理・引出物・ペーパーアイテム・挙式当日の写真/映像・ゲストの過ごしやすさ・当日段取り）に効くか。高い=複数項目について「何を・なぜそう決めたか」の判断材料が豊富、中位=関わる話題に触れる、0=ほぼ無関係                                                                                                                                                                                                                                                |
+| `specific`          | **当日の実施内容の具体性**。固有の選択・数値・実際にやったこと／やらなかった理由・現場でどう進んだかの明確さ。高い=複数の場面で具体的な選択・数値・理由が詳述、中位=一部具体的だが要点は抽象的、0=心構え・一般論・感想のみ                                                                                                                                                                                                                                                                                                                                |
+| `weddingDayContent` | **厳密に「挙式・披露宴が実際に行われた当日」の実施内容**を扱っているか。当日の進行の流れ・その場の演出/余興/スピーチ・料理・装花・衣装・BGMと場面転換・ゲストのその場の反応・当日のトラブルと対応など、**式当日に会場で起きたこと**に限る。高い=当日の複数の場面が時系列・具体的に描写、中位=当日に触れるが断片的、**0=前撮り・後撮り・フォトウェディング等の別日撮影、リハーサル、前日までの準備・搬入、式場探し・見積もり比較・日取り決定・規模や形式の合意形成、後日談・振り返りのみ、あるいは挙式披露宴を伴わない内容**。語彙の有無ではなく実質で判定 |
+| `promotional`       | 事業者の集客・自社サービスへの誘導の度合い。判別基準は「読者が別の会場・別の業者で式を挙げる場合にも役立つか」。0〜1=集客要素が実質的にない、中位=言及や導線はあるが主目的は情報提供で他式場でも役立つ（**減点なし**）、7以上=文章中で過剰かつ明確に自社サービス・特定式場への誘導（**減点対象**。実例紹介に安易に高得点を付けない）                                                                                                                                                                                                                      |
 
 スコア計算式（`USEFULNESS_GATE_BONUS` 等の重み定数は `src/lib/constants.ts`
 に定義する。同じ式が純関数 `src/lib/scoring/usefulness.ts` の
 `computeUsefulnessScore()` と SQL 文字列 `src/lib/db/query.ts` の
 `USEFULNESS_SCORE_SQL` の2箇所に手書きで存在し、両者の一致は
-`tests/feed-order-parity.test.ts` が全 3^5 = 243 通りの判定組み合わせで検証する）:
+`tests/feed-order-parity.test.ts` が判定値の代表値 `{0,1,5,7,9}` の全
+組み合わせ（5^5 = 3125 通り）で検証する）:
 
 ```
-gate  = (ceremonyDecision >= 1 && weddingDayContent >= 1) ? USEFULNESS_GATE_BONUS(16) : 0
+gate  = (ceremonyDecision >= 1 && weddingDayContent >= 1) ? USEFULNESS_GATE_BONUS(70) : 0
 score = gate
       + USEFULNESS_WEIGHT_CEREMONY_DECISION(2) * ceremonyDecision
       + USEFULNESS_WEIGHT_FIRSTHAND(3)         * firsthand
       + USEFULNESS_WEIGHT_SPECIFIC(2)          * specific
       + USEFULNESS_WEIGHT_WEDDING_DAY(2)       * weddingDayContent
-      - USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY(4) * (promotional === 2)
+      - USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY(4) * (promotional >= 7)
 ```
 
-各項目は `重み × 値(0/1/2)` を独立に加算する。`ceremonyDecision` と
+各項目は `重み × 値(0〜9)` を独立に加算する。`ceremonyDecision` と
 `weddingDayContent` はそれぞれ加算項でありつつ、両方 `>= 1` のときだけ
-`USEFULNESS_GATE_BONUS` を付ける**ゲート**でもある。`promotional` は `2` の
-ときのみ `USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY(4)` を引く（`0`/`1` は無罰則）。
+`USEFULNESS_GATE_BONUS` を付ける**ゲート**でもある。`promotional` は `>= 7` の
+ときのみ `USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY(4)` を引く（`0〜6` は無罰則）。
 
 **ゲートの意義**: 単純な加算項だけにすると「衣装だけの記事だが firsthand=2・
 specific=2・weddingDayContent=2」が「式の中身に効くが浅い記事」を上回り、
 「これから式の中身を決める読者に効く記事を優先する」という編集方針が反転する。
 旧 `preDecisionOrPhotoShoot`（式決定前/別撮影の話題）は `weddingDayContent = 0`
 に吸収済み——フォト婚・前撮り・式場探し・準備段階のみの記事は
-`weddingDayContent = 0` となりゲート不通過帯（`< 16`）に沈む。
+`weddingDayContent = 0` となりゲート不通過帯（`< 70`）に沈む。
 
 **強支配（strong domination）不変条件**: ゲートを通過した記事は、たとえ
-`promotional = 2` の減点を受けていても、ゲート不通過帯のどれだけ質が高い記事にも
+`promotional >= 7` の減点を受けていても、ゲート不通過帯のどれだけ質が高い記事にも
 常に勝つ。
 
-- ゲート不通過の最大 = `2×(W_FIRSTHAND + W_SPECIFIC + W_WEDDING_DAY)` = 2×(3+2+2) = 14
-  （`ceremonyDecision = 0` の場合。`weddingDayContent = 0` かつ `ceremonyDecision = 2`
-  の場合も `2×(W_CEREMONY + W_FIRSTHAND + W_SPECIFIC)` = 14）
+- ゲート不通過の最大 = `9×(W_FIRSTHAND + W_SPECIFIC + W_WEDDING_DAY)` = 9×(3+2+2) = 63
+  （`ceremonyDecision = 0` の場合。`weddingDayContent = 0` かつ `ceremonyDecision = 9`
+  の場合も `9×(W_CEREMONY + W_FIRSTHAND + W_SPECIFIC)` = 63）
 - ゲート通過の最小 = `GATE_BONUS + W_CEREMONY×1 + W_WEDDING_DAY×1 - PROMO_PENALTY`
-  （`cd=1, wdc=1, firsthand=0, specific=0, promotional=2`）= 16 + 2 + 2 - 4 = 16 > 14
-- 不変条件 `GATE_BONUS + W_CEREMONY + W_WEDDING_DAY - PROMO_PENALTY > 2×(W_FIRSTHAND + W_SPECIFIC + W_WEDDING_DAY)`
+  （`cd=1, wdc=1, firsthand=0, specific=0, promotional=9`）= 70 + 2 + 2 - 4 = 70 > 63
+- 不変条件 `GATE_BONUS + W_CEREMONY + W_WEDDING_DAY - PROMO_PENALTY > 9×(W_FIRSTHAND + W_SPECIFIC + W_WEDDING_DAY)`
   を `tests/usefulness-score.test.ts` で定数から式を組み立てて固定している。
-  `USEFULNESS_GATE_BONUS` を 12→16 に引き上げたのは、0-2 化で各項の最大寄与が
-  倍になり 12 ではこの不変条件が破れていたため。
+  `USEFULNESS_GATE_BONUS` を 16→70 に引き上げたのは、0-9 化で各項の最大寄与が
+  9/2 倍になり 16 ではこの不変条件が破れていたため。
 
 **判断材料が無ければ 0 に倒す**: どの項目も抜粋から情報が得られない場合は 0
 とする（あるだろうと推測して 1/2 にしない。§9.4）。これにより情報不足の記事を
@@ -571,22 +575,21 @@ specific=2・weddingDayContent=2」が「式の中身に効くが浅い記事」
 **後方互換（DB マイグレーションを行わない設計判断）**: 旧 shape の
 `criteria_json`（5 boolean ＋ `promotional` の文字列 enum ＋ `preDecisionOrPhotoShoot`
 キー）は読み取り時に `normalizeCriterion` / `normalizePromotional`
-（`src/lib/scoring/usefulness.ts`）が 0-2 に吸収する: 旧 `true → 2`、`false → 0`、
-`promotional` は `heavy → 2 / light → 1 / none → 0`、旧 boolean `promotional true → 1`
-（減点対象の 2 には昇格させない）。SQL 側は `json_extract` が JSON の `true`/`false`
-を `1`/`0` に変換するため旧 boolean 行は自然に 0/1 として読める。この差
-（旧 `true` が 1、新 `2` が 2）は `CURATION_PROMPT_VERSION` bump ＋ 全件
-再キュレーションが速やかに解消する。
+（`src/lib/scoring/usefulness.ts`）が 0-9 に吸収する: 旧 `true → 9`、`false → 0`、
+`promotional` は `heavy → 9 / light → 4 / none → 0`、旧 boolean `promotional true → 4`
+（減点対象の 7 には昇格させない）。SQL 側は `json_extract` が JSON の `true`/`false`
+を `1`/`0` に変換するため旧 boolean 行は自然に 0/1 として読める。この差は
+`CURATION_PROMPT_VERSION` bump ＋ 全件再キュレーションが速やかに解消する。
 
 **重み**: `firsthand`（3）> `ceremonyDecision`/`specific`/`weddingDayContent`（各 2）は、
 抜粋（記事冒頭）からの判定しやすさに比例させたもの。`promotional` の減点（4）は
 ゲート通過記事でも集客・誘導に支配された記事を上位に出さない編集方針の強さを
-反映し、`promotional === 2` のときのみ発火する。
+反映し、`promotional >= 7` のときのみ発火する。
 
 ### §9.4 判断材料が無ければ 0 に倒す
 
 LLM が判定に必要な情報を十分に得られない場合（抜粋が短すぎる等）、各項目は
-1/2 ではなく `0` に倒す。自信を持って誤判定して不適切な記事を上位に
+正の値ではなく `0` に倒す。自信を持って誤判定して不適切な記事を上位に
 押し上げるより、判定を保留して新着順相当の位置に留まる方が実害が小さい
 という判断による。
 
@@ -594,8 +597,8 @@ LLM が判定に必要な情報を十分に得られない場合（抜粋が短�
 
 LLM によるキュレーションが一時的に失敗した投稿、および原文テキストが存在せ
 ず要約を生成できない投稿（次章 §10 の要件 4. 参照）には、`src/lib/scoring/usefulness.ts`
-の `UNSCORED_USEFULNESS_SCORE`（固定値 4）を用いる。この値は現在の式では
-「ゲート通過帯の下限（`USEFULNESS_GATE_BONUS` = 16）より下、かつ全項目
+の `UNSCORED_USEFULNESS_SCORE`（固定値 20）を用いる。この値は現在の式では
+「ゲート通過帯の下限（`USEFULNESS_GATE_BONUS` = 70）より下、かつ全項目
 0（0点）より上」の**楽観的な中位**に意図的に置いており、無条件で最下位
 に落とすことはしない。最下位に固定してしまうと、一時的な LLM 失敗によって
 新着の良記事が静かに埋もれてしまうためである。次回 ingest で
@@ -618,7 +621,7 @@ bump しなければならない。bump がないと `getStaleCurationCandidates
 - **pre-commit チェック**: `scripts/check-prompt-version-bump.sh` が
   `prompts.ts` が staged なのに `CURATION_PROMPT_VERSION` が変更されていない
   場合に警告する（advisory・非ブロッキング）。
-- **履歴**: v2 で有用度判定5項目追加、v3 で `preDecisionOrPhotoShoot` 追加、v4 で見出し修正、v10 で topicAnchor 緩和、**v11 (2026-08-30) で全判定項目 0-2 化・`specific`/`weddingDayContent` 再定義・`preDecisionOrPhotoShoot` 廃止**。v4 以前の
+- **履歴**: v2 で有用度判定5項目追加、v3 で `preDecisionOrPhotoShoot` 追加、v4 で見出し修正、v10 で topicAnchor 緩和、**v11 (2026-08-30) で全判定項目 0-2 化・`specific`/`weddingDayContent` 再定義・`preDecisionOrPhotoShoot` 廃止**、v12 (2026-08-30) でスケール使い方の校正、**v13 (2026-08-30) で判定レンジ 0-2 → 0〜9 拡張・`weddingDayContent` を「厳密に式当日」と強調・`USEFULNESS_GATE_BONUS` 16→70**。v4 以前の
   `prompts.ts` 変更（PR要素のenum化、コミット `a8d4f0f`）では
   version bump が見落とされ、87件全件の再スコアが未実施だった
   （`shared_plan/11` §4 参照）。
@@ -642,7 +645,7 @@ bump しなければならない。bump がないと `getStaleCurationCandidates
     書き換えてはならない**——SQLite の `->` は JSON テキスト（真偽値なら
     `'true'`/`'false'`）を返すため `= 1` の比較が常に false になり、
     ゲート条件が静かに常時不通過になる（`->>` なら等価だが、実績のある
-    `json_extract` に統一する）。**`promotional` は 2026-08-30 に数値 0/1/2 へ再変更した**が、旧レコード（文字列 enum）互換のため `USEFULNESS_SCORE_SQL` の `promotional` 減点は `CASE WHEN json_extract(criteria_json, '$.promotional') = 2 OR json_extract(...) = 'heavy' THEN 1 ELSE 0 END` で新旧両対応にしている。`json_extract` は文字列値をクォート
+    `json_extract` に統一する）。**`promotional` は 2026-08-30 に数値 0/1/2、さらに 0〜9 へ再変更した**が、旧レコード（文字列 enum）互換のため `USEFULNESS_SCORE_SQL` の `promotional` 減点は `CASE WHEN json_extract(criteria_json, '$.promotional') = 'heavy' OR (json_extract(...) + 0) >= 7 THEN 1 ELSE 0 END` で新旧両対応にしている。`+ 0` は数値文脈を強制するためで、これが無いと SQLite の型親和性により `'light' >= 7` のような文字列比較が予期せず真になりうる。`json_extract` は文字列値をクォート
     無しの TEXT（`heavy`）で返すため比較対象は `'heavy'` でよいが、これを
     `->` に書き換えると JSON テキストとして `'"heavy"'`（ダブルクォート
     込み）が返るようになり、`= 'heavy'` に永久に一致しなくなる——つまり

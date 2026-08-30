@@ -60,8 +60,9 @@ export const LLM_SINGLE_MAX_TOKENS = 800;
  * v10 (2026-08-29, オーナー判断): topicAnchor のゲート大幅緩和に伴い RATIONALE_RULES を再設計。(a) 本文語句の逐語使用指定を削除（記事内容に即していれば自然な言い換えを許容）、(b) 文型指定（「問いを立てる節にする・体言止め禁止」）を削除、(c) 「この記事ならではの独自性を続きを読みたくなる形で提示する」クリック誘引ルールを追加。数値・PII・煽り語の禁止は維持。bump により全投稿の curationSignature が不一致になり、backfill-usefulness.mjs --force で一括再キュレーションできる（spec §10-3）。
  * v11 (2026-08-30, オーナー判断): 有用度判定を全項目 boolean → 0/1/2 の三段階へ。`specific` を「当日の実施内容の具体性」、`weddingDayContent` を「フルパッケージ結婚式の当日内容か」に再定義し、`preDecisionOrPhotoShoot` を廃止（`weddingDayContent = 0` に吸収）。判定項目は 5 つ（firsthand / ceremonyDecision / specific / weddingDayContent / promotional、すべて 0-2）。USEFULNESS_CRITERIA_RULES を全面書き換え。bump により全投稿再キュレーション（spec §9.3）。
  * v12 (2026-08-30, オーナー判断): v11 再キュレーションで小モデルが 5 項目ほぼすべて 2 を返し、上位 21 件が同点（score 34）で掲載順が実質新着順になっていた。USEFULNESS_CRITERIA_RULES の「スケールの使い方」を書き換え、`1 = 該当する（標準）` / `2 = 例外的に突出している場合のみ（目安: 上位 2〜3 割）` / 迷ったら低い方、を明示。bump により全投稿再キュレーション。
+ * v13 (2026-08-30, オーナー判断): v12 の 0-2 でも小モデルの分解能が不足したため、判定レンジを 0-2 → 0〜9 の整数に拡張（スケール帯を明示）。あわせて weddingDayContent を「厳密に挙式・披露宴が実際に行われた当日の実施内容」と強調し、前撮り・リハーサル・準備・式場探し・後日談のみは 0 とする指示を追加。重み定数据え置き、USEFULNESS_GATE_BONUS 16→70。bump により全投稿再キュレーション。
  */
-export const CURATION_PROMPT_VERSION = 12;
+export const CURATION_PROMPT_VERSION = 13;
 export const RATIONALE_PROMPT_VERSION = "rationale-v2";
 /** フィード表示条件のフェーズ。phase1: 移行期（レガシー対 OR 根拠存在）/ phase2: 根拠のみ。 */
 export const RATIONALE_DISPLAY_PHASE = "phase1" as const;
@@ -356,36 +357,36 @@ export const INGEST_LEASE_TTL_MS = 2 * 60 * 1000;
 /**
  * ゲート分（`ceremonyDecision >= 1 かつ weddingDayContent >= 1` のときに加算）。
  *
- * 2026-08-30 の 0-2 三段階化に伴い 12 → 16 に再計算。**強支配不変条件**
- * （ゲート通過帯は常にゲート不通過帯に優先する）:
- * - ゲート不通過の最大 = `2×(W_FIRSTHAND + W_SPECIFIC + W_WEDDING_DAY)` = 2×(3+2+2) = 14
+ * 2026-08-30 の 0-2 三段階化に伴い 12 → 16 に再計算。同日 0-9 拡張に伴い 16 → 70。
+ * **強支配不変条件**（ゲート通過帯は常にゲート不通過帯に優先する）:
+ * - ゲート不通過の最大 = `9×(W_FIRSTHAND + W_SPECIFIC + W_WEDDING_DAY)` = 9×(3+2+2) = 63
  *   （`ceremonyDecision = 0` かつ他が最大の場合。`weddingDayContent = 0` かつ
- *   `ceremonyDecision = 2` の場合も `2×(W_CEREMONY + W_FIRSTHAND + W_SPECIFIC)` = 14）
+ *   `ceremonyDecision = 9` の場合も `9×(W_CEREMONY + W_FIRSTHAND + W_SPECIFIC)` = 63）
  * - ゲート通過の最小 = `GATE_BONUS + W_CEREMONY×1 + W_WEDDING_DAY×1 - PROMO_PENALTY`
- *   （`cd=1, wdc=1, firsthand=0, specific=0, promotional=2`）= 16 + 2 + 2 - 4 = 16
- * - 16 > 14 で成立。不変条件
- *   `GATE_BONUS + W_CEREMONY + W_WEDDING_DAY - PROMO_PENALTY > 2×(W_FIRSTHAND + W_SPECIFIC + W_WEDDING_DAY)`
+ *   （`cd=1, wdc=1, firsthand=0, specific=0, promotional=9`）= 70 + 2 + 2 - 4 = 70
+ * - 70 > 63 で成立。不変条件
+ *   `GATE_BONUS + W_CEREMONY + W_WEDDING_DAY - PROMO_PENALTY > 9×(W_FIRSTHAND + W_SPECIFIC + W_WEDDING_DAY)`
  *   を `tests/usefulness-score.test.ts` で定数から式を組み立てて固定している。
  */
-export const USEFULNESS_GATE_BONUS = 16;
+export const USEFULNESS_GATE_BONUS = 70;
 
-/** 実体験に基づく記事であることの加点（`weight × value(0-2)`）。抜粋段階で判定しやすいため重め。 */
+/** 実体験に基づく記事であることの加点（`weight × value(0-9)`）。抜粋段階で判定しやすいため重め。 */
 export const USEFULNESS_WEIGHT_FIRSTHAND = 3;
 
 /**
  * `ceremonyDecision`（挙式・披露宴の中身の意思決定に効くか）の加点
- * （`weight × value(0-2)`）。2026-08-30 の 0-2 化以前はゲート専用でこの加点は無かった。
+ * （`weight × value(0-9)`）。2026-08-30 の 0-2 化以前はゲート専用でこの加点は無かった。
  */
 export const USEFULNESS_WEIGHT_CEREMONY_DECISION = 2;
 
-/** 当日の実施内容の具体性の加点（`weight × value(0-2)`）。本文中盤以降でないと判定しにくいため firsthand より軽め。 */
+/** 当日の実施内容の具体性の加点（`weight × value(0-9)`）。本文中盤以降でないと判定しにくいため firsthand より軽め。 */
 export const USEFULNESS_WEIGHT_SPECIFIC = 2;
 
-/** フルパッケージ結婚式（挙式＋披露宴）の当日内容を扱っているかの加点（`weight × value(0-2)`）。
+/** フルパッケージ結婚式（挙式＋披露宴）の当日内容を扱っているかの加点（`weight × value(0-9)`）。
  * `value` は強支配不変条件（`USEFULNESS_GATE_BONUS` の JSDoc 参照）を維持する必要から 2 に据え置く。 */
 export const USEFULNESS_WEIGHT_WEDDING_DAY = 2;
 
-/** 事業者による集客が主目的の記事に対する減点。`promotional === 2`（過剰かつ明確な誘導）のときのみ発火する。 */
+/** 事業者による集客が主目的の記事に対する減点。`promotional >= 7`（過剰かつ明確な誘導）のときのみ発火する。 */
 export const USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY = 4;
 
 // ── HTTP ステータス ───────────────────────────────────────────

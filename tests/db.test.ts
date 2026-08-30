@@ -480,11 +480,11 @@ describe("Database Repository and Queries", () => {
       const buildUpdate = (
         url: string,
         criteria: {
-          firsthand: 0 | 1 | 2;
-          ceremonyDecision: 0 | 1 | 2;
-          specific: 0 | 1 | 2;
-          weddingDayContent: 0 | 1 | 2;
-          promotional: 0 | 1 | 2;
+          firsthand: number;
+          ceremonyDecision: number;
+          specific: number;
+          weddingDayContent: number;
+          promotional: number;
         } | null,
       ) => ({
         url,
@@ -506,7 +506,7 @@ describe("Database Repository and Queries", () => {
       });
 
       await markCurated([
-        // gate(16) + W_CD×2(4) + W_F×2(6) + W_S×2(4) + W_WDC×2(4) = 34
+        // gate(70) + W_CD×2(4) + W_F×2(6) + W_S×2(4) + W_WDC×2(4) = 88
         buildUpdate("https://example.com/a", {
           firsthand: 2,
           ceremonyDecision: 2,
@@ -514,7 +514,7 @@ describe("Database Repository and Queries", () => {
           weddingDayContent: 2,
           promotional: 0,
         }),
-        // gate(16) + W_CD×2(4) + W_WDC×2(4) = 24
+        // gate(70) + W_CD×2(4) + W_WDC×2(4) = 78
         buildUpdate("https://example.com/b", {
           firsthand: 0,
           ceremonyDecision: 2,
@@ -530,16 +530,16 @@ describe("Database Repository and Queries", () => {
           weddingDayContent: 2,
           promotional: 0,
         }),
-        // ceremonyDecision=0 のためゲート不通過: W_F×2(6) + W_S×2(4) + W_WDC×2(4) = 14
+        // ceremonyDecision=0 のためゲート不通過だが最大級: W_F×9(27) + W_S×9(18) + W_WDC×9(18) = 63
         buildUpdate("https://example.com/d", {
-          firsthand: 2,
+          firsthand: 9,
           ceremonyDecision: 0,
-          specific: 2,
-          weddingDayContent: 2,
+          specific: 9,
+          weddingDayContent: 9,
           promotional: 0,
         }),
         // weddingDayContent=0（フォト婚・準備段階のみ = 旧 preDecisionOrPhotoShoot 吸収）
-        // のためゲート不通過: W_CD×1(2) + W_F×1(3) = 5。d(14) より下に沈む。
+        // のためゲート不通過: W_CD×1(2) + W_F×1(3) = 5。d(63) より下に沈む。
         buildUpdate("https://example.com/p", {
           firsthand: 1,
           ceremonyDecision: 1,
@@ -547,7 +547,8 @@ describe("Database Repository and Queries", () => {
           weddingDayContent: 0,
           promotional: 0,
         }),
-        // 有用度未スコア（post_usefulness 行なし）: UNSCORED_USEFULNESS_SCORE(4) 扱い
+        // 有用度未スコア（post_usefulness 行なし）: UNSCORED_USEFULNESS_SCORE(20) 扱い。
+        // d(63) より下、p(5) より上。
         buildUpdate("https://example.com/c", null),
       ]);
 
@@ -557,8 +558,8 @@ describe("Database Repository and Queries", () => {
         "https://example.com/b2",
         "https://example.com/b",
         "https://example.com/d",
-        "https://example.com/p",
         "https://example.com/c",
+        "https://example.com/p",
       ]);
     });
 
