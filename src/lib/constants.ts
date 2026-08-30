@@ -59,8 +59,9 @@ export const LLM_SINGLE_MAX_TOKENS = 800;
  * v8 (2026-08-27, shared_plan/15): topicAnchor を「結論を出さずに記事が扱う具体的な判断・場面・選択肢を体言止めで名指しする」よう RATIONALE_RULES を書き換えた。bump により全投稿の curationSignature が不一致になり、backfill-usefulness.mjs で再キュレーションされる。
  * v10 (2026-08-29, オーナー判断): topicAnchor のゲート大幅緩和に伴い RATIONALE_RULES を再設計。(a) 本文語句の逐語使用指定を削除（記事内容に即していれば自然な言い換えを許容）、(b) 文型指定（「問いを立てる節にする・体言止め禁止」）を削除、(c) 「この記事ならではの独自性を続きを読みたくなる形で提示する」クリック誘引ルールを追加。数値・PII・煽り語の禁止は維持。bump により全投稿の curationSignature が不一致になり、backfill-usefulness.mjs --force で一括再キュレーションできる（spec §10-3）。
  * v11 (2026-08-30, オーナー判断): 有用度判定を全項目 boolean → 0/1/2 の三段階へ。`specific` を「当日の実施内容の具体性」、`weddingDayContent` を「フルパッケージ結婚式の当日内容か」に再定義し、`preDecisionOrPhotoShoot` を廃止（`weddingDayContent = 0` に吸収）。判定項目は 5 つ（firsthand / ceremonyDecision / specific / weddingDayContent / promotional、すべて 0-2）。USEFULNESS_CRITERIA_RULES を全面書き換え。bump により全投稿再キュレーション（spec §9.3）。
+ * v12 (2026-08-30, オーナー判断): v11 再キュレーションで小モデルが 5 項目ほぼすべて 2 を返し、上位 21 件が同点（score 34）で掲載順が実質新着順になっていた。USEFULNESS_CRITERIA_RULES の「スケールの使い方」を書き換え、`1 = 該当する（標準）` / `2 = 例外的に突出している場合のみ（目安: 上位 2〜3 割）` / 迷ったら低い方、を明示。bump により全投稿再キュレーション。
  */
-export const CURATION_PROMPT_VERSION = 11;
+export const CURATION_PROMPT_VERSION = 12;
 export const RATIONALE_PROMPT_VERSION = "rationale-v2";
 /** フィード表示条件のフェーズ。phase1: 移行期（レガシー対 OR 根拠存在）/ phase2: 根拠のみ。 */
 export const RATIONALE_DISPLAY_PHASE = "phase1" as const;
