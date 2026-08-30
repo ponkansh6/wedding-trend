@@ -347,7 +347,6 @@ function criteriaOf(curation: CurationResult) {
     specific: curation.specific,
     weddingDayContent: curation.weddingDayContent,
     promotional: curation.promotional,
-    preDecisionOrPhotoShoot: curation.preDecisionOrPhotoShoot,
   };
 }
 

@@ -25,24 +25,21 @@ vi.mock("next/cache", () => ({
 
 const BASE_DATE = Date.UTC(2024, 0, 1);
 
-const PROMOTIONAL_LEVELS = ["none", "light", "heavy"] as const;
+const TOTAL_COMBOS = 3 ** 5; // 5 軸 × {0,1,2} = 243
 
 /**
- * `mask`（0〜95、全96通り）から6項目分の判定値を組み立てる。
- * promotional は3値の enum になったため、下位の3進数1桁を promotional に、
- * 残りの5ビットを他5項目のブール値に割り当てる（5ビット×3値=32×3=96通り）。
- * ビット・桁の割り当て順序自体に意味は無く、全96通りを網羅することが目的。
+ * `mask`（0〜242、全 3^5 = 243 通り）から 5 項目分の判定値（各 0/1/2）を
+ * 組み立てる。mask を 5 桁の 3 進数として各桁を 1 項目に割り当てる。
+ * 桁の割り当て順序自体に意味は無く、全 243 通りを網羅することが目的。
  */
 function criteriaFromMask(mask: number): UsefulnessCriteria {
-  const promotionalIndex = mask % 3;
-  const boolBits = Math.floor(mask / 3);
+  const digit = (i: number) => (Math.floor(mask / 3 ** i) % 3) as 0 | 1 | 2;
   return {
-    firsthand: ((boolBits >> 0) & 1) === 1,
-    ceremonyDecision: ((boolBits >> 1) & 1) === 1,
-    specific: ((boolBits >> 2) & 1) === 1,
-    weddingDayContent: ((boolBits >> 3) & 1) === 1,
-    promotional: PROMOTIONAL_LEVELS[promotionalIndex],
-    preDecisionOrPhotoShoot: ((boolBits >> 4) & 1) === 1,
+    firsthand: digit(0),
+    ceremonyDecision: digit(1),
+    specific: digit(2),
+    weddingDayContent: digit(3),
+    promotional: digit(4),
   };
 }
 
@@ -65,11 +62,11 @@ describe("SQL score (USEFULNESS_SCORE_SQL) matches computeUsefulnessScore()", ()
     await setupTestDb();
   });
 
-  it("all 96 combinations of the 5 boolean criteria × 3-value promotional: getFeedCards() order matches computeUsefulnessScore() order", async () => {
+  it("all 243 combinations of the 5 criteria (each 0/1/2): getFeedCards() order matches computeUsefulnessScore() order", async () => {
     // publishedAt をすべて別の値にしておくことで、スコアが同点になった場合でも
     // 期待順序が publishedAt 降順で一意に決まるようにする（id タイブレークに
     // 依存しない）。
-    const combos = Array.from({ length: 96 }, (_, mask) => {
+    const combos = Array.from({ length: TOTAL_COMBOS }, (_, mask) => {
       const url = `https://example.com/parity/${mask}`;
       const publishedAt = new Date(BASE_DATE + mask * 60_000).toISOString();
       return { mask, url, publishedAt, criteria: criteriaFromMask(mask) };
@@ -107,7 +104,7 @@ describe("SQL score (USEFULNESS_SCORE_SQL) matches computeUsefulnessScore()", ()
       })
       .map((c) => c.url);
 
-    const feedCards = await getFeedCards({ sourceType: "blog", limit: 100 });
+    const feedCards = await getFeedCards({ sourceType: "blog", limit: 300 });
     expect(feedCards.map((c) => c.url)).toEqual(expectedOrder);
   });
 
@@ -136,12 +133,11 @@ describe("SQL score (USEFULNESS_SCORE_SQL) matches computeUsefulnessScore()", ()
           // markCurated 経由だと UsefulnessCriteria 型で全 6 キーが強制される
           // ため、まず全 false で書き込んでから下で weddingDayContent キーを欠落させる。
           criteria: {
-            firsthand: true,
-            ceremonyDecision: true,
-            specific: true,
-            weddingDayContent: false,
-            promotional: "none",
-            preDecisionOrPhotoShoot: false,
+            firsthand: 2,
+            ceremonyDecision: 2,
+            specific: 2,
+            weddingDayContent: 0,
+            promotional: 0,
           },
         },
       },
@@ -157,12 +153,11 @@ describe("SQL score (USEFULNESS_SCORE_SQL) matches computeUsefulnessScore()", ()
           postId: states.get("https://example.com/explicit-false")!.id,
           modelId: "test-model",
           criteria: {
-            firsthand: true,
-            ceremonyDecision: true,
-            specific: true,
-            weddingDayContent: false,
-            promotional: "none",
-            preDecisionOrPhotoShoot: false,
+            firsthand: 2,
+            ceremonyDecision: 2,
+            specific: 2,
+            weddingDayContent: 0,
+            promotional: 0,
           },
         },
       },
@@ -176,12 +171,11 @@ describe("SQL score (USEFULNESS_SCORE_SQL) matches computeUsefulnessScore()", ()
       .update(postUsefulnessCriteria)
       .set({
         criteriaJson: JSON.stringify({
-          firsthand: true,
-          ceremonyDecision: true,
-          specific: true,
+          firsthand: 2,
+          ceremonyDecision: 2,
+          specific: 2,
           // weddingDayContent キーが存在しない
-          promotional: "none",
-          preDecisionOrPhotoShoot: false,
+          promotional: 0,
         }),
       })
       .where(eq(postUsefulnessCriteria.postId, missingKeyPostId));
@@ -231,12 +225,11 @@ describe("SQL score (USEFULNESS_SCORE_SQL) matches computeUsefulnessScore()", ()
           postId: states.get("https://example.com/gate-only")!.id,
           modelId: "test-model",
           criteria: {
-            firsthand: false,
-            ceremonyDecision: true,
-            specific: false,
-            weddingDayContent: false,
-            promotional: "none",
-            preDecisionOrPhotoShoot: false,
+            firsthand: 0,
+            ceremonyDecision: 2,
+            specific: 0,
+            weddingDayContent: 2,
+            promotional: 0,
           },
         },
       },
@@ -246,7 +239,7 @@ describe("SQL score (USEFULNESS_SCORE_SQL) matches computeUsefulnessScore()", ()
     const unscoredIndex = feedCards.findIndex((c) => c.url === "https://example.com/unscored");
     const gateOnlyIndex = feedCards.findIndex((c) => c.url === "https://example.com/gate-only");
 
-    // UNSCORED_USEFULNESS_SCORE(3) はゲート通過（12点）より下 → gate-only が先。
+    // UNSCORED_USEFULNESS_SCORE(4) はゲート通過帯（>= 16）より下 → gate-only が先。
     expect(gateOnlyIndex).toBeLessThan(unscoredIndex);
     expect(unscoredIndex).toBeGreaterThanOrEqual(0);
     void UNSCORED_USEFULNESS_SCORE; // 参照のみ（実際の値は computeUsefulnessScore 側のテストで固定済み）
@@ -254,7 +247,7 @@ describe("SQL score (USEFULNESS_SCORE_SQL) matches computeUsefulnessScore()", ()
 
   it("malformed criteria_json: the broken row alone falls back to UNSCORED_USEFULNESS_SCORE, and every other row in the lane still scores and orders normally (json_valid guard)", async () => {
     // 1行の JSON 破損がレーン全体を [] にしてしまわないことを確認する。
-    // gatePasser(12) > richNonGate(7) > {malformed, noRow}(3, publishedAt で
+    // gatePasser(24) > richNonGate(14) > {malformed, noRow}(4, publishedAt で
     // タイブレーク) > allFalse(0) という厳密な順序まで検証することで、壊れた
     // 行の周囲の健全な行が「巻き込まれずに」正しくスコアされることも保証する。
     await upsertPosts([
@@ -288,43 +281,39 @@ describe("SQL score (USEFULNESS_SCORE_SQL) matches computeUsefulnessScore()", ()
     });
 
     await markCurated([
-      // score = USEFULNESS_GATE_BONUS のみ = 12
+      // ゲート通過（cd=2, wdc=2）→ GATE_BONUS + W_CEREMONY×2 + W_WDC×2 = 16+4+4 = 24
       usefulnessFor("https://example.com/gate-passer", {
-        firsthand: false,
-        ceremonyDecision: true,
-        specific: false,
-        weddingDayContent: false,
-        promotional: "none",
-        preDecisionOrPhotoShoot: false,
+        firsthand: 0,
+        ceremonyDecision: 2,
+        specific: 0,
+        weddingDayContent: 2,
+        promotional: 0,
       }),
-      // ゲート不通過 → firsthand+specific+weddingDayContent = 7
+      // ゲート不通過（cd=0）→ W_FIRSTHAND×2 + W_SPECIFIC×2 + W_WDC×2 = 6+4+4 = 14
       usefulnessFor("https://example.com/rich-non-gate", {
-        firsthand: true,
-        ceremonyDecision: false,
-        specific: true,
-        weddingDayContent: true,
-        promotional: "none",
-        preDecisionOrPhotoShoot: false,
+        firsthand: 2,
+        ceremonyDecision: 0,
+        specific: 2,
+        weddingDayContent: 2,
+        promotional: 0,
       }),
       // criteria の中身はどうせ後で JSON ごと壊すので内容は不問（ここでは
       // gate-passer 相当の高スコアを装う——それでも壊れた後は UNSCORED(3) まで
       // 落ちることを示すのが本テストの主眼）。
       usefulnessFor("https://example.com/malformed", {
-        firsthand: true,
-        ceremonyDecision: true,
-        specific: true,
-        weddingDayContent: true,
-        promotional: "none",
-        preDecisionOrPhotoShoot: false,
+        firsthand: 2,
+        ceremonyDecision: 2,
+        specific: 2,
+        weddingDayContent: 2,
+        promotional: 0,
       }),
       // score = 0（全 false）
       usefulnessFor("https://example.com/all-false", {
-        firsthand: false,
-        ceremonyDecision: false,
-        specific: false,
-        weddingDayContent: false,
-        promotional: "none",
-        preDecisionOrPhotoShoot: false,
+        firsthand: 0,
+        ceremonyDecision: 0,
+        specific: 0,
+        weddingDayContent: 0,
+        promotional: 0,
       }),
     ]);
     // no-row は post_usefulness_criteria 行を一切作らない（usefulness を渡さない）。
@@ -389,17 +378,15 @@ describe("SQL score (USEFULNESS_SCORE_SQL) matches computeUsefulnessScore()", ()
       usefulness: {
         postId: states.get(url)!.id,
         modelId: "test-model",
-        // markCurated 経由では型上 PromotionalLevel しか書けないため、まず
-        // 妥当な enum 値で書き込んでから、下で criteria_json を旧 boolean に
-        // 直接書き換える。
+        // まず妥当な整数値で書き込んでから、下で criteria_json を
+        // v11 以前の完全なレガシー shape に直接書き換える。
         criteria: {
-          firsthand: true,
-          ceremonyDecision: true,
-          specific: false,
-          weddingDayContent: false,
-          promotional: "none" as const,
-          preDecisionOrPhotoShoot: false,
-        },
+          firsthand: 2,
+          ceremonyDecision: 2,
+          specific: 0,
+          weddingDayContent: 0,
+          promotional: 0,
+        } satisfies UsefulnessCriteria,
       },
     });
 
@@ -412,6 +399,8 @@ describe("SQL score (USEFULNESS_SCORE_SQL) matches computeUsefulnessScore()", ()
     await db
       .update(postUsefulnessCriteria)
       .set({
+        // v11 以前の完全なレガシー shape（5 項目 boolean + promotional 文字列 or
+        // boolean + preDecisionOrPhotoShoot キー）。
         criteriaJson: JSON.stringify({
           firsthand: true,
           ceremonyDecision: true,
@@ -446,17 +435,17 @@ describe("SQL score (USEFULNESS_SCORE_SQL) matches computeUsefulnessScore()", ()
     expect(trueCard?.usefulness).not.toBeNull();
     expect(falseCard?.usefulness).not.toBeNull();
 
-    // SQL 側: boolean true の行は json_extract(...) = 'heavy' に一致せず
-    // 減点 0（gate + firsthand のみのスコアで並ぶ）。同点なので publishedAt
-    // 降順で legacy-bool-false が先に来る。
+    // SQL 側: 旧 boolean promotional は `= 2 OR = 'heavy'` のどちらにも一致せず
+    // 減点 0。weddingDayContent=false→0 でゲート不通過なので両行とも
+    // `W_CEREMONY×1 + W_FIRSTHAND×1` で同点。publishedAt 降順で false が先。
     expect(feedCards.map((c) => c.url)).toEqual([
       "https://example.com/legacy-bool-false",
       "https://example.com/legacy-bool-true",
     ]);
 
-    // TS 側（normalizePromotional 経由）: 旧 true は "light" に正規化され、
-    // 旧 false は "none" に正規化される——いずれも減点対象ではない。
-    expect(trueCard?.usefulness?.promotional).toBe("light");
-    expect(falseCard?.usefulness?.promotional).toBe("none");
+    // TS 側（normalizePromotional 経由）: 旧 true は 1、旧 false は 0 に正規化される
+    // ——いずれも減点対象（2）ではない。
+    expect(trueCard?.usefulness?.promotional).toBe(1);
+    expect(falseCard?.usefulness?.promotional).toBe(0);
   });
 });

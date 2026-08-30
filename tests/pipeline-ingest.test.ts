@@ -46,12 +46,11 @@ vi.mock("@/lib/llm/batch", () => ({
         summary: `AI summary for ${input.title}`,
         category: "その他",
         tag: "trend",
-        firsthand: true,
-        ceremonyDecision: true,
-        specific: true,
-        weddingDayContent: false,
-        promotional: "none",
-        preDecisionOrPhotoShoot: false,
+        firsthand: 2,
+        ceremonyDecision: 2,
+        specific: 2,
+        weddingDayContent: 0,
+        promotional: 0,
         // M1-2 の語彙的接地（plan 07 D4）を通すため、topicAnchor は LLM への
         // 実入力（input.title）に逐語で含まれる語にする（固定値だと入力ごとに
         // 一致せず誤って anchor_ungrounded になる）。
@@ -151,9 +150,10 @@ describe("runIngest (src/lib/pipeline/ingest.ts)", () => {
     expect(rows).toHaveLength(2);
     for (const row of rows) {
       const criteria = JSON.parse(row.criteriaJson);
-      expect(criteria.firsthand).toBe(true);
-      expect(criteria.ceremonyDecision).toBe(true);
-      expect(criteria.preDecisionOrPhotoShoot).toBe(false);
+      expect(criteria.firsthand).toBe(2);
+      expect(criteria.ceremonyDecision).toBe(2);
+      expect(criteria.weddingDayContent).toBe(0);
+      expect(criteria).not.toHaveProperty("preDecisionOrPhotoShoot");
     }
   });
 
@@ -213,7 +213,7 @@ describe("runIngest (src/lib/pipeline/ingest.ts)", () => {
       .where(eq(postUsefulnessCriteria.postId, postId));
     expect(rows).toHaveLength(1);
     expect(rows[0].signature).toBe(computeCurationSignature());
-    expect(JSON.parse(rows[0].criteriaJson).ceremonyDecision).toBe(true);
+    expect(JSON.parse(rows[0].criteriaJson).ceremonyDecision).toBe(2);
   });
 
   // Q1相当（簡易版）: 抜粋が無い投稿は LLM を呼ばず即終端棄却する。
@@ -327,12 +327,11 @@ describe("runIngest (src/lib/pipeline/ingest.ts)", () => {
                 summary: `AI summary for ${input.title}`,
                 category: "その他",
                 tag: "trend",
-                firsthand: true,
-                ceremonyDecision: true,
-                specific: true,
-                weddingDayContent: false,
-                promotional: "none",
-                preDecisionOrPhotoShoot: false,
+                firsthand: 2,
+                ceremonyDecision: 2,
+                specific: 2,
+                weddingDayContent: 0,
+                promotional: 0,
                 topicAnchor: input.title,
                 rationaleText:
                   "実際の体験に基づく会場選びや進行プロセスにおける具体的な工夫と背景についての客観的な振り返りを行う非常に有用な記事内容である",
@@ -375,12 +374,11 @@ describe("runIngest (src/lib/pipeline/ingest.ts)", () => {
           summary: `AI summary for ${input.title}`,
           category: "その他",
           tag: "trend",
-          firsthand: true,
-          ceremonyDecision: true,
-          specific: true,
-          weddingDayContent: false,
-          promotional: "none",
-          preDecisionOrPhotoShoot: false,
+          firsthand: 2,
+          ceremonyDecision: 2,
+          specific: 2,
+          weddingDayContent: 0,
+          promotional: 0,
           // D5 (plan 16): 2 回目も接地しないアンカーを LLM が返したケースを模擬 → degrade to null。
           topicAnchor: input.title === "Blog Post 1" ? null : input.title,
           rationaleText:

@@ -58,8 +58,9 @@ export const LLM_SINGLE_MAX_TOKENS = 800;
  * bump により全投稿の curationSignature が不一致になり再キュレーションされる）。
  * v8 (2026-08-27, shared_plan/15): topicAnchor を「結論を出さずに記事が扱う具体的な判断・場面・選択肢を体言止めで名指しする」よう RATIONALE_RULES を書き換えた。bump により全投稿の curationSignature が不一致になり、backfill-usefulness.mjs で再キュレーションされる。
  * v10 (2026-08-29, オーナー判断): topicAnchor のゲート大幅緩和に伴い RATIONALE_RULES を再設計。(a) 本文語句の逐語使用指定を削除（記事内容に即していれば自然な言い換えを許容）、(b) 文型指定（「問いを立てる節にする・体言止め禁止」）を削除、(c) 「この記事ならではの独自性を続きを読みたくなる形で提示する」クリック誘引ルールを追加。数値・PII・煽り語の禁止は維持。bump により全投稿の curationSignature が不一致になり、backfill-usefulness.mjs --force で一括再キュレーションできる（spec §10-3）。
+ * v11 (2026-08-30, オーナー判断): 有用度判定を全項目 boolean → 0/1/2 の三段階へ。`specific` を「当日の実施内容の具体性」、`weddingDayContent` を「フルパッケージ結婚式の当日内容か」に再定義し、`preDecisionOrPhotoShoot` を廃止（`weddingDayContent = 0` に吸収）。判定項目は 5 つ（firsthand / ceremonyDecision / specific / weddingDayContent / promotional、すべて 0-2）。USEFULNESS_CRITERIA_RULES を全面書き換え。bump により全投稿再キュレーション（spec §9.3）。
  */
-export const CURATION_PROMPT_VERSION = 10;
+export const CURATION_PROMPT_VERSION = 11;
 export const RATIONALE_PROMPT_VERSION = "rationale-v2";
 /** フィード表示条件のフェーズ。phase1: 移行期（レガシー対 OR 根拠存在）/ phase2: 根拠のみ。 */
 export const RATIONALE_DISPLAY_PHASE = "phase1" as const;
@@ -352,54 +353,39 @@ export const INGEST_LEASE_TTL_MS = 2 * 60 * 1000;
 // `openspec/specs/wedding-trend/spec.md` を参照。ここでは値のみを持つ。
 
 /**
- * `ceremonyDecision`（挙式・披露宴の中身に関する記事か）を満たした場合にのみ
- * 加算するゲート分。
+ * ゲート分（`ceremonyDecision >= 1 かつ weddingDayContent >= 1` のときに加算）。
  *
- * 単に他の加点項目の合計（firsthand + specific + weddingDayContent = 3+2+2=7）を
- * 上回るだけでは不十分（オーナー判断で 10→12 に引き上げ）。ゲートを通過した
- * が `promotional` 判定を受けた記事（GATE - PROMOTIONAL_PENALTY）が、ゲート
- * 不通過だが他の加点項目を総取りした記事（7）に負けてはならない。つまり
- * `USEFULNESS_GATE_BONUS - USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY` が
- * `USEFULNESS_WEIGHT_FIRSTHAND + USEFULNESS_WEIGHT_SPECIFIC +
- * USEFULNESS_WEIGHT_WEDDING_DAY`（= 7）を上回っている必要がある。10 だと
- * 10-4=6 < 7 で逆転してしまうため、7 に 4 を足した 11 を超える 12 とした。
- * 「挙式・披露宴の中身の記事は、どれだけ質が高い的外れ記事にも常に勝つ」
- * という強支配（strong domination）を保証するための値。この不変条件は
- * `tests/usefulness-score.test.ts` で定数から式を組み立てて固定している。
+ * 2026-08-30 の 0-2 三段階化に伴い 12 → 16 に再計算。**強支配不変条件**
+ * （ゲート通過帯は常にゲート不通過帯に優先する）:
+ * - ゲート不通過の最大 = `2×(W_FIRSTHAND + W_SPECIFIC + W_WEDDING_DAY)` = 2×(3+2+2) = 14
+ *   （`ceremonyDecision = 0` かつ他が最大の場合。`weddingDayContent = 0` かつ
+ *   `ceremonyDecision = 2` の場合も `2×(W_CEREMONY + W_FIRSTHAND + W_SPECIFIC)` = 14）
+ * - ゲート通過の最小 = `GATE_BONUS + W_CEREMONY×1 + W_WEDDING_DAY×1 - PROMO_PENALTY`
+ *   （`cd=1, wdc=1, firsthand=0, specific=0, promotional=2`）= 16 + 2 + 2 - 4 = 16
+ * - 16 > 14 で成立。不変条件
+ *   `GATE_BONUS + W_CEREMONY + W_WEDDING_DAY - PROMO_PENALTY > 2×(W_FIRSTHAND + W_SPECIFIC + W_WEDDING_DAY)`
+ *   を `tests/usefulness-score.test.ts` で定数から式を組み立てて固定している。
  */
-export const USEFULNESS_GATE_BONUS = 12;
+export const USEFULNESS_GATE_BONUS = 16;
 
-/** 実体験に基づく記事であることの加点。話題性・宣伝性と同様に抜粋段階で判定しやすいため重め。 */
+/** 実体験に基づく記事であることの加点（`weight × value(0-2)`）。抜粋段階で判定しやすいため重め。 */
 export const USEFULNESS_WEIGHT_FIRSTHAND = 3;
 
-/** 具体（固有の選択・数字・実際の行動）を含むことの加点。本文中盤以降でないと判定しにくいため firsthand より軽め。 */
+/**
+ * `ceremonyDecision`（挙式・披露宴の中身の意思決定に効くか）の加点
+ * （`weight × value(0-2)`）。2026-08-30 の 0-2 化以前はゲート専用でこの加点は無かった。
+ */
+export const USEFULNESS_WEIGHT_CEREMONY_DECISION = 2;
+
+/** 当日の実施内容の具体性の加点（`weight × value(0-2)`）。本文中盤以降でないと判定しにくいため firsthand より軽め。 */
 export const USEFULNESS_WEIGHT_SPECIFIC = 2;
 
-/** 結婚式当日の実施内容（進行・演出・料理・装花・BGM・ゲスト体験・当日のトラブル対応等）が具体的に描写されていることの加点。
- * 旧 `tradeoff`（判断理由・後悔の評価）軸を置換。重みは 2 のまま据え置く。
- * この重み 2 は「当日内容軸の重要度」ではなく、強支配不変条件
- * `USEFULNESS_GATE_BONUS - USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY > USEFULNESS_WEIGHT_FIRSTHAND + USEFULNESS_WEIGHT_SPECIFIC + USEFULNESS_WEIGHT_WEDDING_DAY`（= 3+2+2=7）
- * を維持するために必然的に 2 でなければならない。3 以上にすると `12-4=8 > 8` が偽となり強支配が崩れる。 */
+/** フルパッケージ結婚式（挙式＋披露宴）の当日内容を扱っているかの加点（`weight × value(0-2)`）。
+ * `value` は強支配不変条件（`USEFULNESS_GATE_BONUS` の JSDoc 参照）を維持する必要から 2 に据え置く。 */
 export const USEFULNESS_WEIGHT_WEDDING_DAY = 2;
 
-/** 事業者による集客が主目的の記事に対する減点。ゲート通過後でも上位に出さない編集方針の強さを反映し、他の加点より大きい。 */
+/** 事業者による集客が主目的の記事に対する減点。`promotional === 2`（過剰かつ明確な誘導）のときのみ発火する。 */
 export const USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY = 4;
-
-/**
- * `preDecisionOrPhotoShoot`（フォトウェディング・前撮り・式場探し等、式決定前/
- * 別撮影の話題に限られるか）が true の場合の独立減点。
- *
- * ゲート条件（`ceremonyDecision && !preDecisionOrPhotoShoot`）の AND 側は
- * 実測データ上ほぼ発火しない（本番 43 件中 `ceremonyDecision=true` かつ
- * `preDecisionOrPhotoShoot=true` の組み合わせは 0 件 —— そもそも
- * `preDecisionOrPhotoShoot` の定義自体が「式決定前/別撮影の話題に限られる」
- * であり、意味論上 `ceremonyDecision=true` とはほぼ両立しない）。そのため
- * ゲートの AND 条件だけでは `preDecisionOrPhotoShoot=true` の記事は
- * `ceremonyDecision=false` の記事と同点のまま区別できず、掲載順に一切
- * 反映されていなかった。オーナー方針（「ゲートというよりは、ソートさえ
- * できればよい」）に基づき、ゲートとは独立した減点項として加える。
- */
-export const USEFULNESS_WEIGHT_PRE_DECISION_PENALTY = 3;
 
 // ── HTTP ステータス ───────────────────────────────────────────
 export const HTTP_STATUS_TOO_MANY_REQUESTS = 429;

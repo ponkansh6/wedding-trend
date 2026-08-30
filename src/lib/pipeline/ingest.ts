@@ -265,7 +265,6 @@ async function reprocessRssRetry(url: string, ctx: RetryContext, now: string): P
           specific: result.specific,
           weddingDayContent: result.weddingDayContent,
           promotional: result.promotional,
-          preDecisionOrPhotoShoot: result.preDecisionOrPhotoShoot,
         },
       },
       rationale: {
@@ -600,7 +599,6 @@ export async function runIngest(trigger: IngestTrigger = "manual"): Promise<Inge
                     specific: result.specific,
                     weddingDayContent: result.weddingDayContent,
                     promotional: result.promotional,
-                    preDecisionOrPhotoShoot: result.preDecisionOrPhotoShoot,
                   },
                 }
               : undefined,

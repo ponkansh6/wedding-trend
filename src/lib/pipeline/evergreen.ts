@@ -258,7 +258,6 @@ async function publishEvergreen(
           specific: curation.specific,
           weddingDayContent: curation.weddingDayContent,
           promotional: curation.promotional,
-          preDecisionOrPhotoShoot: curation.preDecisionOrPhotoShoot,
         },
         modelId: LLM_MODEL,
       },

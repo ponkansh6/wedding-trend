@@ -29,24 +29,28 @@ const TitleSchema = z
   );
 
 /**
- * 有用度判定 6 項目。点数（重み）は一切ここに含めない —— LLM にはブール値
- * だけを出させ、重み付けは `src/lib/scoring/usefulness.ts` の
+ * 有用度判定 5 項目。点数（重み）は一切ここに含めない —— LLM には 0/1/2 の
+ * 整数だけを出させ、重み付けは `src/lib/scoring/usefulness.ts` の
  * `computeUsefulnessScore()` がコード側で行う（定義は
  * openspec/specs/wedding-trend/spec.md §9.3 を参照。プロンプト側の指示文は
  * `src/lib/llm/prompts.ts` の `USEFULNESS_CRITERIA_RULES` を参照）。
+ *
+ * 2026-08-30: 全項目 boolean → 0/1/2 の整数。旧 `preDecisionOrPhotoShoot` は
+ * 廃止（`weddingDayContent = 0` に吸収）。
  */
+const CriterionLevelSchema = z.union([z.literal(0), z.literal(1), z.literal(2)]);
+
 export const CurationItemSchema = z.object({
   index: z.number().int(),
   title: TitleSchema,
   summary: z.string().min(AI_SUMMARY_VALIDATE_MIN_CHARS).max(AI_SUMMARY_VALIDATE_MAX_CHARS),
   category: z.enum(CATEGORIES),
   tag: z.enum(["trend", "classic"]),
-  firsthand: z.boolean(),
-  ceremonyDecision: z.boolean(),
-  specific: z.boolean(),
-  weddingDayContent: z.boolean(),
-  promotional: z.enum(["none", "light", "heavy"]),
-  preDecisionOrPhotoShoot: z.boolean(),
+  firsthand: CriterionLevelSchema,
+  ceremonyDecision: CriterionLevelSchema,
+  specific: CriterionLevelSchema,
+  weddingDayContent: CriterionLevelSchema,
+  promotional: CriterionLevelSchema,
   /**
    * 記事の主題となるトピックのアンカー（40字以内）。
    * plan 07 §5-M1: 公開前に `src/lib/publish/gate.ts` の

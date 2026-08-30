@@ -1,49 +1,70 @@
 import {
   USEFULNESS_WEIGHT_FIRSTHAND,
+  USEFULNESS_WEIGHT_CEREMONY_DECISION,
   USEFULNESS_WEIGHT_SPECIFIC,
   USEFULNESS_WEIGHT_WEDDING_DAY,
   USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY,
-  USEFULNESS_WEIGHT_PRE_DECISION_PENALTY,
   USEFULNESS_GATE_BONUS,
 } from "@/lib/constants";
 
 /**
- * LLM から受け取る判定項目 6 つ。LLM にはこのブール値だけを出させ、点数は
- * 一切出させない。重み付け（`computeUsefulnessScore`）をコード側に閉じ込める
- * ことで、重み調整が再課金ゼロのコード変更だけで完結する。
+ * LLM から受け取る判定項目 5 つ。すべて 0/1/2 の三段階（degree）。LLM には
+ * この整数だけを出させ、点数（重み付け合計）は一切出させない。重み付け
+ * （`computeUsefulnessScore`）をコード側に閉じ込めることで、重み調整が
+ * 再課金ゼロのコード変更だけで完結する。
  *
- * 定義は `openspec/specs/wedding-trend/spec.md` の編集方針セクションを
+ * 定義は `openspec/specs/wedding-trend/spec.md` の編集方針セクション（§9.3）を
  * 唯一の参照先とする（ここでは重複記載しない）。
+ *
+ * 2026-08-30: 旧仕様（5 boolean + `promotional` の3段階 enum）から、全項目
+ * 0/1/2 の整数へ変更。旧 `preDecisionOrPhotoShoot` は廃止し `weddingDayContent`
+ * に吸収した（`weddingDayContent = 0` が「フルパッケージ結婚式の当日内容では
+ * ない＝フォト婚・前撮り・式場探し・準備段階のみ」を意味する）。
  */
-export type PromotionalLevel = "none" | "light" | "heavy";
+export type CriterionLevel = 0 | 1 | 2;
 
 /**
- * `criteria_json` の `promotional` を正規化する。3 段階 enum を正として
- * そのまま返し、旧レコードの boolean 値は読み取り時にここで吸収する
- * （DB マイグレーションは行わない）。`true`（旧仕様の「宣伝要素あり」）は
- * 新仕様では減点対象外の "light" に降格する —— 旧仕様は宣伝要素の有無で
- * 一律 -4 していたが、新仕様は「多すぎる」記事だけを減点する方針のため、
- * 旧 true を無条件で heavy 相当（減点継続）にはしない。
+ * 判定値を 0/1/2 に正規化する。新レコードは整数、旧レコードの boolean は
+ * 読み取り時にここで吸収する（DB マイグレーションは行わない）。
+ * `true → 2`（旧仕様で「該当する」と判定されたものは最上位相当）、`false → 0`。
+ * bump + 全件再キュレーションで旧レコードは速やかに整数へ置き換わるため、
+ * この吸収は移行期の短期間のみ効く。
  */
-export function normalizePromotional(value: unknown): PromotionalLevel {
-  if (value === "none" || value === "light" || value === "heavy") return value;
-  if (typeof value === "boolean") return value ? "light" : "none";
-  return "none";
+export function normalizeCriterion(value: unknown): CriterionLevel {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    if (value >= 2) return 2;
+    if (value >= 1) return 1;
+    return 0;
+  }
+  if (value === true) return 2;
+  return 0;
+}
+
+/**
+ * `criteria_json` の `promotional` を 0/1/2 に正規化する。新レコードは整数、
+ * 旧レコードの文字列 enum（`none/light/heavy`）と boolean をここで吸収する。
+ * 旧 `heavy → 2`、旧 `light → 1`、旧 `none → 0`。旧 boolean `true → 1`
+ * （旧「宣伝要素あり」は新仕様の減点対象＝2 ではなく light 相当に降格）。
+ */
+export function normalizePromotional(value: unknown): CriterionLevel {
+  if (value === "heavy") return 2;
+  if (value === "light") return 1;
+  if (value === "none") return 0;
+  if (value === true) return 1;
+  return normalizeCriterion(value);
 }
 
 export interface UsefulnessCriteria {
-  /** 書き手自身または近しい当事者が実際に挙式・披露宴を経験した立場から書かれている。 */
-  firsthand: boolean;
-  /** 挙式・披露宴の「中身」の意思決定に効く内容か。 */
-  ceremonyDecision: boolean;
-  /** 具体（固有の選択・数字・実際にやったこと/やらなかった理由）を含むか。 */
-  specific: boolean;
-  /** 結婚式当日の実施内容（進行・演出・料理・装花・BGM・ゲスト体験・当日のトラブル対応等）が具体的に描写されているか。 */
-  weddingDayContent: boolean;
-  /** 事業者による集客・自社サービスへの誘導の度合い（heavy のときのみ減点）。 */
-  promotional: PromotionalLevel;
-  /** 内容がフォトウェディング・前撮り・式場探し等、式決定前/別撮影の話題に限られるか（true ならゲート不通過）。 */
-  preDecisionOrPhotoShoot: boolean;
+  /** 書き手自身または近しい当事者が実際に挙式・披露宴を経験した立場から書かれているか（0-2）。 */
+  firsthand: CriterionLevel;
+  /** 挙式・披露宴の「中身」の意思決定に効く内容か（0-2）。`>= 1` かつ `weddingDayContent >= 1` でゲート通過。 */
+  ceremonyDecision: CriterionLevel;
+  /** 当日の実施内容の具体性（固有の選択・数値・実際にやったこと/やらなかった理由の明確さ）（0-2）。 */
+  specific: CriterionLevel;
+  /** フルパッケージ結婚式（挙式＋披露宴）の当日内容を扱っているか（0-2）。`0` はフォト婚・前撮り・式場探し・準備段階のみ。 */
+  weddingDayContent: CriterionLevel;
+  /** 事業者による集客・自社サービスへの誘導の度合い（0-2。`2` のときのみ減点）。 */
+  promotional: CriterionLevel;
 }
 
 /**
@@ -54,71 +75,54 @@ export interface UsefulnessCriteria {
  * 無条件で最下位に落とすと、一時的な LLM 失敗で新着の良記事が静かに埋もれて
  * しまう。次回 ingest で `signature` 不一致として再スコアされれば、自然に
  * 正しい位置へ移動する——それまでの間だけ「判定保留」として中位に留め置く
- * 値である。`preDecisionOrPhotoShoot` の独立減点により理論上の下限は負の値
- * まで下がりうるが、この定数はあくまで 0 を基準にした中位に据え置く
- * （判定保留を過度に悲観視しないため）。
+ * 値である（ゲート帯 `USEFULNESS_GATE_BONUS = 16` 未満・全項目 0（0点）より上）。
  */
-export const UNSCORED_USEFULNESS_SCORE = 3;
+export const UNSCORED_USEFULNESS_SCORE = 4;
 
 /**
- * 6 つのブール判定から有用度スコアを計算する純関数。
+ * 5 つの 0/1/2 判定から有用度スコアを計算する純関数（2026-08-30 に boolean 版から改訂）。
  *
  * ```
- * score = (ceremonyDecision && !preDecisionOrPhotoShoot ? USEFULNESS_GATE_BONUS : 0)
- *       + USEFULNESS_WEIGHT_FIRSTHAND   * firsthand
- *       + USEFULNESS_WEIGHT_SPECIFIC    * specific
- *       + USEFULNESS_WEIGHT_WEDDING_DAY    * weddingDayContent
- *       - USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY * promotional
- *       - USEFULNESS_WEIGHT_PRE_DECISION_PENALTY * preDecisionOrPhotoShoot
+ * gate  = (ceremonyDecision >= 1 && weddingDayContent >= 1) ? USEFULNESS_GATE_BONUS : 0
+ * score = gate
+ *       + USEFULNESS_WEIGHT_CEREMONY_DECISION * ceremonyDecision
+ *       + USEFULNESS_WEIGHT_FIRSTHAND         * firsthand
+ *       + USEFULNESS_WEIGHT_SPECIFIC          * specific
+ *       + USEFULNESS_WEIGHT_WEDDING_DAY       * weddingDayContent
+ *       - USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY * (promotional === 2 ? 1 : 0)
  * ```
  *
- * `ceremonyDecision` と `preDecisionOrPhotoShoot` は加点項の一つではなく**ゲート**として働く。もし単純な
- * 加点項にすると、「衣装だけの記事だが実体験・具体的・weddingDayContent あり」
- * （3+2+2=7）が「式の中身に触れているが浅い記事」（12）を上回ってしまい、
- * 「これから式の中身を決める読者に効く記事を優先する」というオーナーの
- * 意図が反転する。挙式・披露宴の中身に関する記事であることを他の加点の
- * 前提条件にしつつ、フォト婚・前撮り・式場探し等の話題（`preDecisionOrPhotoShoot === true`）はゲート不通過（0点）とすることで、この逆転を構造的に防ぐ。
- * この強支配（「ゲート通過帯は常にゲート不通過帯に優先する」）が
- * `promotional` 減点を足しても崩れないことは
- * `USEFULNESS_GATE_BONUS - USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY > firsthand+specific+weddingDayContent の合計`
- * という不変条件として `src/lib/constants.ts` の `USEFULNESS_GATE_BONUS` の
- * JSDoc に明記し、`tests/usefulness-score.test.ts` で定数から式を組み立てて
- * 固定している。
+ * **ゲート**: `ceremonyDecision` と `weddingDayContent` はそれぞれ加点項でありつつ、
+ * 両方 `>= 1` のときだけ `USEFULNESS_GATE_BONUS` を付ける関門でもある。もし
+ * 単純な加点項だけにすると「衣装だけの記事だが firsthand=2・specific=2・
+ * weddingDayContent=2」が「式の中身に効くが浅い記事」を上回り、オーナーの
+ * 意図（これから式の中身を決める読者に効く記事を優先）が反転する。旧
+ * `preDecisionOrPhotoShoot`（式決定前/別撮影の話題）は `weddingDayContent = 0`
+ * に吸収済み——フォト婚・前撮り・式場探し・準備段階のみの記事は
+ * `weddingDayContent = 0` となりゲート不通過帯に沈む。
  *
- * `preDecisionOrPhotoShoot` はゲートの AND 条件（安全網）に加えて、
- * `USEFULNESS_WEIGHT_PRE_DECISION_PENALTY` による**独立した減点**としても
- * 働く。ゲートの AND 条件は `ceremonyDecision=true` かつ
- * `preDecisionOrPhotoShoot=true` という組み合わせでしか発火せず、この2項目の
- * 定義上ほぼ両立しないため実測データ（本番 43 件）では発火が 0 件——つまり
- * ゲート条件だけでは `preDecisionOrPhotoShoot=true` の記事は
- * `ceremonyDecision=false` の記事と常に同点になり、掲載順に一切反映され
- * ない。独立減点により、ゲート不通過帯の中でも「フォト婚・前撮り・式場
- * 探しの話題」を後方へ沈められるようにしている（オーナー方針:
- * 「ゲートというよりは、ソートさえできればよい」）。ゲートの AND 条件自体は
- * 安全網として残しており、**現状ほぼ発火しないことを理由に将来削っては
- * ならない**——`ceremonyDecision` の定義が将来広がった場合に備えた保険である。
+ * **強支配不変条件**（「ゲート通過帯は常にゲート不通過帯に優先する」）:
+ * ゲート不通過の最大 = `2×(W_FIRSTHAND + W_SPECIFIC + W_WEDDING_DAY)` = 14
+ * （`ceremonyDecision = 0`、他が最大の場合。`weddingDayContent = 0` かつ
+ * `ceremonyDecision = 2` の場合も `2×(W_CEREMONY + W_FIRSTHAND + W_SPECIFIC)` = 14）。
+ * ゲート通過の最小 = `GATE_BONUS + W_CEREMONY×1 + W_WEDDING_DAY×1 - PROMO_PENALTY`
+ * （`cd=1, wdc=1, firsthand=0, specific=0, promotional=2`）= `16 + 2 + 2 - 4` = 16 > 14。
+ * → `GATE_BONUS + W_CEREMONY + W_WEDDING_DAY - PROMO_PENALTY > 2×(W_FIRSTHAND + W_SPECIFIC + W_WEDDING_DAY)`
+ * を `tests/usefulness-score.test.ts` で定数から式を組んで固定している。
  *
- * 各項目の重みは、抜粋（記事冒頭）から LLM が判定できる確信度に比例させて
- * いる。話題（ceremonyDecision）・書き手の立場（firsthand）・宣伝性
- * （promotional）は記事冒頭からでも判定しやすい一方、具体性（specific）や
- * 当日内容（weddingDayContent）は本文中盤以降にしか現れないことが多く、抜粋だけ
- * からの判定は firsthand/promotional より確信度が落ちる。そのため
- * firsthand（3）> specific/weddingDayContent（各 2）という重みにしている。
- * promotional の減点（4）を他の加点より大きくしているのは、ゲートを通過した
- * 記事であっても宣伝目的の記事を上位に出さないという編集方針の強さを反映
- * したもの（詳細は spec.md の編集方針セクションを参照）。
+ * **重み**: firsthand（3）> ceremonyDecision / specific / weddingDayContent（各 2）は、
+ * 抜粋（記事冒頭）からの判定しやすさに比例させたもの。`promotional` の減点（4）は
+ * ゲート通過記事でも宣伝目的記事を上位に出さない編集方針の強さを反映し、
+ * `promotional === 2`（過剰かつ明確な誘導）のときのみ発火する。
  */
 export function computeUsefulnessScore(criteria: UsefulnessCriteria): number {
   const gate =
-    criteria.ceremonyDecision && !criteria.preDecisionOrPhotoShoot ? USEFULNESS_GATE_BONUS : 0;
-  const firsthand = criteria.firsthand ? USEFULNESS_WEIGHT_FIRSTHAND : 0;
-  const specific = criteria.specific ? USEFULNESS_WEIGHT_SPECIFIC : 0;
-  const weddingDayContent = criteria.weddingDayContent ? USEFULNESS_WEIGHT_WEDDING_DAY : 0;
-  const promotionalPenalty =
-    criteria.promotional === "heavy" ? USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY : 0;
-  const preDecisionPenalty = criteria.preDecisionOrPhotoShoot
-    ? USEFULNESS_WEIGHT_PRE_DECISION_PENALTY
-    : 0;
+    criteria.ceremonyDecision >= 1 && criteria.weddingDayContent >= 1 ? USEFULNESS_GATE_BONUS : 0;
+  const ceremonyDecision = USEFULNESS_WEIGHT_CEREMONY_DECISION * criteria.ceremonyDecision;
+  const firsthand = USEFULNESS_WEIGHT_FIRSTHAND * criteria.firsthand;
+  const specific = USEFULNESS_WEIGHT_SPECIFIC * criteria.specific;
+  const weddingDayContent = USEFULNESS_WEIGHT_WEDDING_DAY * criteria.weddingDayContent;
+  const promotionalPenalty = criteria.promotional >= 2 ? USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY : 0;
 
-  return gate + firsthand + specific + weddingDayContent - promotionalPenalty - preDecisionPenalty;
+  return gate + ceremonyDecision + firsthand + specific + weddingDayContent - promotionalPenalty;
 }

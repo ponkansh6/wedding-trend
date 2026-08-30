@@ -31,7 +31,7 @@ import {
 /**
  * キュレーション結果本体（LLM が実際に決めた部分。index はバッチ内の整列にのみ
  * 使うため除く）。`rationaleText` は plan 07 §6-Q5 により LLM 出力ではなく
- * `renderRationaleText()`（`topicAnchor` + 6 boolean からの決定的テンプレート）
+ * `renderRationaleText()`（`topicAnchor` + 5 つの 0-2 判定値からの決定的テンプレート）
  * で付与する。`evidenceSufficient` は plan 07 §6-Q1 により LLM の自己申告を
  * 廃止したため、この型からは削除されている
  * （破壊的変更。呼び出し元での結線は別レーンが行う。詳細はタスク完了報告を参照）。
@@ -70,7 +70,7 @@ export type CurationResult = Omit<CurationItem, "index" | "topicAnchor"> & {
   retryAttemptMatchedTerms?: string[];
 };
 
-/** `renderRationaleText()` に渡す 6 boolean を item から取り出すヘルパ。 */
+/** `renderRationaleText()` に渡す 5 つの 0-2 判定値を item から取り出すヘルパ。 */
 function usefulnessFlagsOf(item: Omit<CurationItem, "index" | "topicAnchor">) {
   return {
     firsthand: item.firsthand,
@@ -78,12 +78,11 @@ function usefulnessFlagsOf(item: Omit<CurationItem, "index" | "topicAnchor">) {
     specific: item.specific,
     weddingDayContent: item.weddingDayContent,
     promotional: item.promotional,
-    preDecisionOrPhotoShoot: item.preDecisionOrPhotoShoot,
   };
 }
 
 /**
- * LLM が返した boolean 群から `rationaleText` を決定的に付与する
+ * LLM が返した 0-2 判定値から `rationaleText` を決定的に付与する
  * （plan 07 §6-Q5: LLM の自由生成文は一切使わない）。
  */
 function attachRationale<
@@ -294,7 +293,6 @@ export async function curateBatch(
               specific: retryRes.specific,
               weddingDayContent: retryRes.weddingDayContent,
               promotional: retryRes.promotional,
-              preDecisionOrPhotoShoot: retryRes.preDecisionOrPhotoShoot,
               degradeReason: null,
               firstAttemptReason: reason,
               retryAttemptReason: null,
@@ -324,7 +322,6 @@ export async function curateBatch(
         specific: item.specific,
         weddingDayContent: item.weddingDayContent,
         promotional: item.promotional,
-        preDecisionOrPhotoShoot: item.preDecisionOrPhotoShoot,
         degradeReason,
         firstAttemptReason,
         retryAttemptReason,

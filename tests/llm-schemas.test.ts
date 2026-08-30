@@ -6,14 +6,13 @@ import { buildSingleCurationPrompt } from "@/lib/llm/prompts";
 const validSummary =
   "結婚式の準備における費用感や演出のポイントについて、実際の体験に基づいた内容がまとめられています。会場選びやゲスト対応など具体的な工夫点が紹介されています。";
 
-/** 有用度判定 6 項目（promotional のみ enum、他はブール値）。テストのデフォルト値として使い回す。 */
+/** 有用度判定 5 項目（すべて 0/1/2）。テストのデフォルト値として使い回す。 */
 const validUsefulness = {
-  firsthand: true,
-  ceremonyDecision: true,
-  specific: true,
-  weddingDayContent: false,
-  promotional: "none",
-  preDecisionOrPhotoShoot: false,
+  firsthand: 2,
+  ceremonyDecision: 2,
+  specific: 2,
+  weddingDayContent: 0,
+  promotional: 0,
 };
 
 const validRationaleFields = {
@@ -91,7 +90,7 @@ describe("CurationItemSchema", () => {
     expect(result.success).toBe(false);
   });
 
-  it("rejects an item missing one of the usefulness boolean fields", () => {
+  it("rejects an item missing one of the usefulness fields", () => {
     const { weddingDayContent: _weddingDayContent, ...rest } = validUsefulness;
     const result = CurationItemSchema.safeParse({
       index: 1,
@@ -105,7 +104,7 @@ describe("CurationItemSchema", () => {
     expect(result.success).toBe(false);
   });
 
-  it("rejects an item where a boolean usefulness field is a string instead of a boolean", () => {
+  it("rejects an item where a usefulness field is a string instead of 0/1/2", () => {
     const result = CurationItemSchema.safeParse({
       index: 1,
       title: "テスト",
@@ -114,27 +113,13 @@ describe("CurationItemSchema", () => {
       tag: "trend",
       ...validUsefulness,
       ...validRationaleFields,
-      weddingDayContent: "false",
+      weddingDayContent: "1",
     });
     expect(result.success).toBe(false);
   });
 
-  it("rejects an item where promotional is not one of the enum values", () => {
-    const result = CurationItemSchema.safeParse({
-      index: 1,
-      title: "テスト",
-      summary: validSummary,
-      category: "その他",
-      tag: "trend",
-      ...validUsefulness,
-      ...validRationaleFields,
-      promotional: "false",
-    });
-    expect(result.success).toBe(false);
-  });
-
-  it("accepts all three promotional enum values", () => {
-    for (const promotional of ["none", "light", "heavy"] as const) {
+  it("rejects a usefulness field outside 0/1/2 (boolean, 3, negative)", () => {
+    for (const bad of [true, 3, -1, 1.5]) {
       const result = CurationItemSchema.safeParse({
         index: 1,
         title: "テスト",
@@ -143,24 +128,29 @@ describe("CurationItemSchema", () => {
         tag: "trend",
         ...validUsefulness,
         ...validRationaleFields,
-        promotional,
+        firsthand: bad,
       });
-      expect(result.success).toBe(true);
+      expect(result.success).toBe(false);
     }
   });
 
-  it("does not accept a numeric score in place of the boolean criteria", () => {
-    const result = CurationItemSchema.safeParse({
-      index: 1,
-      title: "テスト",
-      summary: validSummary,
-      category: "その他",
-      tag: "trend",
-      ...validUsefulness,
-      ...validRationaleFields,
-      firsthand: 1,
-    });
-    expect(result.success).toBe(false);
+  it("accepts all three levels 0 / 1 / 2 for every usefulness field", () => {
+    for (const level of [0, 1, 2] as const) {
+      const result = CurationItemSchema.safeParse({
+        index: 1,
+        title: "テスト",
+        summary: validSummary,
+        category: "その他",
+        tag: "trend",
+        firsthand: level,
+        ceremonyDecision: level,
+        specific: level,
+        weddingDayContent: level,
+        promotional: level,
+        ...validRationaleFields,
+      });
+      expect(result.success).toBe(true);
+    }
   });
 });
 

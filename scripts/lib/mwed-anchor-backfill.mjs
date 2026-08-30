@@ -132,7 +132,6 @@ export function buildMwedUpdates(outcomes, deps) {
             specific: result.specific,
             weddingDayContent: result.weddingDayContent,
             promotional: result.promotional,
-            preDecisionOrPhotoShoot: result.preDecisionOrPhotoShoot,
           },
         };
         update.rationale = {

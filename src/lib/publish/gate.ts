@@ -14,7 +14,6 @@
  */
 
 import { RATIONALE_TEXT_MAX_CHARS, RATIONALE_TEXT_MIN_CHARS } from "@/lib/constants";
-import type { PromotionalLevel } from "@/lib/scoring/usefulness";
 import type { DropReason } from "@/lib/types";
 
 export type GateResult =
@@ -340,15 +339,14 @@ export function checkAnchorGrounding(topicAnchor: string, bodyText: string): Gat
 // renderRationaleText（Q5: rationaleText のテンプレート化）
 // ─────────────────────────────────────────────────────────────
 
-/** LLM の有用度判定 6 boolean。フィールド名は `src/lib/llm/schemas.ts` の
+/** LLM の有用度判定 5 つ（すべて 0-2）。フィールド名は `src/lib/llm/schemas.ts` の
  * `CurationItemSchema` と一致させること。 */
 export interface RationaleUsefulnessFlags {
-  firsthand: boolean;
-  ceremonyDecision: boolean;
-  specific: boolean;
-  weddingDayContent: boolean;
-  promotional: PromotionalLevel;
-  preDecisionOrPhotoShoot: boolean;
+  firsthand: number;
+  ceremonyDecision: number;
+  specific: number;
+  weddingDayContent: number;
+  promotional: number;
 }
 
 export interface RationaleTemplateInput {
@@ -364,8 +362,7 @@ const USEFULNESS_LABELS = {
   firsthand: "実際に挙式・披露宴を経験した立場からの記述である",
   ceremonyDecision: "挙式・披露宴の中身の意思決定に役立つ内容を含む",
   specific: "具体的な選択や工夫についての記述がある",
-  weddingDayContent: "結婚式当日の内容（進行・演出など）に具体的に触れている",
-  preDecisionOrPhotoShoot: "式場決定前の段階や前撮り・後撮りに関する話題が中心である",
+  weddingDayContent: "フルパッケージ結婚式当日の内容（進行・演出など）に具体的に触れている",
 } satisfies Partial<Record<keyof RationaleUsefulnessFlags, string>>;
 
 /** テンプレート内での出現順序（判定意図の一貫性のため固定）。
@@ -377,16 +374,16 @@ const FLAG_ORDER: (keyof typeof USEFULNESS_LABELS)[] = [
   "ceremonyDecision",
   "specific",
   "weddingDayContent",
-  "preDecisionOrPhotoShoot",
 ];
 
 /**
- * Q5: 構造化フィールド（`topicAnchor` + ラベル対象の5 boolean）から根拠文を決定的に
+ * Q5: 構造化フィールド（`topicAnchor` + ラベル対象の 4 判定値）から根拠文を決定的に
  * 生成する。LLM の自由文は一切受け取らない。同一入力からは常に同一出力に
- * なる純粋関数。
+ * なる純粋関数。2026-08-30 の 0-2 化以降、ラベルを付けるのは値が `>= 2`
+ * （明確に該当）の項目のみ。
  */
 export function renderRationaleText(input: RationaleTemplateInput): string {
-  const activeLabels = FLAG_ORDER.filter((flag) => input.usefulness[flag] === true).map(
+  const activeLabels = FLAG_ORDER.filter((flag) => input.usefulness[flag] >= 2).map(
     (flag) => USEFULNESS_LABELS[flag],
   );
 

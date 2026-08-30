@@ -4,14 +4,18 @@ import { posts, postUsefulnessCriteria, postRationales } from "./schema";
 import {
   RATIONALE_DISPLAY_PHASE,
   USEFULNESS_GATE_BONUS,
+  USEFULNESS_WEIGHT_CEREMONY_DECISION,
   USEFULNESS_WEIGHT_FIRSTHAND,
-  USEFULNESS_WEIGHT_PRE_DECISION_PENALTY,
   USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY,
   USEFULNESS_WEIGHT_SPECIFIC,
   USEFULNESS_WEIGHT_WEDDING_DAY,
   type RationaleDisplayPhase,
 } from "@/lib/constants";
-import { UNSCORED_USEFULNESS_SCORE, normalizePromotional } from "@/lib/scoring/usefulness";
+import {
+  UNSCORED_USEFULNESS_SCORE,
+  normalizeCriterion,
+  normalizePromotional,
+} from "@/lib/scoring/usefulness";
 import type { Category, FeedCard, SourceType, TrendTag } from "@/lib/types";
 import type { UsefulnessCriteria } from "@/lib/scoring/usefulness";
 
@@ -45,11 +49,11 @@ const FEED_ROW_FIELDS = {
  * 体験談レーン専用の並び順キー。`post_usefulness_criteria` の `criteria_json`
  * カラムから `json_extract` を使って各判定項目を取り出し、
  * `src/lib/scoring/usefulness.ts` の `computeUsefulnessScore()` と**同じ重み**
- * およびゲート条件 `(ceremonyDecision && !preDecisionOrPhotoShoot)` を使って
+ * およびゲート条件 `(ceremonyDecision >= 1 && weddingDayContent >= 1)` を使って
  * スコアを SQL 上で組み立てる（重みを SQL 側に数値として直書きせず、
  * `src/lib/constants.ts` の定数から式を組み立てることで、重みを変更したときに
  * ここを個別に修正し忘れる事故を防ぐ）。この式と純関数の一致は
- * `tests/feed-order-parity.test.ts` が 64 通りの判定組み合わせで検証する。
+ * `tests/feed-order-parity.test.ts` が全 3^5 = 243 通りの判定組み合わせで検証する。
  *
  * `post_usefulness_criteria` に対応行が無い（＝未スコア。LLM キュレーション未実行、
  * または一時的な失敗）場合は `UNSCORED_USEFULNESS_SCORE`（ゲート不通過帯の
@@ -72,8 +76,12 @@ const FEED_ROW_FIELDS = {
  * 位置へ復帰する（`post_usefulness_criteria` に行が無い場合と同じ意味論）。
  *
  * 各 `json_extract(...)` を必ず `COALESCE(..., 0)` で包むこと。
- * `criteria_json` は 6 キーの JSON だが、将来判定項目を追加したときに
- * 旧バックフィル分の行にそのキーが存在しないケースが生じうる。
+ * `criteria_json` は 5 キーの JSON（2026-08-30 に 6→5、全項目 0-2 の整数へ）
+ * だが、旧バックフィル分の行はキーの構成・型が異なる（`promotional` は
+ * 文字列 enum、5 項目は boolean、`preDecisionOrPhotoShoot` キーが余分）。
+ * `json_extract` は JSON の `true`/`false` を SQL の `1`/`0` に変換するため
+ * 旧 boolean 行は自然に 0/1 として読める（新しい 2 との差は bump + 全件
+ * 再キュレーションが速やかに解消する）。
  * `json_extract` は存在しないキーに対して SQL の `NULL` を返し、
  * `3 * NULL` は `NULL` になり、`NULL` は算術式全体に伝播する ——
  * つまりキーが1つ欠けているだけで加算式全体が `NULL` になり、
@@ -92,12 +100,12 @@ const USEFULNESS_SCORE_SQL = sql<number>`CASE
   WHEN ${postUsefulnessCriteria.postId} IS NULL THEN ${UNSCORED_USEFULNESS_SCORE}
   WHEN NOT json_valid(${postUsefulnessCriteria.criteriaJson}) THEN ${UNSCORED_USEFULNESS_SCORE}
   ELSE
-  (CASE WHEN COALESCE(json_extract(${postUsefulnessCriteria.criteriaJson}, '$.ceremonyDecision'), 0) = 1 AND COALESCE(json_extract(${postUsefulnessCriteria.criteriaJson}, '$.preDecisionOrPhotoShoot'), 0) = 0 THEN ${USEFULNESS_GATE_BONUS} ELSE 0 END)
+  (CASE WHEN COALESCE(json_extract(${postUsefulnessCriteria.criteriaJson}, '$.ceremonyDecision'), 0) >= 1 AND COALESCE(json_extract(${postUsefulnessCriteria.criteriaJson}, '$.weddingDayContent'), 0) >= 1 THEN ${USEFULNESS_GATE_BONUS} ELSE 0 END)
+  + ${USEFULNESS_WEIGHT_CEREMONY_DECISION} * COALESCE(json_extract(${postUsefulnessCriteria.criteriaJson}, '$.ceremonyDecision'), 0)
   + ${USEFULNESS_WEIGHT_FIRSTHAND} * COALESCE(json_extract(${postUsefulnessCriteria.criteriaJson}, '$.firsthand'), 0)
   + ${USEFULNESS_WEIGHT_SPECIFIC} * COALESCE(json_extract(${postUsefulnessCriteria.criteriaJson}, '$.specific'), 0)
   + ${USEFULNESS_WEIGHT_WEDDING_DAY} * COALESCE(json_extract(${postUsefulnessCriteria.criteriaJson}, '$.weddingDayContent'), 0)
-  - ${USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY} * (CASE WHEN json_extract(${postUsefulnessCriteria.criteriaJson}, '$.promotional') = 'heavy' THEN 1 ELSE 0 END)
-  - ${USEFULNESS_WEIGHT_PRE_DECISION_PENALTY} * COALESCE(json_extract(${postUsefulnessCriteria.criteriaJson}, '$.preDecisionOrPhotoShoot'), 0)
+  - ${USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY} * (CASE WHEN json_extract(${postUsefulnessCriteria.criteriaJson}, '$.promotional') = 2 OR json_extract(${postUsefulnessCriteria.criteriaJson}, '$.promotional') = 'heavy' THEN 1 ELSE 0 END)
 END`;
 
 /**
@@ -183,20 +191,26 @@ export async function getFeedCards(params: {
       if (row.criteriaJson) {
         try {
           const parsed = JSON.parse(row.criteriaJson);
+          // 新レコードは 0/1/2 の整数、旧レコードは boolean（`promotional` は文字列）。
+          // `normalizeCriterion` / `normalizePromotional` が両方を 0-2 に吸収する。
+          const isScorable = (v: unknown) =>
+            typeof v === "number" || typeof v === "boolean" || typeof v === "string";
           if (
             parsed &&
             typeof parsed === "object" &&
-            typeof parsed.firsthand === "boolean" &&
-            typeof parsed.ceremonyDecision === "boolean" &&
-            typeof parsed.specific === "boolean" &&
-            typeof parsed.weddingDayContent === "boolean" &&
-            (typeof parsed.promotional === "boolean" || typeof parsed.promotional === "string") &&
-            typeof parsed.preDecisionOrPhotoShoot === "boolean"
+            isScorable(parsed.firsthand) &&
+            isScorable(parsed.ceremonyDecision) &&
+            isScorable(parsed.specific) &&
+            isScorable(parsed.weddingDayContent) &&
+            isScorable(parsed.promotional)
           ) {
             parsedUsefulness = {
-              ...parsed,
+              firsthand: normalizeCriterion(parsed.firsthand),
+              ceremonyDecision: normalizeCriterion(parsed.ceremonyDecision),
+              specific: normalizeCriterion(parsed.specific),
+              weddingDayContent: normalizeCriterion(parsed.weddingDayContent),
               promotional: normalizePromotional(parsed.promotional),
-            } as UsefulnessCriteria;
+            };
           }
         } catch {
           parsedUsefulness = null;

@@ -304,19 +304,18 @@ describe("renderRationaleText (plan 07 §6-Q5: rationaleText のテンプレー�
   const baseInput: RationaleTemplateInput = {
     topicAnchor: "会場選びのコツ",
     usefulness: {
-      firsthand: true,
-      ceremonyDecision: true,
-      specific: false,
-      weddingDayContent: false,
-      promotional: "none",
-      preDecisionOrPhotoShoot: false,
+      firsthand: 2,
+      ceremonyDecision: 2,
+      specific: 0,
+      weddingDayContent: 0,
+      promotional: 0,
     },
   };
 
   it("never includes the negative promotional label, regardless of promotional level (spec.md §10-3: 否定的評価は公開画面に一切出さない)", () => {
     const text = renderRationaleText({
       ...baseInput,
-      usefulness: { ...baseInput.usefulness, promotional: "heavy" },
+      usefulness: { ...baseInput.usefulness, promotional: 2 },
     });
     expect(text).not.toContain("特定のサービス・会場への誘導を含む可能性がある");
     expect(text).not.toContain("PR");
@@ -326,15 +325,15 @@ describe("renderRationaleText (plan 07 §6-Q5: rationaleText のテンプレー�
   it("is invariant to the promotional level: output is identical across none/light/heavy for otherwise-identical input", () => {
     const withNone = renderRationaleText({
       ...baseInput,
-      usefulness: { ...baseInput.usefulness, promotional: "none" },
+      usefulness: { ...baseInput.usefulness, promotional: 0 },
     });
     const withLight = renderRationaleText({
       ...baseInput,
-      usefulness: { ...baseInput.usefulness, promotional: "light" },
+      usefulness: { ...baseInput.usefulness, promotional: 1 },
     });
     const withHeavy = renderRationaleText({
       ...baseInput,
-      usefulness: { ...baseInput.usefulness, promotional: "heavy" },
+      usefulness: { ...baseInput.usefulness, promotional: 2 },
     });
     expect(withLight).toBe(withNone);
     expect(withHeavy).toBe(withNone);
@@ -357,7 +356,7 @@ describe("renderRationaleText (plan 07 §6-Q5: rationaleText のテンプレー�
   it("changes output when a usefulness flag changes (not a constant string)", () => {
     const withWeddingDayContent = renderRationaleText({
       ...baseInput,
-      usefulness: { ...baseInput.usefulness, weddingDayContent: true },
+      usefulness: { ...baseInput.usefulness, weddingDayContent: 2 },
     });
     const without = renderRationaleText(baseInput);
     expect(withWeddingDayContent).not.toBe(without);
@@ -367,12 +366,11 @@ describe("renderRationaleText (plan 07 §6-Q5: rationaleText のテンプレー�
     const allFalse: RationaleTemplateInput = {
       topicAnchor: "式場探しの記録",
       usefulness: {
-        firsthand: false,
-        ceremonyDecision: false,
-        specific: false,
-        weddingDayContent: false,
-        promotional: "none",
-        preDecisionOrPhotoShoot: false,
+        firsthand: 0,
+        ceremonyDecision: 0,
+        specific: 0,
+        weddingDayContent: 0,
+        promotional: 0,
       },
     };
     expect(renderRationaleText(allFalse)).toBe(
@@ -389,42 +387,40 @@ describe("renderRationaleText (plan 07 §6-Q5: rationaleText のテンプレー�
   });
 
   it("throws when the deterministically-assembled sentence exceeds the cap via an out-of-spec topicAnchor (fail-loud, not silent truncation)", () => {
-    // `topicAnchor` の zod 上限は40字（`CurationItemSchema`）。有用度5項目
-    // （`promotional` は spec.md § 10-3 によりラベル対象外）すべて true の
-    // 状態で、その上限を大きく超える80字のアンカー（意図的に不正な入力）を
-    // 与えると、構造的最大値（182字、40字アンカー時）をさらに超え、
+    // `topicAnchor` の zod 上限は40字（`CurationItemSchema`）。ラベル対象4項目
+    // （`promotional` は spec.md §10-3 によりラベル対象外）すべて 2 の状態で、
+    // その上限を大きく超える120字のアンカー（意図的に不正な入力）を与えると、
+    // 構造的最大値（169字、40字アンカー時）をさらに超え、
     // RATIONALE_TEXT_MAX_CHARS（210字）も超過する。renderRationaleText()
     // は決定的テンプレートのため、これは実装バグまたはスキーマ制約破りを
     // 意味する - 黙って切り詰めず例外を投げること。
     const overLongInput: RationaleTemplateInput = {
-      topicAnchor: "あ".repeat(80),
+      topicAnchor: "あ".repeat(120),
       usefulness: {
-        firsthand: true,
-        ceremonyDecision: true,
-        specific: true,
-        weddingDayContent: true,
-        promotional: "heavy",
-        preDecisionOrPhotoShoot: true,
+        firsthand: 2,
+        ceremonyDecision: 2,
+        specific: 2,
+        weddingDayContent: 2,
+        promotional: 2,
       },
     };
     expect(() => renderRationaleText(overLongInput)).toThrow();
   });
 
-  it("never exceeds RATIONALE_TEXT_MAX_CHARS at the structural maximum: topicAnchor at the zod cap (40 chars) with all 5 labeled usefulness flags true", () => {
+  it("never exceeds RATIONALE_TEXT_MAX_CHARS at the structural maximum: topicAnchor at the zod cap (40 chars) with all 4 labeled usefulness flags at 2", () => {
     // これが今回欠けていた保護そのもの: RATIONALE_TEXT_MAX_CHARS が
-    // 構造的最大値（アンカー40字×ラベル対象フラグ5個。`promotional` は
+    // 構造的最大値（アンカー40字×ラベル対象フラグ4個。`promotional` は
     // spec.md § 10-3 によりラベル対象外）を常に上回ることを保証する。
     // 将来テンプレートやラベル文言を増やして構造的最大値が伸びた場合、
     // このテストが落ちて気づけるようにする。
     const structuralMaxInput: RationaleTemplateInput = {
       topicAnchor: "あ".repeat(40),
       usefulness: {
-        firsthand: true,
-        ceremonyDecision: true,
-        specific: true,
-        weddingDayContent: true,
-        promotional: "heavy",
-        preDecisionOrPhotoShoot: true,
+        firsthand: 2,
+        ceremonyDecision: 2,
+        specific: 2,
+        weddingDayContent: 2,
+        promotional: 2,
       },
     };
     let text = "";
@@ -434,29 +430,28 @@ describe("renderRationaleText (plan 07 §6-Q5: rationaleText のテンプレー�
     expect(text.length).toBeLessThanOrEqual(RATIONALE_TEXT_MAX_CHARS);
   });
 
-  it("fixes the structural maximum output length (topicAnchor at the zod cap, all 5 labeled flags true) as a literal (regression guard against silent template growth)", () => {
+  it("fixes the structural maximum output length (topicAnchor at the zod cap, all 4 labeled flags at 2) as a literal (regression guard against silent template growth)", () => {
     // 構造的最大値の実測: 182字（`promotional` は
-    // ラベル対象外のためフラグ5個分のみで計算される）。
+    // ラベル対象外のためフラグ4個分のみで計算される）。
     // テンプレート文言やラベルを変更した際、
     // この期待値がズレることで気づけるようにする。
     // 期待値は定数から導出せずリテラルで固定する。
     const structuralMaxInput: RationaleTemplateInput = {
       topicAnchor: "あ".repeat(40),
       usefulness: {
-        firsthand: true,
-        ceremonyDecision: true,
-        specific: true,
-        weddingDayContent: true,
-        promotional: "heavy",
-        preDecisionOrPhotoShoot: true,
+        firsthand: 2,
+        ceremonyDecision: 2,
+        specific: 2,
+        weddingDayContent: 2,
+        promotional: 2,
       },
     };
     const text = renderRationaleText(structuralMaxInput);
-    expect(text.length).toBe(191);
+    expect(text.length).toBe(169);
   });
 
-  it("fixes the actual output length for a 5-true-flag combination as a literal (regression guard against silent template growth)", () => {
-    // 実データ相当: ラベル対象5項目すべて true + 実在ケースと同じ
+  it("fixes the actual output length for a 4-flags-at-2 combination as a literal (regression guard against silent template growth)", () => {
+    // 実データ相当: ラベル対象4項目すべて 2 + 実在ケースと同じ
     // 桁数の topicAnchor。`promotional` はラベル対象外のため値を変えても
     // 出力に影響しない。テンプレート文言を将来変更した際、
     // この期待値がズレることで気づけるようにする。
@@ -464,42 +459,38 @@ describe("renderRationaleText (plan 07 §6-Q5: rationaleText のテンプレー�
     const fiveTrueInput: RationaleTemplateInput = {
       topicAnchor: "会場選びのコツ",
       usefulness: {
-        firsthand: true,
-        ceremonyDecision: true,
-        specific: true,
-        weddingDayContent: true,
-        promotional: "none",
-        preDecisionOrPhotoShoot: true,
+        firsthand: 2,
+        ceremonyDecision: 2,
+        specific: 2,
+        weddingDayContent: 2,
+        promotional: 0,
       },
     };
     const text = renderRationaleText(fiveTrueInput);
     expect(text).toBe(
-      "「会場選びのコツ」に関する記事で、実際に挙式・披露宴を経験した立場からの記述である、挙式・披露宴の中身の意思決定に役立つ内容を含む、具体的な選択や工夫についての記述がある、結婚式当日の内容（進行・演出など）に具体的に触れている、式場決定前の段階や前撮り・後撮りに関する話題が中心であるという特徴が自動判定されました。",
+      "「会場選びのコツ」に関する記事で、実際に挙式・披露宴を経験した立場からの記述である、挙式・披露宴の中身の意思決定に役立つ内容を含む、具体的な選択や工夫についての記述がある、フルパッケージ結婚式当日の内容（進行・演出など）に具体的に触れているという特徴が自動判定されました。",
     );
-    expect(text.length).toBe(158);
+    expect(text.length).toBe(136);
     expect(text.length).toBeLessThanOrEqual(RATIONALE_TEXT_MAX_CHARS);
   });
 
-  it("does not throw for a real-data-scale case: 29-char anchor with 4 true labeled flags (142 chars, promotional excluded from labeling)", () => {
-    // shared_plan の実測（postId 235）相当: アンカー29字 ×
-    // ラベル対象フラグ4個（`preDecisionOrPhotoShoot` のみ false、
-    // `promotional` はラベル対象外）= 142字。
+  it("does not throw for a real-data-scale case: 29-char anchor with 4 labeled flags at 2 (promotional excluded from labeling)", () => {
+    // アンカー29字 × ラベル対象フラグ4個（`promotional` はラベル対象外）。
     const realDataScaleInput: RationaleTemplateInput = {
       topicAnchor: "あ".repeat(29),
       usefulness: {
-        firsthand: true,
-        ceremonyDecision: true,
-        specific: true,
-        weddingDayContent: true,
-        promotional: "heavy",
-        preDecisionOrPhotoShoot: false,
+        firsthand: 2,
+        ceremonyDecision: 2,
+        specific: 2,
+        weddingDayContent: 2,
+        promotional: 2,
       },
     };
     let text = "";
     expect(() => {
       text = renderRationaleText(realDataScaleInput);
     }).not.toThrow();
-    expect(text.length).toBe(151);
+    expect(text.length).toBe(158);
   });
 
   it("fixes the publish-reachable structural minimum output length (2-char topicAnchor — the shortest that survives checkAnchorGrounding — all usefulness flags false) as a literal (regression guard against silent template shrinkage)", () => {
@@ -515,12 +506,11 @@ describe("renderRationaleText (plan 07 §6-Q5: rationaleText のテンプレー�
     const structuralMinInput: RationaleTemplateInput = {
       topicAnchor: "あい",
       usefulness: {
-        firsthand: false,
-        ceremonyDecision: false,
-        specific: false,
-        weddingDayContent: false,
-        promotional: "none",
-        preDecisionOrPhotoShoot: false,
+        firsthand: 0,
+        ceremonyDecision: 0,
+        specific: 0,
+        weddingDayContent: 0,
+        promotional: 0,
       },
     };
     const text = renderRationaleText(structuralMinInput);
@@ -541,12 +531,11 @@ describe("renderRationaleText (plan 07 §6-Q5: rationaleText のテンプレー�
     const belowMinInput: RationaleTemplateInput = {
       topicAnchor: "あ",
       usefulness: {
-        firsthand: false,
-        ceremonyDecision: false,
-        specific: false,
-        weddingDayContent: false,
-        promotional: "none",
-        preDecisionOrPhotoShoot: false,
+        firsthand: 0,
+        ceremonyDecision: 0,
+        specific: 0,
+        weddingDayContent: 0,
+        promotional: 0,
       },
     };
     expect(() => renderRationaleText(belowMinInput)).toThrow();

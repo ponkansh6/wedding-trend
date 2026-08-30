@@ -1,273 +1,161 @@
 import { describe, expect, it } from "vitest";
 import {
   USEFULNESS_GATE_BONUS,
+  USEFULNESS_WEIGHT_CEREMONY_DECISION,
   USEFULNESS_WEIGHT_FIRSTHAND,
-  USEFULNESS_WEIGHT_PRE_DECISION_PENALTY,
   USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY,
   USEFULNESS_WEIGHT_SPECIFIC,
   USEFULNESS_WEIGHT_WEDDING_DAY,
 } from "@/lib/constants";
 import {
   computeUsefulnessScore,
+  normalizeCriterion,
   normalizePromotional,
   UNSCORED_USEFULNESS_SCORE,
   type UsefulnessCriteria,
 } from "@/lib/scoring/usefulness";
 
-/** 全項目 false（promotional は "none"）のベースライン。個々のテストで必要な項目だけ上書きする。 */
-const ALL_FALSE: UsefulnessCriteria = {
-  firsthand: false,
-  ceremonyDecision: false,
-  specific: false,
-  weddingDayContent: false,
-  promotional: "none",
-  preDecisionOrPhotoShoot: false,
+/** 全項目 0 のベースライン。個々のテストで必要な項目だけ上書きする。 */
+const ALL_ZERO: UsefulnessCriteria = {
+  firsthand: 0,
+  ceremonyDecision: 0,
+  specific: 0,
+  weddingDayContent: 0,
+  promotional: 0,
 };
 
-describe("computeUsefulnessScore", () => {
-  it("gates on ceremonyDecision: failing the gate outscored by nothing, even with all other criteria true", () => {
-    // オーナーの意図の核心: 「衣装だけの記事だが実体験・具体的・weddingDayContent
-    // あり」が「式の中身に触れているが浅い記事」を上回ってはならない。
-    const richButOffTopic = computeUsefulnessScore({
-      ...ALL_FALSE,
-      firsthand: true,
-      specific: true,
-      weddingDayContent: true,
-      promotional: "heavy",
-    });
-    const shallowButOnTopic = computeUsefulnessScore({
-      ...ALL_FALSE,
-      ceremonyDecision: true,
-    });
+/** リテラル 0/1/2 が `number` へ広がるのを避けつつ部分上書きするヘルパ。 */
+const score = (over: Partial<Record<keyof UsefulnessCriteria, number>>) =>
+  computeUsefulnessScore({ ...ALL_ZERO, ...over } as UsefulnessCriteria);
 
-    expect(richButOffTopic).toBeLessThan(shallowButOnTopic);
+describe("computeUsefulnessScore (0-2 三段階)", () => {
+  it("boundary: 全項目 0 は 0 点", () => {
+    expect(computeUsefulnessScore(ALL_ZERO)).toBe(0);
   });
 
-  it("boundary: all criteria false scores 0", () => {
-    expect(computeUsefulnessScore(ALL_FALSE)).toBe(0);
-  });
-
-  it("boundary: all criteria true fails the gate (preDecisionOrPhotoShoot=true) and pays both the promotional and pre-decision penalties", () => {
-    const allTrue: UsefulnessCriteria = {
-      firsthand: true,
-      ceremonyDecision: true,
-      specific: true,
-      weddingDayContent: true,
-      promotional: "heavy",
-      preDecisionOrPhotoShoot: true,
-    };
-    // preDecisionOrPhotoShoot: true によりゲート不通過となるため、ゲート分は 0。
-    // 残りは firsthand(3) + specific(2) + weddingDayContent(2) - promotional(4) -
-    // preDecisionPenalty(3) = 0。定数から組み立てて検証する。
-    const expected =
-      USEFULNESS_WEIGHT_FIRSTHAND +
-      USEFULNESS_WEIGHT_SPECIFIC +
-      USEFULNESS_WEIGHT_WEDDING_DAY -
-      USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY -
-      USEFULNESS_WEIGHT_PRE_DECISION_PENALTY;
-    expect(computeUsefulnessScore(allTrue)).toBe(expected);
-  });
-
-  it("each positive criterion adds its own weight independently of the others", () => {
-    const gateOnly = computeUsefulnessScore({ ...ALL_FALSE, ceremonyDecision: true });
-
-    expect(
-      computeUsefulnessScore({ ...ALL_FALSE, ceremonyDecision: true, firsthand: true }) - gateOnly,
-    ).toBe(USEFULNESS_WEIGHT_FIRSTHAND);
-    expect(
-      computeUsefulnessScore({ ...ALL_FALSE, ceremonyDecision: true, specific: true }) - gateOnly,
-    ).toBe(USEFULNESS_WEIGHT_SPECIFIC);
-    expect(
-      computeUsefulnessScore({ ...ALL_FALSE, ceremonyDecision: true, weddingDayContent: true }) -
-        gateOnly,
-    ).toBe(USEFULNESS_WEIGHT_WEDDING_DAY);
-  });
-
-  it("promotional subtracts its own weight independently, regardless of the other criteria", () => {
-    const gateOnly = computeUsefulnessScore({ ...ALL_FALSE, ceremonyDecision: true });
-    const gateAndPromotional = computeUsefulnessScore({
-      ...ALL_FALSE,
-      ceremonyDecision: true,
-      promotional: "heavy",
-    });
-
-    expect(gateOnly - gateAndPromotional).toBe(USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY);
-  });
-
-  it('promotional: "light" and "none" incur no penalty (only "heavy" is penalized, per the 3-level enum)', () => {
-    // 今回の変更の核心: boolean→3段階 enum 化により、"light"（軽微な言及）は
-    // 減点対象から外れ、"heavy"（明確な宣伝）だけが減点される。
-    const gateOnly = computeUsefulnessScore({ ...ALL_FALSE, ceremonyDecision: true });
-    const gateAndNone = computeUsefulnessScore({
-      ...ALL_FALSE,
-      ceremonyDecision: true,
-      promotional: "none",
-    });
-    const gateAndLight = computeUsefulnessScore({
-      ...ALL_FALSE,
-      ceremonyDecision: true,
-      promotional: "light",
-    });
-
-    expect(gateAndNone).toBe(gateOnly);
-    expect(gateAndLight).toBe(gateOnly);
-  });
-
-  it("preDecisionOrPhotoShoot subtracts its own weight independently of ceremonyDecision", () => {
-    // ゲートの AND 条件（ceremonyDecision && !preDecisionOrPhotoShoot）とは別に、
-    // preDecisionOrPhotoShoot は単独の減点としても効く。ceremonyDecision の
-    // 値に関わらず、この減点だけが差分になる。
-    const withoutPreDecision = computeUsefulnessScore({
-      ...ALL_FALSE,
-      firsthand: true,
-      specific: true,
-    });
-    const withPreDecision = computeUsefulnessScore({
-      ...ALL_FALSE,
-      firsthand: true,
-      specific: true,
-      preDecisionOrPhotoShoot: true,
-    });
-
-    expect(withoutPreDecision - withPreDecision).toBe(USEFULNESS_WEIGHT_PRE_DECISION_PENALTY);
-  });
-
-  it("even a promotional gate-passing article still outranks the richest possible gate-failing article (strong domination, 10→12 の理由そのもの)", () => {
-    // 10 のままだと、ゲートを通過したが宣伝判定を受けた記事（10-4=6）が、
-    // ゲート不通過だが他の加点項目を総取りした記事（3+2+2=7）に負けていた。
-    // GATE_BONUS を 12 に引き上げたことで、この逆転が構造的に起きなくなる
-    // ことを確認する（オーナー判断の核心）。
-    const barelyQualifyingButPromotional = computeUsefulnessScore({
-      ...ALL_FALSE,
-      ceremonyDecision: true,
-      promotional: "heavy",
-    });
-    const richestNonGatePassing = computeUsefulnessScore({
-      ...ALL_FALSE,
-      firsthand: true,
-      specific: true,
-      weddingDayContent: true,
-    });
-
-    expect(barelyQualifyingButPromotional).toBeGreaterThan(richestNonGatePassing);
-  });
-
-  it("UNSCORED_USEFULNESS_SCORE sits in the gate-not-passed band: below the gate-passing floor, above the gate-not-passed floor", () => {
-    const gatePassingFloor = computeUsefulnessScore({ ...ALL_FALSE, ceremonyDecision: true });
-    const nonGatePassingFloor = computeUsefulnessScore(ALL_FALSE);
-
-    expect(UNSCORED_USEFULNESS_SCORE).toBeLessThan(gatePassingFloor);
-    expect(UNSCORED_USEFULNESS_SCORE).toBeGreaterThan(nonGatePassingFloor);
-  });
-
-  it("preDecisionOrPhotoShoot true blocks the gate even when ceremonyDecision is true", () => {
-    const photoShoot = computeUsefulnessScore({
-      ...ALL_FALSE,
-      ceremonyDecision: true,
-      preDecisionOrPhotoShoot: true,
-      firsthand: true,
-      specific: true,
-      weddingDayContent: true,
-    });
-    // ゲート不通過 → firsthand(3)+specific(2)+weddingDayContent(2) - preDecisionPenalty(3)。
-    // ceremonyDecision のみの USEFULNESS_GATE_BONUS より下。
-    const expected =
-      USEFULNESS_WEIGHT_FIRSTHAND +
-      USEFULNESS_WEIGHT_SPECIFIC +
-      USEFULNESS_WEIGHT_WEDDING_DAY -
-      USEFULNESS_WEIGHT_PRE_DECISION_PENALTY;
-    expect(photoShoot).toBe(expected);
-    expect(photoShoot).toBeLessThan(
-      computeUsefulnessScore({ ...ALL_FALSE, ceremonyDecision: true }),
+  it("ゲート: ceremonyDecision>=1 かつ weddingDayContent>=1 で GATE_BONUS が付く", () => {
+    expect(score({ ceremonyDecision: 1 })).toBe(USEFULNESS_WEIGHT_CEREMONY_DECISION * 1); // weddingDayContent=0 なのでゲート不通過
+    expect(score({ ceremonyDecision: 1, weddingDayContent: 1 })).toBe(
+      USEFULNESS_GATE_BONUS +
+        USEFULNESS_WEIGHT_CEREMONY_DECISION * 1 +
+        USEFULNESS_WEIGHT_WEDDING_DAY * 1,
     );
   });
 
-  it("photo-wedding equivalent scores lower than a Canva-DIY equivalent (core change of plan 02)", () => {
-    const photoWedding = computeUsefulnessScore({
-      ...ALL_FALSE,
-      firsthand: true,
-      ceremonyDecision: true,
-      specific: true,
-      weddingDayContent: true,
-      preDecisionOrPhotoShoot: true,
-    }); // ゲート不通過 → 3+2+2-3(preDecisionPenalty) = 4
-    const canvaDiy = computeUsefulnessScore({
-      ...ALL_FALSE,
-      firsthand: true,
-      ceremonyDecision: true,
-      specific: true,
-    }); // ゲート通過 → 12+3+2 = 17
-    expect(photoWedding).toBeLessThan(canvaDiy);
+  it("各項目は自分の重み × 値（0/1/2）を独立に加算する", () => {
+    const gate = { ceremonyDecision: 2, weddingDayContent: 2 };
+    const base = score(gate);
+    expect(score({ ...gate, firsthand: 1 }) - base).toBe(USEFULNESS_WEIGHT_FIRSTHAND);
+    expect(score({ ...gate, firsthand: 2 }) - base).toBe(2 * USEFULNESS_WEIGHT_FIRSTHAND);
+    expect(score({ ...gate, specific: 2 }) - base).toBe(2 * USEFULNESS_WEIGHT_SPECIFIC);
   });
 
-  it("preDecisionOrPhotoShoot now pays both the lost gate and the independent penalty (double effect, not double-avoided)", () => {
-    // 以前は preDecisionOrPhotoShoot はゲートの AND 条件でしか効かず、独立減点が
-    // 無かったため「宣伝記事より上に留まる」挙動だった。今回オーナー判断で
-    // 独立減点を追加したため、この関係は反転しうる——ここではその反転を
-    // 固定する（意図した仕様変更であることの記録）。
-    const preShoot = computeUsefulnessScore({
-      ...ALL_FALSE,
-      firsthand: true,
-      ceremonyDecision: true,
-      specific: true,
-      weddingDayContent: true,
-      preDecisionOrPhotoShoot: true,
-    }); // 3+2+2-3 = 4
-    const promotional = computeUsefulnessScore({
-      ...ALL_FALSE,
-      ceremonyDecision: true,
-      promotional: "heavy",
-    }); // 12-4 = 8
-    expect(preShoot).toBeLessThan(promotional);
+  it("promotional は 2（heavy）のときのみ減点。0/1 は無罰則", () => {
+    const gate = { ceremonyDecision: 2, weddingDayContent: 2 };
+    const base = score(gate);
+    expect(score({ ...gate, promotional: 1 })).toBe(base);
+    expect(base - score({ ...gate, promotional: 2 })).toBe(USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY);
   });
 
-  it("invariant: gate-passing always outranks gate-failing, even a promotional gate-passer against the richest possible gate-failer", () => {
-    // 強支配（strong domination）不変条件。定数から式を組み立てて検証するため、
-    // USEFULNESS_GATE_BONUS や合計値をここに直書きしない——定数を変えて
-    // この不変条件が破れたら、このテストが落ちる。
-    const worstGatePassing = computeUsefulnessScore({
-      ...ALL_FALSE,
-      ceremonyDecision: true,
-      promotional: "heavy",
+  it("フォト婚相当（weddingDayContent=0）はゲート不通過帯に沈む（旧 preDecisionOrPhotoShoot の吸収）", () => {
+    const photoWedding = score({
+      firsthand: 2,
+      ceremonyDecision: 2,
+      specific: 2,
+      weddingDayContent: 0, // フォト婚・前撮り・準備段階のみ
     });
-    const bestGateFailing = computeUsefulnessScore({
-      ...ALL_FALSE,
-      firsthand: true,
-      specific: true,
-      weddingDayContent: true,
+    const realWeddingDay = score({
+      firsthand: 2,
+      ceremonyDecision: 2,
+      specific: 2,
+      weddingDayContent: 2,
     });
+    expect(photoWedding).toBeLessThan(realWeddingDay);
+    expect(photoWedding).toBeLessThan(USEFULNESS_GATE_BONUS);
+  });
 
-    expect(worstGatePassing).toBeGreaterThan(bestGateFailing);
-    expect(USEFULNESS_GATE_BONUS - USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY).toBeGreaterThan(
-      USEFULNESS_WEIGHT_FIRSTHAND + USEFULNESS_WEIGHT_SPECIFIC + USEFULNESS_WEIGHT_WEDDING_DAY,
+  it("UNSCORED はゲート通過帯の下限未満・0 超の中位に置かれる", () => {
+    const gatePassingFloor = score({ ceremonyDecision: 1, weddingDayContent: 1, promotional: 2 });
+    expect(UNSCORED_USEFULNESS_SCORE).toBeLessThan(gatePassingFloor);
+    expect(UNSCORED_USEFULNESS_SCORE).toBeGreaterThan(computeUsefulnessScore(ALL_ZERO));
+  });
+
+  it("強支配不変条件: どんなゲート通過記事も、あらゆるゲート不通過記事に勝つ（定数から式を組んで固定）", () => {
+    // ゲート通過の最小（cd=1, wdc=1, 他0, promotional=2）
+    const worstGatePassing = score({ ceremonyDecision: 1, weddingDayContent: 1, promotional: 2 });
+    // ゲート不通過の最大: ceremonyDecision=0 で他を総取り
+    const bestGateFailingA = score({ firsthand: 2, specific: 2, weddingDayContent: 2 });
+    // ゲート不通過の最大: weddingDayContent=0 で ceremonyDecision=2
+    const bestGateFailingB = score({ ceremonyDecision: 2, firsthand: 2, specific: 2 });
+
+    expect(worstGatePassing).toBeGreaterThan(bestGateFailingA);
+    expect(worstGatePassing).toBeGreaterThan(bestGateFailingB);
+
+    // 定数レベルの不変条件（重みを変えて破れたらここが落ちる）
+    expect(
+      USEFULNESS_GATE_BONUS +
+        USEFULNESS_WEIGHT_CEREMONY_DECISION +
+        USEFULNESS_WEIGHT_WEDDING_DAY -
+        USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY,
+    ).toBeGreaterThan(
+      2 *
+        (USEFULNESS_WEIGHT_FIRSTHAND + USEFULNESS_WEIGHT_SPECIFIC + USEFULNESS_WEIGHT_WEDDING_DAY),
+    );
+    expect(
+      USEFULNESS_GATE_BONUS +
+        USEFULNESS_WEIGHT_CEREMONY_DECISION +
+        USEFULNESS_WEIGHT_WEDDING_DAY -
+        USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY,
+    ).toBeGreaterThan(
+      2 *
+        (USEFULNESS_WEIGHT_CEREMONY_DECISION +
+          USEFULNESS_WEIGHT_FIRSTHAND +
+          USEFULNESS_WEIGHT_SPECIFIC),
     );
   });
 });
 
+describe("normalizeCriterion", () => {
+  it("整数 0/1/2 はそのまま", () => {
+    expect(normalizeCriterion(0)).toBe(0);
+    expect(normalizeCriterion(1)).toBe(1);
+    expect(normalizeCriterion(2)).toBe(2);
+  });
+  it("範囲外の数値は clamp", () => {
+    expect(normalizeCriterion(3)).toBe(2);
+    expect(normalizeCriterion(-1)).toBe(0);
+    expect(normalizeCriterion(1.7)).toBe(1);
+  });
+  it("旧 boolean を吸収（true→2 / false→0）", () => {
+    expect(normalizeCriterion(true)).toBe(2);
+    expect(normalizeCriterion(false)).toBe(0);
+  });
+  it("その他は 0", () => {
+    expect(normalizeCriterion(undefined)).toBe(0);
+    expect(normalizeCriterion(null)).toBe(0);
+    expect(normalizeCriterion("2")).toBe(0);
+    expect(normalizeCriterion(NaN)).toBe(0);
+  });
+});
+
 describe("normalizePromotional", () => {
-  it("passes through the three canonical enum values unchanged", () => {
-    expect(normalizePromotional("none")).toBe("none");
-    expect(normalizePromotional("light")).toBe("light");
-    expect(normalizePromotional("heavy")).toBe("heavy");
+  it("新 0/1/2 はそのまま", () => {
+    expect(normalizePromotional(0)).toBe(0);
+    expect(normalizePromotional(1)).toBe(1);
+    expect(normalizePromotional(2)).toBe(2);
   });
-
-  it('maps the legacy boolean true to "light" (not "heavy") for backward compatibility', () => {
-    // 確定方針: 旧 boolean true は「PRらしき言及があった」程度の弱いシグナル
-    // だったため、3段階化後の "light"（無罰則）に丸める。"heavy" 昇格はしない。
-    expect(normalizePromotional(true)).toBe("light");
+  it("旧文字列 enum を吸収（none→0 / light→1 / heavy→2）", () => {
+    expect(normalizePromotional("none")).toBe(0);
+    expect(normalizePromotional("light")).toBe(1);
+    expect(normalizePromotional("heavy")).toBe(2);
   });
-
-  it('maps the legacy boolean false to "none"', () => {
-    expect(normalizePromotional(false)).toBe("none");
+  it("旧 boolean を吸収（true→1（減点対象の 2 には昇格しない）/ false→0）", () => {
+    expect(normalizePromotional(true)).toBe(1);
+    expect(normalizePromotional(false)).toBe(0);
   });
-
-  it('falls back to "none" for undefined, null, numbers, and unrecognized strings', () => {
-    expect(normalizePromotional(undefined)).toBe("none");
-    expect(normalizePromotional(null)).toBe("none");
-    expect(normalizePromotional(0)).toBe("none");
-    expect(normalizePromotional(1)).toBe("none");
-    expect(normalizePromotional("")).toBe("none");
-    expect(normalizePromotional("yes")).toBe("none");
-    expect(normalizePromotional("HEAVY")).toBe("none");
+  it("その他は 0", () => {
+    expect(normalizePromotional(undefined)).toBe(0);
+    expect(normalizePromotional(null)).toBe(0);
+    expect(normalizePromotional("HEAVY")).toBe(0);
   });
 });

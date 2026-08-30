@@ -107,12 +107,11 @@ describe("Database Repository and Queries", () => {
           postId,
           modelId: "test-model",
           criteria: {
-            firsthand: true,
-            ceremonyDecision: true,
-            specific: true,
-            weddingDayContent: false,
-            promotional: "none",
-            preDecisionOrPhotoShoot: false,
+            firsthand: 2,
+            ceremonyDecision: 2,
+            specific: 2,
+            weddingDayContent: 0,
+            promotional: 0,
           },
         },
       },
@@ -126,12 +125,11 @@ describe("Database Repository and Queries", () => {
     expect(usefulnessRows).toHaveLength(1);
     expect(usefulnessRows[0].postId).toBe(postId);
     expect(JSON.parse(usefulnessRows[0].criteriaJson)).toEqual({
-      firsthand: true,
-      ceremonyDecision: true,
-      specific: true,
-      weddingDayContent: false,
-      promotional: "none",
-      preDecisionOrPhotoShoot: false,
+      firsthand: 2,
+      ceremonyDecision: 2,
+      specific: 2,
+      weddingDayContent: 0,
+      promotional: 0,
     });
     expect(usefulnessRows[0].signature).toBe("sig1");
     expect(usefulnessRows[0].modelId).toBe("test-model");
@@ -482,12 +480,11 @@ describe("Database Repository and Queries", () => {
       const buildUpdate = (
         url: string,
         criteria: {
-          firsthand: boolean;
-          ceremonyDecision: boolean;
-          specific: boolean;
-          weddingDayContent: boolean;
-          promotional: "none" | "light" | "heavy";
-          preDecisionOrPhotoShoot: boolean;
+          firsthand: 0 | 1 | 2;
+          ceremonyDecision: 0 | 1 | 2;
+          specific: 0 | 1 | 2;
+          weddingDayContent: 0 | 1 | 2;
+          promotional: 0 | 1 | 2;
         } | null,
       ) => ({
         url,
@@ -509,55 +506,48 @@ describe("Database Repository and Queries", () => {
       });
 
       await markCurated([
-        // score = 12(gate) + 3(firsthand) + 2(specific) + 2(weddingDayContent) = 19
+        // gate(16) + W_CD×2(4) + W_F×2(6) + W_S×2(4) + W_WDC×2(4) = 34
         buildUpdate("https://example.com/a", {
-          firsthand: true,
-          ceremonyDecision: true,
-          specific: true,
-          weddingDayContent: true,
-          promotional: "none",
-          preDecisionOrPhotoShoot: false,
+          firsthand: 2,
+          ceremonyDecision: 2,
+          specific: 2,
+          weddingDayContent: 2,
+          promotional: 0,
         }),
-        // score = 12(gate) = 12
+        // gate(16) + W_CD×2(4) + W_WDC×2(4) = 24
         buildUpdate("https://example.com/b", {
-          firsthand: false,
-          ceremonyDecision: true,
-          specific: false,
-          weddingDayContent: false,
-          promotional: "none",
-          preDecisionOrPhotoShoot: false,
+          firsthand: 0,
+          ceremonyDecision: 2,
+          specific: 0,
+          weddingDayContent: 2,
+          promotional: 0,
         }),
-        // score = 12(gate) = 12（b と同点。publishedAt が新しい方が先）
+        // 24（b と同点。publishedAt が新しい方が先）
         buildUpdate("https://example.com/b2", {
-          firsthand: false,
-          ceremonyDecision: true,
-          specific: false,
-          weddingDayContent: false,
-          promotional: "none",
-          preDecisionOrPhotoShoot: false,
+          firsthand: 0,
+          ceremonyDecision: 2,
+          specific: 0,
+          weddingDayContent: 2,
+          promotional: 0,
         }),
-        // ceremonyDecision=false のためゲート不通過: 3+2+2 = 7 に留まる
-        // （preDecisionOrPhotoShoot=false なので独立減点も無し）
+        // ceremonyDecision=0 のためゲート不通過: W_F×2(6) + W_S×2(4) + W_WDC×2(4) = 14
         buildUpdate("https://example.com/d", {
-          firsthand: true,
-          ceremonyDecision: false,
-          specific: true,
-          weddingDayContent: true,
-          promotional: "none",
-          preDecisionOrPhotoShoot: false,
+          firsthand: 2,
+          ceremonyDecision: 0,
+          specific: 2,
+          weddingDayContent: 2,
+          promotional: 0,
         }),
-        // preDecisionOrPhotoShoot=true のためゲート不通過かつ独立減点も乗る:
-        // 3+2+2-3(preDecisionPenalty) = 4。publishedAt は 01-06 で d(01-03) より
-        // 新しいが、独立減点により d(7) より下に沈む（今回の仕様変更の核心）。
+        // weddingDayContent=0（フォト婚・準備段階のみ = 旧 preDecisionOrPhotoShoot 吸収）
+        // のためゲート不通過: W_CD×1(2) + W_F×1(3) = 5。d(14) より下に沈む。
         buildUpdate("https://example.com/p", {
-          firsthand: true,
-          ceremonyDecision: true,
-          specific: true,
-          weddingDayContent: true,
-          promotional: "none",
-          preDecisionOrPhotoShoot: true,
+          firsthand: 1,
+          ceremonyDecision: 1,
+          specific: 0,
+          weddingDayContent: 0,
+          promotional: 0,
         }),
-        // 有用度未スコア（post_usefulness 行なし）: UNSCORED_USEFULNESS_SCORE(3) 扱い
+        // 有用度未スコア（post_usefulness 行なし）: UNSCORED_USEFULNESS_SCORE(4) 扱い
         buildUpdate("https://example.com/c", null),
       ]);
 
@@ -765,12 +755,11 @@ describe("Database Repository and Queries", () => {
             postId: fullId,
             modelId: "m1",
             criteria: {
-              firsthand: true,
-              ceremonyDecision: true,
-              specific: false,
-              weddingDayContent: true,
-              promotional: "none",
-              preDecisionOrPhotoShoot: false,
+              firsthand: 2,
+              ceremonyDecision: 2,
+              specific: 0,
+              weddingDayContent: 2,
+              promotional: 0,
             },
           },
         },
@@ -803,12 +792,11 @@ describe("Database Repository and Queries", () => {
       expect(fullCard?.topicAnchor).toBe("アンカー1");
       expect(fullCard?.rationaleText).toBe("これは判定根拠のテスト文章です。");
       expect(fullCard?.usefulness).toEqual({
-        firsthand: true,
-        ceremonyDecision: true,
-        specific: false,
-        weddingDayContent: true,
-        promotional: "none",
-        preDecisionOrPhotoShoot: false,
+        firsthand: 2,
+        ceremonyDecision: 2,
+        specific: 0,
+        weddingDayContent: 2,
+        promotional: 0,
       });
 
       expect(emptyCard).toBeDefined();

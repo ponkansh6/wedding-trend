@@ -67,10 +67,10 @@ export function FeedCard({ card, variant, index = 0 }: FeedCardProps) {
       {card.usefulness && (
         <p className="text-[11px] leading-tight text-muted-foreground">
           {[
-            card.usefulness.firsthand && "当事者",
-            card.usefulness.ceremonyDecision && "意思決定",
-            card.usefulness.specific && "具体的",
-            card.usefulness.weddingDayContent && "当日内容",
+            card.usefulness.firsthand >= 2 && "当事者",
+            card.usefulness.ceremonyDecision >= 2 && "意思決定",
+            card.usefulness.specific >= 2 && "具体的",
+            card.usefulness.weddingDayContent >= 2 && "当日内容",
           ]
             .filter(Boolean)
             .join("・")}

@@ -398,7 +398,6 @@ export function buildBackfillUpdates(outcomes, deps) {
                   specific: result.specific,
                   weddingDayContent: result.weddingDayContent,
                   promotional: result.promotional,
-                  preDecisionOrPhotoShoot: result.preDecisionOrPhotoShoot,
                 },
               }
             : undefined,

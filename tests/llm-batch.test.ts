@@ -20,14 +20,13 @@ function textResponse(text: string) {
   return { response: { text: () => text } };
 }
 
-/** 有用度判定 6 項目のデフォルト値（テストの主眼ではないため固定値で埋める）。 */
+/** 有用度判定 5 項目（すべて 0/1/2）のデフォルト値（テストの主眼ではないため固定値で埋める）。 */
 const USEFULNESS_FIELDS = {
-  firsthand: true,
-  ceremonyDecision: true,
-  specific: false,
-  weddingDayContent: false,
-  promotional: "none",
-  preDecisionOrPhotoShoot: false,
+  firsthand: 2,
+  ceremonyDecision: 2,
+  specific: 0,
+  weddingDayContent: 0,
+  promotional: 0,
 };
 
 // すべてのテストコーパス（タイトル「投稿N」＋抜粋「本文N」/「（本文抜粋なし）」）に
@@ -102,7 +101,7 @@ describe("curateBatch", () => {
     expect(results).toHaveLength(2);
     expect(results[0]?.title).toBe("式場レポート");
     expect(results[0]?.tag).toBe("trend");
-    expect(results[0]?.firsthand).toBe(true);
+    expect(results[0]?.firsthand).toBe(2);
     expect(results[1]?.category).toBe("衣装・ドレス");
     // plan 07 §6-Q5: rationaleText はもはや LLM の出力ではなく、
     // topicAnchor + 6 boolean からの決定的テンプレートで付与される。
@@ -297,7 +296,6 @@ describe("curatePosts", () => {
       category: "衣装・ドレス" as const,
       tag: "trend" as const,
       ...USEFULNESS_FIELDS,
-      promotional: "none" as const,
     };
 
     it("keeps anchor if passing on first try", async () => {
