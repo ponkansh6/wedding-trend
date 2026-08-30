@@ -221,6 +221,8 @@ export interface CurationUpdate {
     postId: number;
     criteria: UsefulnessCriteria;
     modelId: string;
+    /** 有用度計算時の curation signature。省略時は `curationSignature` にフォールバック。 */
+    signature?: string;
   };
   rationale?: {
     postId: number;
@@ -278,14 +280,17 @@ export async function markCurated(
 
   const buildUsefulnessValues = (u: CurationUpdate, now: string) => {
     if (!u.usefulness) return null;
-    const { postId, criteria, modelId } = u.usefulness;
+    const { postId, criteria, modelId, signature } = u.usefulness;
     return {
       postId,
       criteriaJson: JSON.stringify(criteria),
-      // posts.curationSignature と同じ値を保存する。両者は必ず一致させる
-      // （getStaleCurationCandidates は posts.curationSignature だけを見て
-      // 再スコア対象を判定するため、ここがズレると検出漏れになる）。
-      signature: u.curationSignature,
+      // 有用度計算時の curation signature を保存する（`u.usefulness.signature` 優先、
+      // 無ければ `u.curationSignature`）。通常のキュレーションでは両者は一致する。
+      // バックフィルの gate_degrade（アンカー不採用）では posts.curation_signature を
+      // 据え置きつつ有用度だけ前進させることがあるため、この signature は
+      // posts.curationSignature 以上（単調増加）となり得る。getStaleCurationCandidates は
+      // posts.curationSignature だけを見るため、検出漏れは発生しない。
+      signature: signature ?? u.curationSignature,
       modelId,
       scoredAt: now,
     };

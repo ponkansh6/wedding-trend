@@ -144,9 +144,14 @@ Next.js 16 (App Router), React 19, TypeScript strict, Tailwind CSS v4, Drizzle O
   `normalizeCriterion` / `normalizePromotional`（`src/lib/scoring/usefulness.ts`）が
   0-2 に吸収する（`CURATION_PROMPT_VERSION` bump ＋ 全件再キュレーションで
   速やかに置き換わる）。
-- `signature`: 採点時点の `computeCurationSignature()`（`src/lib/llm/signature.ts`）
-  の値。`posts.curation_signature` と比較し、プロンプト/モデルが変わった
-  記事を再スコア対象として検出する。
+- `signature`: 採点時点（その記事の有用度を計算した LLM 実行）の
+  `computeCurationSignature()` の値。通常のキュレーションでは
+  `posts.curation_signature` と一致するが、バックフィルのゲート下落
+  （アンカー不採用：gate_degrade）では `posts.curation_signature` を据え置きつつ
+  有用度だけ前進させるため、この値は `posts.curation_signature` 以上（単調増加）に
+  なり得る。再スコア対象の検出はあくまで `posts.curation_signature` の
+  不一致のみで行う（`posts.curation_signature` が据え置かれた記事は、有用度が
+  最新でも将来の再生成候補として残る）。
 - `model_id`: 採点した Gemini モデル ID。
 - `scored_at`: ISO8601 文字列（`config` / `posts` と同じ規約）。
 

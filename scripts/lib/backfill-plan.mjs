@@ -306,11 +306,11 @@ export function summarizeBackfillOutcomes(outcomes) {
  * `getStaleCurationCandidates()` の stale 判定から外れ、プロンプト/gate を
  * 改善した後も**二度と再生成の機会が来なくなる**（「淡白なアンカーの永久固定」。
  * このバックフィルが直そうとしている当のバグを別の形で再現してしまう）。
- * 同じ理由で `usefulness`（`post_usefulness_criteria`）への書き込みも
- * gate_degrade では省略する: `post_usefulness_criteria.signature` は
- * `posts.curationSignature` と必ず一致させる契約（`src/lib/db/repository.ts`
- * の `buildUsefulnessValues` JSDoc 参照）があり、`curationSignature` を
- * 進めないままここに値を書くとその契約が壊れる。
+ * 一方、有用度スコア（`usefulness` / `post_usefulness_criteria`）は gate_degrade でも
+ * 書き込むよう緩和された（署名を `currentSignature` とする単調増加契約）。
+ * これにより、アンカーがゲートに落ちた記事でも再計算済みの有用度スコアが正しく更新され、
+ * 掲載順の停滞が解消される。`posts.curation_signature` は据え置かれるため、
+ * 将来のアンカー再生成の機会は維持される。
  *
  * 一方 `aiTitle` / `aiSummary` / `category` / `tag` は topicAnchor の合否とは
  * 独立に正しく生成されているため、gate_degrade でも通常どおり更新する
@@ -385,13 +385,15 @@ export function buildBackfillUpdates(outcomes, deps) {
         _newTopicAnchor: finalTopicAnchor,
         _gateReason: gateReason,
         _rejectedAnchors: rejectedAnchors,
-        // 不変条件その3: gate_degrade では post_usefulness_criteria.signature が
-        // posts.curationSignature と一致しなくなってしまうため usefulness も省略する。
+        // 有用度: gate_degrade でも usefulness は signature を `currentSignature` として
+        // 書き込む（単調増加契約）。posts.curation_signature は進めないが、有用度スコアは
+        // 正しく最新化する。
         usefulness:
-          c.id !== null && !isDegrade
+          c.id !== null
             ? {
                 postId: c.id,
                 modelId,
+                signature: currentSignature,
                 criteria: {
                   firsthand: result.firsthand,
                   ceremonyDecision: result.ceremonyDecision,

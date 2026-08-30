@@ -36,7 +36,7 @@ type TestUpdate = {
   aiSummary: string;
   category: string;
   tag: string;
-  // gate_degrade では意図的に省略される（オーナー方針決定: 署名を進めない）。
+  // gate_degrade では curationSignature / contentHash は意図的に省略される（署名を進めない）。
   contentHash?: string;
   curationSignature?: string;
   _kind: string;
@@ -44,7 +44,7 @@ type TestUpdate = {
   _newTopicAnchor: string | null;
   _gateReason?: string | null;
   _rejectedAnchors?: TestRejectedAnchor[];
-  usefulness?: { postId: number; modelId: string };
+  usefulness?: { postId: number; modelId: string; signature?: string };
   rationale?: { postId: number; topicAnchor: string };
 };
 
@@ -465,10 +465,10 @@ describe("buildBackfillUpdates", () => {
     expect(updates[0].rationale).toMatchObject({ postId: 1, topicAnchor: "アンカー本文" });
   });
 
-  it("kind === 'gate_degrade' は topicAnchor が null になり rationale は渡さないが、aiTitle 等は通常どおり更新する", () => {
+  it("kind === 'gate_degrade' は topicAnchor が null になり rationale は渡さないが、aiTitle や usefulness は通常どおり更新する", () => {
     const outcomes: TestOutcome[] = [
       outcomeFor(
-        { url: "https://example.com/degrade" },
+        { url: "https://example.com/degrade", id: 1 },
         "gate_degrade",
         curationResult(),
         null,
@@ -486,10 +486,15 @@ describe("buildBackfillUpdates", () => {
     expect(updates[0].aiSummary).toBe("AI Summary");
     expect(updates[0].category).toBe("その他");
     expect(updates[0].tag).toBe("trend");
+    expect(updates[0].usefulness).toMatchObject({
+      postId: 1,
+      modelId: "test-model",
+      signature: "sig-current",
+    });
     expect(degradeReasonCounts.get("anchor_ungrounded")).toBe(1);
   });
 
-  it("本命の不変条件（オーナー方針決定）: kind === 'gate_degrade' では contentSignature を updates に含めてはならない（curationSignature を進めると二度と再生成されなくなる）", () => {
+  it("本命の不変条件（オーナー方針決定）: kind === 'gate_degrade' では contentSignature を updates に含めてはならない（curationSignature を進めると二度と再生成されなくなるが、usefulness は単調増加契約で書き込む）", () => {
     const outcomes: TestOutcome[] = [
       outcomeFor(
         { url: "https://example.com/degrade-signature", id: 42 },
@@ -512,14 +517,22 @@ describe("buildBackfillUpdates", () => {
     expect(updates[0].curationSignature).toBeUndefined();
     expect(updates[0].contentHash).toBeUndefined();
 
-    // post_usefulness_criteria.signature も posts.curationSignature と必ず一致
-    // させる契約があるため、署名を進めない以上 usefulness も書いてはならない。
-    expect(updates[0].usefulness).toBeUndefined();
+    // usefulness は gate_degrade でも単調増加契約で書き込まれる（signature は currentSignature）。
+    expect(updates[0].usefulness).toMatchObject({
+      postId: 42,
+      modelId: "test-model",
+      signature: "sig-current",
+    });
 
-    // markCurated に渡す直前でも同様（toMarkCuratedInput を経ても復活しない）。
+    // markCurated に渡す直前でも同様（toMarkCuratedInput を経ても posts 側の署名は復活しない）。
     const applyUpdates = toMarkCuratedInput(updates);
     expect(applyUpdates[0]).not.toHaveProperty("curationSignature");
     expect(applyUpdates[0]).not.toHaveProperty("contentHash");
+    expect(applyUpdates[0].usefulness).toMatchObject({
+      postId: 42,
+      modelId: "test-model",
+      signature: "sig-current",
+    });
   });
 
   it("要件4: matchedTermCounts は degrade した候補の rejectedAnchors から denylist 項目ごとに集計する（llm_failed / updated は数えない）", () => {
