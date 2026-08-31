@@ -2,7 +2,7 @@
  * Purpose: Publication history, removals, retractions, retry queue, evidence observations, host metrics.
  * When called: Publication pipeline, revalidation, retraction crawler, metrics recording.
  */
-import { and, desc, eq, gte, inArray, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { db } from "./index";
 import {
   posts,

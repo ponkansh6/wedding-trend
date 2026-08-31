@@ -3,9 +3,9 @@
  * When called: Discovery crawler, host crawling ledger.
  */
 import { createHash } from "crypto";
-import { and, desc, eq, gte, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "./index";
-import { discoverySeen, discoveryRun, discoveryHostMetrics } from "./schema";
+import { discoverySeen, discoveryRun } from "./schema";
 export type DiscoverySeenStatus = "pending" | "fetched" | "skipped";
 
 export function hashUrl(url: string): string {

@@ -16,7 +16,7 @@ async function filterRemoved(postIds: number[]): Promise<Set<number>> {
  * Purpose: Ingest write & curation database operations (upsertPosts, markCurated, candidates, config, embed, rationales).
  * When called: Ingest pipeline, LLM curation worker, submit-url, cron tasks.
  */
-import { and, desc, eq, gte, inArray, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
 import { db } from "./index";
 import {
   posts,
@@ -26,15 +26,7 @@ import {
   postRemovals,
   sourcePolicy,
 } from "./schema";
-import type {
-  BodyHashKind,
-  Category,
-  DropReason,
-  EmbedProvider,
-  PostStatus,
-  SourceType,
-  TrendTag,
-} from "@/lib/types";
+import type { Category, EmbedProvider, PostStatus, SourceType, TrendTag } from "@/lib/types";
 import type { UsefulnessCriteria } from "@/lib/scoring/usefulness";
 import type { NonEphemeralString } from "@/lib/types/judgment";
 /** `getSourcePolicy` / `upsertSourcePolicy` の行の型（schema から導出）。 */

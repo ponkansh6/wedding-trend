@@ -3,7 +3,7 @@ import { writeConfigValue } from "./ingest";
  * Purpose: Gate state & source policy database operations (sourcePolicy, hostGateState, discoveryCursor).
  * When called: Source policy checks, host gate gating, discovery cursors.
  */
-import { and, desc, eq, gte, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "./index";
 import { sourcePolicy, hostGateState, config } from "./schema";
 export type SourcePolicyRow = typeof sourcePolicy.$inferSelect;
