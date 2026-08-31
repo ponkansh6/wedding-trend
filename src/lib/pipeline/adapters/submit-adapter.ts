@@ -14,6 +14,7 @@ import { canonicalizeUrl } from "@/lib/url";
 import { dueRetries } from "@/lib/db/publication";
 import { fetchOEmbed } from "@/lib/embed/oembed";
 import { detectEmbedProvider } from "@/lib/embed/providers";
+import { getPostsByUrls, upsertPosts } from "@/lib/db/repository";
 import type { EmbedProvider } from "@/lib/types";
 
 const PROVIDER_DISPLAY_NAME: Record<EmbedProvider, string> = {
@@ -129,6 +130,39 @@ export class SubmitAdapter implements PipelineAdapter {
       });
     }
     return candidates;
+  }
+
+  /**
+   * 既存 post 行があればその id を返し（**フィールドは一切上書きしない**。
+   * 旧 `terminateSubmitRetry` は `upsertSubmitRow`（内部で `upsertPosts`）を
+   * 無条件に呼ぶため、既存の正常な `originalTitle` を URL 文字列で上書き
+   * するバグを持っていた。まず取得を試み、無い場合にのみ作成する）。
+   * 無ければ canonical URL と embed provider から最小行を作成する。
+   * oEmbed を再取得しない（旧実装と同じ）。
+   */
+  async ensureTombstonePost(url: string): Promise<number | null> {
+    const canonical = canonicalizeUrl(url) ?? url;
+    const existing = await getPostsByUrls([canonical]);
+    const existingId = existing.get(canonical)?.id;
+    if (existingId != null) return existingId;
+
+    const provider = detectEmbedProvider(canonical);
+    const upsertResult = await upsertPosts([
+      {
+        url: canonical,
+        sourceType: "sns",
+        sourceId: provider === "none" ? "sns" : provider,
+        sourceName: PROVIDER_DISPLAY_NAME[provider],
+        originalTitle: canonical,
+        originalExcerpt: null,
+        author: null,
+        thumbnailUrl: null,
+        publishedAt: null,
+      },
+    ]);
+    if (upsertResult.failed.length > 0) return null;
+    const states = await getPostsByUrls([canonical]);
+    return states.get(canonical)?.id ?? null;
   }
 
   async onTransientFailure(

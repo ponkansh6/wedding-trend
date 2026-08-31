@@ -116,6 +116,7 @@ function makeAdapter(): PipelineAdapter {
     fetchCandidates: vi.fn().mockResolvedValue([]),
     fetchDueRetries: vi.fn().mockResolvedValue([]),
     onTransientFailure: vi.fn().mockResolvedValue(false),
+    ensureTombstonePost: vi.fn().mockResolvedValue(null),
     onTerminalDrop: vi.fn().mockResolvedValue(undefined),
     buildFeedCard: vi.fn().mockResolvedValue({}),
   };

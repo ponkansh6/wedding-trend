@@ -230,6 +230,17 @@ export class RssAdapter implements PipelineAdapter {
     return candidates;
   }
 
+  /**
+   * RSS レーンは post 行を新規作成しない（post 行が既に存在する前提）。
+   * 既存行があればその id を返し、無ければ null（旧
+   * `processDueAndExpiredRetries` の rss 分岐と同じ「行が無ければ何もしない」）。
+   */
+  async ensureTombstonePost(url: string): Promise<number | null> {
+    const canonical = canonicalizeUrl(url) ?? url;
+    const states = await getPostsByUrls([canonical]);
+    return states.get(canonical)?.id ?? null;
+  }
+
   async onTransientFailure(
     candidate: PipelineCandidate,
     reason: "llm_transient" | "rate_capped",

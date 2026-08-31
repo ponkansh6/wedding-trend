@@ -148,6 +148,17 @@ export interface PipelineAdapter {
     ctx: RetryContext | null,
   ): Promise<void>;
   onTerminalDrop(candidate: PipelineCandidate, reason: TerminalReason, now: string): Promise<void>;
+  /**
+   * TTL 超過（retry_exhausted）による終端棄却専用。LLM/OGP/oEmbed を再取得
+   * せず、URL のみから「終端棄却済みの post 行」の id を確保する（墓標）。
+   * 既存 post 行があればそれを返し、**フィールドを一切上書きしない**
+   * （旧 `terminate*Retry` は `upsertPosts` 経由で `originalTitle` 等を
+   * URL 由来の値で上書きしてしまうバグを持つ。この関数はそれを踏まない）。
+   * 既存行が無い場合のみ、捏造せず URL から得られる情報のみで最小行を
+   * 作成して id を返す。post 行を作れない／特定できない場合は null。
+   * 呼び出し側（`terminateRetry`）は id が null なら何もしない。
+   */
+  ensureTombstonePost(url: string): Promise<number | null>;
   buildFeedCard(
     candidate: PipelineCandidate,
     curation: CurationResult,
@@ -579,4 +590,25 @@ export async function runPipelineOnCandidates(
   }
 
   return summary;
+}
+
+/**
+ * TTL 超過（retry_exhausted）による終端棄却の共有ルーチン（Stage 6 S2 Commit 2）。
+ * パイプラインではない: ゲートを通らず、LLM を呼ばず、公開もしない。
+ * 再試行台帳のライフサイクル終端に墓標を立てる記帳操作。
+ *
+ * レーン固有性は `adapter.ensureTombstonePost` にのみ宿り、ここではレーン名
+ * による分岐を一切書かない（「post 行を作る／取得する」＝アダプタ、
+ * 「棄却理由・冪等性・呼び出し順序」＝共有側、という oracle レビュー済みの分割線）。
+ *
+ * 現時点では未使用（次コミットで旧 `terminate*Retry` / `processDueAndExpiredRetries`
+ * の消費ループから配線する）。
+ */
+export async function terminateRetry(
+  adapter: PipelineAdapter,
+  url: string,
+  now: string,
+): Promise<void> {
+  const id = await adapter.ensureTombstonePost(url);
+  if (id != null) await markDropped(id, "retry_exhausted", now);
 }

@@ -13,6 +13,8 @@ import type { FeedCard, RetryContext } from "@/lib/types";
 import type { CurationResult } from "@/lib/llm/batch";
 import { canonicalizeUrl } from "@/lib/url";
 import { dueRetries } from "@/lib/db/publication";
+import { getPostsByUrls, upsertPosts } from "@/lib/db/repository";
+import { registrableDomain } from "@/lib/pipeline/evergreen";
 import { fetchOgpMetadata } from "@/lib/sources/ogp";
 import { resolveSourceName } from "@/lib/pipeline/evergreen";
 
@@ -107,6 +109,46 @@ export class EvergreenAdapter implements PipelineAdapter {
       });
     }
     return candidates;
+  }
+
+  /**
+   * 再試行キューの TTL 超過時に、終端棄却の記帳先となる post 行の id を返す。
+   * 既存行があればその id をそのまま返し、**既存のカラムを一切上書きしない**。
+   * 旧 `terminateEvergreenRetry` は無条件に `upsertPosts` を呼んでおり、
+   * `updatableCrawlFields` が `originalTitle` を無条件上書きするため、
+   * 既存の正常なタイトルを URL 文字列で潰していた（spec §10-3 の逐語タイトルに反する）。
+   * ここでは「まず取得し、無い場合のみ作る」ことでその穴を塞いでいる。
+   * OGP は再取得しない（失われた元データを補わない、という旧来の設計方針は維持）。
+   */
+  async ensureTombstonePost(url: string): Promise<number | null> {
+    const canonical = canonicalizeUrl(url) ?? url;
+    const existing = await getPostsByUrls([canonical]);
+    const existingId = existing.get(canonical)?.id;
+    if (existingId != null) return existingId;
+
+    let host = "";
+    try {
+      host = new URL(canonical).host;
+    } catch {
+      // 不正 URL は host 空文字のまま扱う。
+    }
+    const sourceName = registrableDomain(canonical) ?? (host || "unknown");
+    const upsertResult = await upsertPosts([
+      {
+        url: canonical,
+        sourceType: "blog",
+        sourceId: EVERGREEN_SOURCE_ID,
+        sourceName,
+        originalTitle: canonical,
+        originalExcerpt: null,
+        author: null,
+        thumbnailUrl: null,
+        publishedAt: null,
+      },
+    ]);
+    if (upsertResult.failed.length > 0) return null;
+    const states = await getPostsByUrls([canonical]);
+    return states.get(canonical)?.id ?? null;
   }
 
   async onTransientFailure(
