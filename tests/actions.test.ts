@@ -29,8 +29,8 @@ vi.mock("@/lib/pipeline/ingest", () => ({
   getLastRunSummary: getLastRunSummaryMock,
 }));
 
-vi.mock("@/lib/pipeline/submit-url", () => ({
-  runSubmitUrl: runSubmitUrlMock,
+vi.mock("@/lib/pipeline/submit-via-pipeline", () => ({
+  runSubmitUrlViaPipeline: runSubmitUrlMock,
 }));
 
 vi.mock("@/lib/pipeline/cooldown", () => ({

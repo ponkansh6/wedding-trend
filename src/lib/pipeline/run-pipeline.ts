@@ -169,6 +169,26 @@ export interface PipelineOptions {
   enforceRemovedFilter?: boolean;
   enforceRateCap?: boolean;
   onComplete?: (summary: PipelineSummary) => Promise<void>;
+  /**
+   * opt-in: true の場合、候補ごとの結果（公開成功時の FeedCard を含む）を
+   * `PipelineSummary.outcomes` に収集する。既定 false（未指定時は
+   * `outcomes` を undefined のままにし、既存呼び出し元（/api/ingest 等）の
+   * レスポンス形状を変えない）。単一 URL 投入（submit レーン）が公開結果
+   * （card）を取得するための経路として S2 で追加。
+   */
+  collectOutcomes?: boolean;
+}
+
+/**
+ * `collectOutcomes: true` のときに `PipelineSummary.outcomes` へ積まれる、
+ * 候補（正規化前の入力 URL 単位）ごとの結果。旧 `runSubmitUrl` の
+ * `SubmitOutcome` と互換な形にするための最小限の形。
+ */
+export interface CandidateOutcome {
+  url: string;
+  ok: boolean;
+  reason: string | null;
+  card: FeedCard | null;
 }
 
 export interface PipelineSummary {
@@ -187,6 +207,7 @@ export interface PipelineSummary {
     dropped: Record<string, number>;
     retried: number;
   };
+  outcomes?: CandidateOutcome[];
 }
 
 export async function runPipeline(
@@ -236,6 +257,13 @@ export async function runPipelineOnCandidates(
     droppedCounts[reason] = (droppedCounts[reason] || 0) + 1;
   }
 
+  // collectOutcomes: 候補 URL（正規化後）ごとの結果を積む opt-in マップ。
+  // 未指定時は null のままにし、以下のあらゆる箇所での set 呼び出しを no-op にする。
+  const outcomeMap = options.collectOutcomes ? new Map<string, CandidateOutcome>() : null;
+  function setOutcome(url: string, outcome: CandidateOutcome) {
+    outcomeMap?.set(url, outcome);
+  }
+
   // 2. Deduplicate by canonical URL
   const seen = new Set<string>();
   const deduped: PipelineCandidate[] = [];
@@ -262,6 +290,9 @@ export async function runPipelineOnCandidates(
   const upsertResult = await upsertPosts(upsertInputs);
   if (upsertResult.failed.length > 0) {
     errors.push(`upsert failed for ${upsertResult.failed.length} posts`);
+    for (const url of upsertResult.failed) {
+      setOutcome(url, { url, ok: false, reason: "save_failed", card: null });
+    }
   }
 
   // 4. Check removed / curation freshness
@@ -295,6 +326,7 @@ export async function runPipelineOnCandidates(
     const id = states.get(c.url)?.id ?? null;
     if (id !== null && removedIds.has(id)) {
       addDrop("removed");
+      setOutcome(c.url, { url: c.url, ok: true, reason: "removed", card: null });
       return false;
     }
     return true;
@@ -326,6 +358,12 @@ export async function runPipelineOnCandidates(
           }
           await saveEmbedIfFetched(c, now);
           await adapter.onTerminalDrop(c, "extraction_insufficient", now);
+          setOutcome(c.url, {
+            url: c.url,
+            ok: true,
+            reason: "extraction_insufficient",
+            card: null,
+          });
         }
       }
 
@@ -366,6 +404,19 @@ export async function runPipelineOnCandidates(
               await saveEmbedIfFetched(post, now);
               await adapter.onTerminalDrop(post, "retry_exhausted", now);
               addDrop("retry_exhausted");
+              setOutcome(post.url, {
+                url: post.url,
+                ok: true,
+                reason: "retry_exhausted",
+                card: null,
+              });
+            } else {
+              setOutcome(post.url, {
+                url: post.url,
+                ok: true,
+                reason: "queued_for_retry",
+                card: null,
+              });
             }
             continue;
           }
@@ -379,6 +430,7 @@ export async function runPipelineOnCandidates(
               await adapter.onTerminalDrop(post, "title_filter", now);
             }
             addDrop("title_filter");
+            setOutcome(post.url, { url: post.url, ok: true, reason: "title_filter", card: null });
             continue;
           }
           titleGatePassed++;
@@ -399,6 +451,14 @@ export async function runPipelineOnCandidates(
               await saveEmbedIfFetched(post, now);
               await adapter.onTerminalDrop(post, "retry_exhausted", now);
               addDrop("retry_exhausted");
+              setOutcome(post.url, {
+                url: post.url,
+                ok: true,
+                reason: "retry_exhausted",
+                card: null,
+              });
+            } else {
+              setOutcome(post.url, { url: post.url, ok: true, reason: "rate_limited", card: null });
             }
             continue;
           }
@@ -451,14 +511,29 @@ export async function runPipelineOnCandidates(
           curated = markResult.succeeded.length;
           if (markResult.failed.length > 0) {
             errors.push(`markCurated failed for ${markResult.failed.length} posts`);
+            for (const url of markResult.failed) {
+              setOutcome(url, { url, ok: false, reason: "save_failed", card: null });
+            }
           }
 
           for (const rec of publishedRecords) {
             if (markResult.succeeded.includes(rec.candidate.url)) {
               await recordPublication(rec.postId, now, rec.bodyHash, "surrogate");
               await saveEmbedIfFetched(rec.candidate, now);
-              await adapter.buildFeedCard(rec.candidate, rec.result, rec.postId, rec.bodyHash, now);
+              const card = await adapter.buildFeedCard(
+                rec.candidate,
+                rec.result,
+                rec.postId,
+                rec.bodyHash,
+                now,
+              );
               publishedCount++;
+              setOutcome(rec.candidate.url, {
+                url: rec.candidate.url,
+                ok: true,
+                reason: null,
+                card,
+              });
             }
           }
         }
@@ -470,27 +545,17 @@ export async function runPipelineOnCandidates(
     }
   }
 
-  if (options.onComplete) {
-    await options.onComplete({
-      fetched: rawCandidates.length,
-      inserted: upsertResult.succeeded.length,
-      curated,
-      skipped,
-      errors,
-      geminiCalls,
-      stageCounts: {
-        deduped: deduped.length,
-        evidenceGatePassed,
-        titleGatePassed,
-        rateCapPassed,
-        published: publishedCount,
-        dropped: droppedCounts,
-        retried: retriedCount,
-      },
-    });
-  }
+  // collectOutcomes: rawCandidates（入力順）に対応する結果配列を組み立てる。
+  // outcomeMap は正規化後 URL をキーに持つため canonicalizeUrl で引く。
+  const outcomes: CandidateOutcome[] | undefined = outcomeMap
+    ? rawCandidates.map((c) => {
+        const canonical = canonicalizeUrl(c.url);
+        const found = canonical ? outcomeMap.get(canonical) : undefined;
+        return found ?? { url: c.url, ok: false, reason: "invalid_url", card: null };
+      })
+    : undefined;
 
-  return {
+  const summary: PipelineSummary = {
     fetched: rawCandidates.length,
     inserted: upsertResult.succeeded.length,
     curated,
@@ -506,5 +571,12 @@ export async function runPipelineOnCandidates(
       dropped: droppedCounts,
       retried: retriedCount,
     },
+    ...(outcomes ? { outcomes } : {}),
   };
+
+  if (options.onComplete) {
+    await options.onComplete(summary);
+  }
+
+  return summary;
 }

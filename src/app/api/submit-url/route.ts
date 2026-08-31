@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { isBearerAuthorized } from "@/lib/auth";
-import { runSubmitUrl } from "@/lib/pipeline/submit-url";
+import { runSubmitUrlViaPipeline } from "@/lib/pipeline/submit-via-pipeline";
 
 interface SubmitUrlBody {
   url: string;
@@ -19,8 +19,9 @@ function parseBody(raw: unknown): SubmitUrlBody | null {
 
 /**
  * 認証 → body 検証 → パイプライン実行 → JSON 応答、という薄いラッパー。
- * 実処理は `@/lib/pipeline/submit-url`（`runSubmitUrl`）に一本化されており、
- * ここに実装を重複させない。
+ * 実処理は `@/lib/pipeline/submit-via-pipeline`（`runSubmitUrlViaPipeline`、
+ * 内部で `runPipeline` コアを使う）に一本化されており、ここに実装を重複させない
+ * （S2 配線: 旧 `runSubmitUrl` は `ingest.ts` の再試行キュー消費ループ専用に残る）。
  */
 export async function POST(request: Request) {
   if (!isBearerAuthorized(request)) {
@@ -36,7 +37,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const outcome = await runSubmitUrl(body.url, body.note);
+  const outcome = await runSubmitUrlViaPipeline(body.url, body.note);
 
   if (!outcome.ok) {
     if (outcome.reason === "invalid_url") {

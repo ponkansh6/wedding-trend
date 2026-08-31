@@ -88,7 +88,7 @@ function oembedFor(url: string): any {
   if (url.includes("title-filter")) {
     return {
       provider: "none" as const,
-      title: "！！！@@@ ### $$$ 違法",
+      title: "！！！！ 違法",
       authorName: "Author",
       thumbnailUrl: null,
       html: null,

@@ -22,22 +22,30 @@ vi.mock("@/lib/embed/providers", () => ({
 }));
 
 vi.mock("@/lib/llm/batch", () => ({
-  curateSingle: vi.fn().mockResolvedValue({
-    title: "AI Curated SNS Title",
-    summary: "AI Curated SNS Summary",
-    category: "その他",
-    tag: "classic",
-    firsthand: true,
-    ceremonyDecision: true,
-    specific: true,
-    weddingDayContent: false,
-    promotional: "none",
-    preDecisionOrPhotoShoot: false,
-    // M1-2 の語彙的接地（plan 07 D4）を通すため、LLM への実入力
-    // （sourceTitle = "IG Title"）に逐語で含まれる語にする。
-    topicAnchor: "IG Title",
-    rationaleText:
-      "実際の体験に基づく会場選びや進行プロセスにおける具体的な工夫と背景についての客観的な振り返りを行う非常に有用な記事内容である",
+  // 本番経路が runSubmitUrlViaPipeline (run-pipeline.ts) に切り替わり、
+  // curateSingle ではなく curatePosts が呼ばれるようになったため、
+  // curatePosts をモックする（M1-2 の語彙的接地を通すための値は変更なし）。
+  curatePosts: vi.fn().mockResolvedValue({
+    results: [
+      {
+        title: "AI Curated SNS Title",
+        summary: "AI Curated SNS Summary",
+        category: "その他",
+        tag: "classic",
+        firsthand: true,
+        ceremonyDecision: true,
+        specific: true,
+        weddingDayContent: false,
+        promotional: "none",
+        preDecisionOrPhotoShoot: false,
+        // M1-2 の語彙的接地（plan 07 D4）を通すため、LLM への実入力
+        // （sourceTitle = "IG Title"）に逐語で含まれる語にする。
+        topicAnchor: "IG Title",
+        rationaleText:
+          "実際の体験に基づく会場選びや進行プロセスにおける具体的な工夫と背景についての客観的な振り返りを行う非常に有用な記事内容である",
+      },
+    ],
+    geminiCalls: 1,
   }),
 }));
 

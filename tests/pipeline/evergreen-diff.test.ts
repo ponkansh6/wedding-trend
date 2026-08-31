@@ -94,7 +94,7 @@ function ogpFor(url: string): any {
   }
   if (url.includes("title-filter")) {
     return {
-      title: "！！！@@@ ### $$$ 違法 非合法",
+      title: "！！！！ 違法 非合法",
       description: "Excerpt for filter",
       siteName: "Example",
       author: "Author Filter",

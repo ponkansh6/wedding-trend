@@ -12,7 +12,7 @@ import {
   releaseIngestLease,
 } from "@/lib/pipeline/cooldown";
 import { getLastRunSummary, runIngest, type LastRunSummary } from "@/lib/pipeline/ingest";
-import { runSubmitUrl } from "@/lib/pipeline/submit-url";
+import { runSubmitUrlViaPipeline } from "@/lib/pipeline/submit-via-pipeline";
 import type { FeedCard } from "@/lib/types";
 
 /**
@@ -468,7 +468,7 @@ export async function submitSnsUrl(url: string, note?: string): Promise<SubmitUr
   const noteArg = trimmedNote && trimmedNote !== "" ? trimmedNote : undefined;
 
   try {
-    const outcome = await runSubmitUrl(parsed.data, noteArg);
+    const outcome = await runSubmitUrlViaPipeline(parsed.data, noteArg);
 
     if (outcome.reason === "needs_source_text") {
       return { ok: false, message: NEEDS_SOURCE_TEXT_MESSAGE, card: null, needsNote: true };
