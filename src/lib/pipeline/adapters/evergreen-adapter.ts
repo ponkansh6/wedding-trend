@@ -23,14 +23,42 @@ export class EvergreenAdapter implements PipelineAdapter {
    * Includes excerpt-null entries so core can drop extraction_insufficient with post row.
    */
   async buildCandidates(urls: string[], sourceName?: string): Promise<PipelineCandidate[]> {
+    const { candidates } = await this.buildCandidatesWithRejections(urls, sourceName);
+    return candidates;
+  }
+
+  /**
+   * `buildCandidates` と同じ選定ロジックだが、スキップした URL の理由
+   * （旧 `curateEvergreenUrl` が返していた `invalid_url` / `no_metadata` /
+   * `no_source_name`）も失わずに返す。管理者向け CLI
+   * （`scripts/ops/submit-evergreen.mjs`）が URL ごとの結果を報告するために
+   * 使う（S2 配線・shared_plan/17 Stage 6）。
+   */
+  async buildCandidatesWithRejections(
+    urls: string[],
+    sourceName?: string,
+  ): Promise<{
+    candidates: PipelineCandidate[];
+    rejections: Array<{ url: string; reason: string }>;
+  }> {
     const candidates: PipelineCandidate[] = [];
+    const rejections: Array<{ url: string; reason: string }> = [];
     for (const url of urls) {
       const canonical = canonicalizeUrl(url);
-      if (!canonical) continue;
+      if (!canonical) {
+        rejections.push({ url, reason: "invalid_url" });
+        continue;
+      }
       const meta = await fetchOgpMetadata(canonical);
-      if (!meta || !meta.title) continue;
+      if (!meta || !meta.title) {
+        rejections.push({ url, reason: "no_metadata" });
+        continue;
+      }
       const resolved = resolveSourceName(canonical, meta, sourceName ? { sourceName } : undefined);
-      if (!resolved) continue;
+      if (!resolved) {
+        rejections.push({ url, reason: "no_source_name" });
+        continue;
+      }
       candidates.push({
         url: canonical,
         originalTitle: meta.title,
@@ -43,7 +71,7 @@ export class EvergreenAdapter implements PipelineAdapter {
         thumbnailUrl: meta.image ?? null,
       });
     }
-    return candidates;
+    return { candidates, rejections };
   }
 
   async fetchCandidates(_limit: number): Promise<PipelineCandidate[]> {

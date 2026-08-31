@@ -65,7 +65,8 @@ if (urls.length === 0) {
   process.exit(1);
 }
 
-const { curateEvergreenUrl } = await import("../src/lib/pipeline/evergreen.ts");
+const { curateEvergreenUrlViaPipeline } =
+  await import("../../src/lib/pipeline/evergreen-via-pipeline.ts");
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -80,7 +81,10 @@ for (let i = 0; i < urls.length; i++) {
   const url = urls[i];
   process.stdout.write(`[${i + 1}/${urls.length}] ${url} ... `);
   try {
-    const outcome = await curateEvergreenUrl(url, sourceName ? { sourceName } : undefined);
+    const outcome = await curateEvergreenUrlViaPipeline(
+      url,
+      sourceName ? { sourceName } : undefined,
+    );
     if (outcome.ok) {
       console.log(`OK (reason: ${outcome.reason ?? "none"}, title: ${outcome.card?.aiTitle})`);
     } else {
