@@ -21,7 +21,7 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const ROOT = resolve(HERE, "..");
+const ROOT = resolve(HERE, "../..");
 
 // ── Tier configuration (mirrors spec.md §7.1) ──────────────────────────
 // 対象ファイルは実際の src/ ツリーに合わせて調整済み。
