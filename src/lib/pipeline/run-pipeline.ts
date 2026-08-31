@@ -29,6 +29,7 @@ import type {
   PostStatus,
   RetryContext,
   RetryLane,
+  RetryQueueEntry,
   RetryReason,
 } from "@/lib/types";
 import { canonicalizeUrl } from "@/lib/url";
@@ -142,6 +143,16 @@ export interface PipelineCandidate {
 export interface PipelineAdapter {
   fetchCandidates(limit: number): Promise<PipelineCandidate[]>;
   fetchDueRetries(now: string): Promise<PipelineCandidate[]>;
+  /**
+   * 1件の再試行キューエントリ（`dueRetries` の戻り値の1要素）を、
+   * 再処理可能な候補1件に変換する。取得元データが失われている等で
+   * 候補化できない場合は null を返す（呼び出し側はそのエントリをスキップする）。
+   * `retry-runner.ts` が `dueRetries(now, RETRY_PROCESS_LIMIT)` を1回だけ呼び、
+   * その結果をレーンでグルーピングして各エントリをこのメソッドで候補化する
+   * ため、`fetchDueRetries` のように内部で `dueRetries` を呼び直さない
+   * （3レーン共有の上限を守るため）。
+   */
+  buildRetryCandidate(entry: RetryQueueEntry): Promise<PipelineCandidate | null>;
   onTransientFailure(
     candidate: PipelineCandidate,
     reason: "llm_transient" | "rate_capped",

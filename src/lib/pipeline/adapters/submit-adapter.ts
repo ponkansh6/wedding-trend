@@ -8,7 +8,7 @@ import type {
   PipelineCandidate,
   TerminalReason,
 } from "@/lib/pipeline/run-pipeline";
-import type { FeedCard, RetryContext } from "@/lib/types";
+import type { FeedCard, RetryContext, RetryQueueEntry } from "@/lib/types";
 import type { CurationResult } from "@/lib/llm/batch";
 import { canonicalizeUrl } from "@/lib/url";
 import { dueRetries } from "@/lib/db/publication";
@@ -93,43 +93,48 @@ export class SubmitAdapter implements PipelineAdapter {
     const submitDue = due.filter((e) => e.lane === "submit");
     const candidates: PipelineCandidate[] = [];
     for (const entry of submitDue) {
-      const canonical = canonicalizeUrl(entry.url) ?? entry.url;
-      const provider = detectEmbedProvider(canonical);
-      const embed = await fetchOEmbed(canonical);
-      const embedTitle = embed?.title && embed.title.trim() !== "" ? embed.title.trim() : null;
-      // Note is not persisted in retry queue (known constraint) -> treat as null on retry
-      const hasSourceText = embedTitle !== null;
-      let originalTitle: string;
-      let originalExcerpt: string | null;
-      if (!hasSourceText) {
-        originalTitle = "SNS 投稿";
-        originalExcerpt = null;
-      } else {
-        originalTitle = embedTitle!;
-        originalExcerpt = embedTitle;
-      }
-
-      candidates.push({
-        url: canonical,
-        originalTitle,
-        originalExcerpt,
-        sourceType: "sns",
-        sourceId: provider === "none" ? "sns" : provider,
-        sourceName: PROVIDER_DISPLAY_NAME[provider],
-        publishedAt: null,
-        author: embed?.authorName ?? null,
-        thumbnailUrl: embed?.thumbnailUrl ?? null,
-        embedProvider: embed?.provider ?? "none",
-        embedHtml: embed?.html ?? null,
-        embedFetched: embed !== null,
-        retry: {
-          urlHash: entry.urlHash,
-          attempts: entry.attempts,
-          firstQueuedAt: entry.firstQueuedAt,
-        } satisfies RetryContext,
-      });
+      const candidate = await this.buildRetryCandidate(entry);
+      if (candidate) candidates.push(candidate);
     }
     return candidates;
+  }
+
+  async buildRetryCandidate(entry: RetryQueueEntry): Promise<PipelineCandidate | null> {
+    const canonical = canonicalizeUrl(entry.url) ?? entry.url;
+    const provider = detectEmbedProvider(canonical);
+    const embed = await fetchOEmbed(canonical);
+    const embedTitle = embed?.title && embed.title.trim() !== "" ? embed.title.trim() : null;
+    // Note is not persisted in retry queue (known constraint) -> treat as null on retry
+    const hasSourceText = embedTitle !== null;
+    let originalTitle: string;
+    let originalExcerpt: string | null;
+    if (!hasSourceText) {
+      originalTitle = "SNS 投稿";
+      originalExcerpt = null;
+    } else {
+      originalTitle = embedTitle!;
+      originalExcerpt = embedTitle;
+    }
+
+    return {
+      url: canonical,
+      originalTitle,
+      originalExcerpt,
+      sourceType: "sns",
+      sourceId: provider === "none" ? "sns" : provider,
+      sourceName: PROVIDER_DISPLAY_NAME[provider],
+      publishedAt: null,
+      author: embed?.authorName ?? null,
+      thumbnailUrl: embed?.thumbnailUrl ?? null,
+      embedProvider: embed?.provider ?? "none",
+      embedHtml: embed?.html ?? null,
+      embedFetched: embed !== null,
+      retry: {
+        urlHash: entry.urlHash,
+        attempts: entry.attempts,
+        firstQueuedAt: entry.firstQueuedAt,
+      } satisfies RetryContext,
+    };
   }
 
   /**

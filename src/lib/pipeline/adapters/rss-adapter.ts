@@ -9,7 +9,7 @@ import type {
   PipelineCandidate,
   TerminalReason,
 } from "@/lib/pipeline/run-pipeline";
-import type { FeedCard, RetryContext } from "@/lib/types";
+import type { FeedCard, RetryContext, RetryQueueEntry } from "@/lib/types";
 import { RETRY_MAX_ATTEMPTS } from "@/lib/constants";
 import { completeRetry, getPostsByUrls, type PostUpsertInput } from "@/lib/db/repository";
 import type { CurationResult } from "@/lib/llm/batch";
@@ -198,36 +198,39 @@ export class RssAdapter implements PipelineAdapter {
     const due = await dueRetries(_now, 50);
     const rssDue = due.filter((e) => e.lane === "rss");
     const candidates: PipelineCandidate[] = [];
-
     for (const entry of rssDue) {
-      const statesMap = await getPostsByUrls([entry.url]);
-      const state = statesMap.get(entry.url);
-      if (!state || state.id == null) {
-        await completeRetry(entry.urlHash);
-        continue;
-      }
-      const sourceMap = await fetchPostSources([entry.url]);
-      const src = sourceMap.get(entry.url);
-
-      candidates.push({
-        url: entry.url,
-        originalTitle: state.originalTitle,
-        originalExcerpt: state.originalExcerpt,
-        sourceType: src?.sourceType ?? "blog",
-        sourceId: src?.sourceId ?? "hatena-bookmark",
-        sourceName: src?.sourceName ?? "はてなブックマーク",
-        publishedAt: state.publishedAt,
-        author: src?.author ?? null,
-        thumbnailUrl: src?.thumbnailUrl ?? null,
-        retry: {
-          urlHash: entry.urlHash,
-          attempts: entry.attempts,
-          firstQueuedAt: entry.firstQueuedAt,
-        },
-      });
+      const candidate = await this.buildRetryCandidate(entry);
+      if (candidate) candidates.push(candidate);
     }
-
     return candidates;
+  }
+
+  async buildRetryCandidate(entry: RetryQueueEntry): Promise<PipelineCandidate | null> {
+    const statesMap = await getPostsByUrls([entry.url]);
+    const state = statesMap.get(entry.url);
+    if (!state || state.id == null) {
+      await completeRetry(entry.urlHash);
+      return null;
+    }
+    const sourceMap = await fetchPostSources([entry.url]);
+    const src = sourceMap.get(entry.url);
+
+    return {
+      url: entry.url,
+      originalTitle: state.originalTitle,
+      originalExcerpt: state.originalExcerpt,
+      sourceType: src?.sourceType ?? "blog",
+      sourceId: src?.sourceId ?? "hatena-bookmark",
+      sourceName: src?.sourceName ?? "はてなブックマーク",
+      publishedAt: state.publishedAt,
+      author: src?.author ?? null,
+      thumbnailUrl: src?.thumbnailUrl ?? null,
+      retry: {
+        urlHash: entry.urlHash,
+        attempts: entry.attempts,
+        firstQueuedAt: entry.firstQueuedAt,
+      },
+    };
   }
 
   /**

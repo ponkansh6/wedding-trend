@@ -9,7 +9,7 @@ import type {
   PipelineCandidate,
   TerminalReason,
 } from "@/lib/pipeline/run-pipeline";
-import type { FeedCard, RetryContext } from "@/lib/types";
+import type { FeedCard, RetryContext, RetryQueueEntry } from "@/lib/types";
 import type { CurationResult } from "@/lib/llm/batch";
 import { canonicalizeUrl } from "@/lib/url";
 import { dueRetries } from "@/lib/db/publication";
@@ -86,29 +86,34 @@ export class EvergreenAdapter implements PipelineAdapter {
     const everDue = due.filter((e) => e.lane === "evergreen");
     const candidates: PipelineCandidate[] = [];
     for (const entry of everDue) {
-      const canonical = canonicalizeUrl(entry.url) ?? entry.url;
-      const meta = await fetchOgpMetadata(canonical);
-      if (!meta || !meta.title) continue;
-      const resolved = resolveSourceName(canonical, meta);
-      if (!resolved) continue;
-      candidates.push({
-        url: canonical,
-        originalTitle: meta.title,
-        originalExcerpt: meta.description ?? null,
-        sourceType: "blog",
-        sourceId: EVERGREEN_SOURCE_ID,
-        sourceName: resolved,
-        publishedAt: meta.datePublished ?? null,
-        author: meta.author ?? null,
-        thumbnailUrl: meta.image ?? null,
-        retry: {
-          urlHash: entry.urlHash,
-          attempts: entry.attempts,
-          firstQueuedAt: entry.firstQueuedAt,
-        } satisfies RetryContext,
-      });
+      const candidate = await this.buildRetryCandidate(entry);
+      if (candidate) candidates.push(candidate);
     }
     return candidates;
+  }
+
+  async buildRetryCandidate(entry: RetryQueueEntry): Promise<PipelineCandidate | null> {
+    const canonical = canonicalizeUrl(entry.url) ?? entry.url;
+    const meta = await fetchOgpMetadata(canonical);
+    if (!meta || !meta.title) return null;
+    const resolved = resolveSourceName(canonical, meta);
+    if (!resolved) return null;
+    return {
+      url: canonical,
+      originalTitle: meta.title,
+      originalExcerpt: meta.description ?? null,
+      sourceType: "blog",
+      sourceId: EVERGREEN_SOURCE_ID,
+      sourceName: resolved,
+      publishedAt: meta.datePublished ?? null,
+      author: meta.author ?? null,
+      thumbnailUrl: meta.image ?? null,
+      retry: {
+        urlHash: entry.urlHash,
+        attempts: entry.attempts,
+        firstQueuedAt: entry.firstQueuedAt,
+      } satisfies RetryContext,
+    };
   }
 
   /**

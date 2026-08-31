@@ -68,6 +68,7 @@ describe("runPipeline (src/lib/pipeline/run-pipeline.ts)", () => {
         },
       ]),
       fetchDueRetries: vi.fn().mockResolvedValue([]),
+      buildRetryCandidate: vi.fn().mockResolvedValue(null),
       onTransientFailure: vi.fn().mockResolvedValue(false),
       ensureTombstonePost: vi.fn().mockResolvedValue(null),
       onTerminalDrop: vi.fn().mockResolvedValue(undefined),
