@@ -91,6 +91,10 @@
 当初「本文が非永続だからバックフィル不可」と評価したが、**誤り**。バックフィルは実装済みかつ spec 公認である。
 
 - 実体は **`scripts/ops/backfill-usefulness.mjs`**（plan17 `f6837e4` で `scripts/` 直下から移動済み。旧パスは存在しない）。
+- **【重要・2026-08-31 追記】このスクリプトは現在そのままでは実行できない。** `f6837e4` の移動時に相対 import の深さが
+  直されておらず、`../src/...` が存在しない `scripts/src/...` を指すため即 `ERR_MODULE_NOT_FOUND` で落ちる
+  （`scripts/` 配下の .mjs 12本が同じ状態だった）。設計上バックフィルが可能であることと、いま実行できることは別である。
+  本プラン着手前に、この修正が入っていることを確認すること。
 - 対象選定は `getStaleCurationCandidates()`（`src/lib/db/ingest.ts:404-453`）。通常は `curationSignature` 不一致、`--force` で `sourceType="blog"` 全件。
 - **判定入力の取得元は2系統**:
   - **RSS レーン** → DB に永続化済みの `posts.originalExcerpt`（＋`originalTitle`）をそのまま再入力（`backfill-usefulness.mjs:402-406`）。再アクセス不要。
@@ -102,7 +106,7 @@
 
 ### 帰結（本プランの設計に効く点）
 
-1. **トピックはバックフィル可能**。`CURATION_PROMPT_VERSION` を 14→15 に bump し `backfill-usefulness.mjs --force --apply` を回せば既存記事にもトピックが付く。
+1. **トピックはバックフィル可能**（設計上）。`CURATION_PROMPT_VERSION` を 14→15 に bump し `backfill-usefulness.mjs --force --apply` を回せば既存記事にもトピックが付く。ただし上記のとおり**スクリプトの実行可能性を先に回復させる必要がある**。
 2. **接地検証もバックフィル時に実行可能**（本文/抜粋がメモリ上にあるため）。「curation 時にしか検証できない」という制約は無い。
 3. ただし **discovery 由来で再取得に失敗する記事は恒久的にトピックを持たない**。UI の欠損時挙動（§5-5）は必須。
 4. bump は**全ブログ投稿の再キュレーション**を意味する。判定基準・カテゴリ・tag・topicAnchor もすべて引き直される点に留意（トピックだけを足す差分更新にはならない）。

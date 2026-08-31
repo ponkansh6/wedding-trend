@@ -14,7 +14,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { execSync } from "node:child_process";
 
-// .env.local の簡易パーサ（scripts/backfill-usefulness.mjs と同じ作法）。
+// .env.local の簡易パーサ（scripts/ops/backfill-usefulness.mjs と同じ作法）。
 if (existsSync(".env.local")) {
   for (const line of readFileSync(".env.local", "utf-8").split("\n")) {
     const trimmed = line.trim();
@@ -44,10 +44,11 @@ console.log(`接続先スキーム: ${process.env.TURSO_DATABASE_URL.split(":")[
 
 // env を設定した後に import する（src/lib/db/index.ts はモジュール読み込み時に
 // process.env を読んで接続を作るため）。
-const { db } = await import("../src/lib/db/index.ts");
-const { posts, postRationales, postUsefulnessCriteria } = await import("../src/lib/db/schema.ts");
+const { db } = await import("../../src/lib/db/index.ts");
+const { posts, postRationales, postUsefulnessCriteria } =
+  await import("../../src/lib/db/schema.ts");
 const { CURATION_PROMPT_VERSION, RATIONALE_PROMPT_VERSION } =
-  await import("../src/lib/constants.ts");
+  await import("../../src/lib/constants.ts");
 
 let gitHead = null;
 try {

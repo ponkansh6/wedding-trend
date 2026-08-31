@@ -1,5 +1,5 @@
 /**
- * `scripts/backfill-usefulness.mjs` の中核ロジックを、DB 接続・LLM 呼び出し・
+ * `scripts/ops/backfill-usefulness.mjs` の中核ロジックを、DB 接続・LLM 呼び出し・
  * `process.exit` を一切含まない純粋関数として切り出したもの。
  *
  * トップレベルスクリプトのままでは import した時点で本番 DB に接続してしまう

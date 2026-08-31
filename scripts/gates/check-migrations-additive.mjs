@@ -6,15 +6,15 @@
  * および所有テーブルへの安全でない ALTER TABLE 形が 1 つでもあれば
  * 非ゼロ終了する。
  *
- * 判定ロジックは `scripts/migrations-additive.mjs` を
- * `scripts/apply-migrations-remote.mjs` と共有している（詳細はそちらのコメント参照）。
+ * 判定ロジックは `scripts/gates/migrations-additive.mjs` を
+ * `scripts/ops/apply-migrations-remote.mjs` と共有している（詳細はそちらのコメント参照）。
  *
  * ネットワーク・DB には一切アクセスしない純粋な静的検査であるため、
  * pre-push のブロックチェックおよび CI ゲートに組み込んでよい
  * （schema.ts の読み取りのみ行う）。
  *
  * 使い方:
- *   node scripts/check-migrations-additive.mjs
+ *   node scripts/gates/check-migrations-additive.mjs
  */
 import { loadMigrationStatements, findNonAdditiveStatements } from "./migrations-additive.mjs";
 

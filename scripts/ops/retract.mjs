@@ -71,7 +71,7 @@ if (!VALID_REASONS.includes(REASON_ARG)) {
   usageAndExit(`--reason は次のいずれかである必要があります: ${VALID_REASONS.join(" / ")}`);
 }
 
-// .env.local の簡易パーサ（scripts/apply-migrations-remote.mjs と同じ作法）。
+// .env.local の簡易パーサ（scripts/ops/apply-migrations-remote.mjs と同じ作法）。
 if (existsSync(".env.local")) {
   for (const line of readFileSync(".env.local", "utf-8").split("\n")) {
     const trimmed = line.trim();
@@ -111,9 +111,9 @@ console.log(
 );
 
 // env を設定した後に import する（src/lib/db/index.ts はモジュール読み込み時に
-// process.env を読んで接続を作るため。scripts/backfill-usefulness.mjs と同じ作法）。
+// process.env を読んで接続を作るため。scripts/ops/backfill-usefulness.mjs と同じ作法）。
 const { findPostByUrlForRetraction, listPublishedByHostForRetraction, markRetracted, isRemoved } =
-  await import("../src/lib/db/repository.ts");
+  await import("../../src/lib/db/repository.ts");
 
 let candidates = [];
 if (URL_ARG) {

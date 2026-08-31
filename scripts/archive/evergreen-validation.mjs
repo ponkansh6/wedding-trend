@@ -8,11 +8,11 @@
 //   B. メタデータ取得失敗率 … 実運用でそもそも摂取できない割合
 //   C. ゲート通過率（本群 vs 対照群）… §1.5 除外トピックの対照群が混入しないか
 import { existsSync, readFileSync } from "node:fs";
-import { canonicalizeUrl } from "../src/lib/url.ts";
-import { fetchOgpMetadata } from "../src/lib/sources/ogp.ts";
-import { curatePosts } from "../src/lib/llm/batch.ts";
+import { canonicalizeUrl } from "../../src/lib/url.ts";
+import { fetchOgpMetadata } from "../../src/lib/sources/ogp.ts";
+import { curatePosts } from "../../src/lib/llm/batch.ts";
 
-// .env.local の簡易パーサ（scripts/submit-evergreen.mjs と同じ作法）
+// .env.local の簡易パーサ（scripts/ops/submit-evergreen.mjs と同じ作法）
 if (existsSync(".env.local")) {
   for (const line of readFileSync(".env.local", "utf-8").split("\n")) {
     const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);

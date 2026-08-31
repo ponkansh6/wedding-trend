@@ -18,8 +18,8 @@
  * - `posts.ai_title` (存在する場合)
  *
  * 使い方:
- *   pnpm exec tsx scripts/backfill-title-normalization.mjs          # dry-run（既定・書き込みなし）
- *   pnpm exec tsx scripts/backfill-title-normalization.mjs --apply  # 実際に DB を更新する
+ *   pnpm exec tsx scripts/ops/backfill-title-normalization.mjs          # dry-run（既定・書き込みなし）
+ *   pnpm exec tsx scripts/ops/backfill-title-normalization.mjs --apply  # 実際に DB を更新する
  *
  * 冪等性:
  * 既に正規化済みの行（`normalizeTitle(val) === val`）は対象外になるため、
@@ -48,10 +48,10 @@ if (existsSync(".env.local")) {
   }
 }
 
-const { db } = await import("../src/lib/db/index.ts");
-const { posts } = await import("../src/lib/db/schema.ts");
+const { db } = await import("../../src/lib/db/index.ts");
+const { posts } = await import("../../src/lib/db/schema.ts");
 const { eq } = await import("drizzle-orm");
-const { normalizeTitle } = await import("../src/lib/sources/base/feed-parser.ts");
+const { normalizeTitle } = await import("../../src/lib/sources/base/feed-parser.ts");
 
 console.log(`接続先スキーム: ${(process.env.TURSO_DATABASE_URL ?? "local sqlite").split(":")[0]}`);
 console.log(APPLY ? "モード: --apply（DB を更新します）" : "モード: dry-run（書き込みなし）");

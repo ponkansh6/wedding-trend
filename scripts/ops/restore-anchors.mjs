@@ -1,6 +1,6 @@
 #!/usr/bin/env tsx
 /**
- * scripts/snapshot-anchors.mjs が取ったスナップショットから、DB を
+ * scripts/ops/snapshot-anchors.mjs が取ったスナップショットから、DB を
  * その時点の値に復元する。
  *
  * 復元対象はスナップショットが持つフィールドに限る（posts の一部カラムと
@@ -32,7 +32,7 @@ if (!snapshot?.meta || !Array.isArray(snapshot.posts) || !Array.isArray(snapshot
   process.exit(1);
 }
 
-// .env.local の簡易パーサ（scripts/backfill-usefulness.mjs と同じ作法）。
+// .env.local の簡易パーサ（scripts/ops/backfill-usefulness.mjs と同じ作法）。
 if (existsSync(".env.local")) {
   for (const line of readFileSync(".env.local", "utf-8").split("\n")) {
     const trimmed = line.trim();
@@ -70,8 +70,9 @@ console.log(
     } 件`,
 );
 
-const { db } = await import("../src/lib/db/index.ts");
-const { posts, postRationales, postUsefulnessCriteria } = await import("../src/lib/db/schema.ts");
+const { db } = await import("../../src/lib/db/index.ts");
+const { posts, postRationales, postUsefulnessCriteria } =
+  await import("../../src/lib/db/schema.ts");
 const { eq } = await import("drizzle-orm");
 
 const currentPosts = await db

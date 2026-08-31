@@ -15,8 +15,8 @@
  * して使う。
  *
  * 使い方（pnpm 経由。npx/npm は使わない）:
- *   pnpm exec tsx scripts/backfill-rationale-text.mjs          # dry-run（既定・書き込みなし）
- *   pnpm exec tsx scripts/backfill-rationale-text.mjs --apply  # 実際に DB を更新する
+ *   pnpm exec tsx scripts/ops/backfill-rationale-text.mjs          # dry-run（既定・書き込みなし）
+ *   pnpm exec tsx scripts/ops/backfill-rationale-text.mjs --apply  # 実際に DB を更新する
  *
  * 対象: rationale_text に削除対象文言を含む post_rationales 行のみ。
  * 文言を含まない行は対象外になるため、二度実行しても安全（冪等）。
@@ -25,7 +25,7 @@ import { existsSync, readFileSync } from "node:fs";
 
 const APPLY = process.argv.includes("--apply");
 
-// .env.local の簡易パーサ（scripts/apply-migrations-remote.mjs と同じ作法）。
+// .env.local の簡易パーサ（scripts/ops/apply-migrations-remote.mjs と同じ作法）。
 if (existsSync(".env.local")) {
   for (const line of readFileSync(".env.local", "utf-8").split("\n")) {
     const trimmed = line.trim();
@@ -46,13 +46,13 @@ if (existsSync(".env.local")) {
 
 // env を設定した後に import する（src/lib/db/index.ts はモジュール読み込み時に
 // process.env を読んで接続を作るため）。
-const { db } = await import("../src/lib/db/index.ts");
-const { postRationales, postUsefulnessCriteria } = await import("../src/lib/db/schema.ts");
+const { db } = await import("../../src/lib/db/index.ts");
+const { postRationales, postUsefulnessCriteria } = await import("../../src/lib/db/schema.ts");
 const { eq, like } = await import("drizzle-orm");
-const { renderRationaleText } = await import("../src/lib/publish/gate.ts");
-const { normalizePromotional } = await import("../src/lib/scoring/usefulness.ts");
+const { renderRationaleText } = await import("../../src/lib/publish/gate.ts");
+const { normalizePromotional } = await import("../../src/lib/scoring/usefulness.ts");
 const { RATIONALE_TEXT_MIN_CHARS, RATIONALE_TEXT_MAX_CHARS } =
-  await import("../src/lib/constants.ts");
+  await import("../../src/lib/constants.ts");
 
 const REMOVED_LABEL = "特定のサービス・会場への誘導を含む可能性がある";
 

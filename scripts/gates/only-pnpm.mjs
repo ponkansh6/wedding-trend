@@ -21,7 +21,7 @@ if (detected && detected !== "pnpm") {
 
   "${detected} install" は package-lock.json / yarn.lock を生成し、
   pnpm-lock.yaml と二重管理になります。その結果 CI の
-  --frozen-lockfile と scripts/check-lockfile-sync.sh が無意味になります。
+  --frozen-lockfile と scripts/gates/check-lockfile-sync.sh が無意味になります。
 
   代わりに以下を実行してください:
 

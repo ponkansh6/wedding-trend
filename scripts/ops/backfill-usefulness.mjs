@@ -24,14 +24,14 @@
  * 前回失敗した分は自然にリトライされる）。
  *
  * 使い方（pnpm 経由。npx/npm は使わない）:
- *   pnpm exec tsx scripts/backfill-usefulness.mjs          # dry-run（Gemini を呼んで
+ *   pnpm exec tsx scripts/ops/backfill-usefulness.mjs          # dry-run（Gemini を呼んで
  *     プレビュー表示するが DB へは書き込まない。Gemini 課金は dry-run でも発生する）
- *   pnpm exec tsx scripts/backfill-usefulness.mjs --apply  # 実際に DB へ書き込む
- *   pnpm exec tsx scripts/backfill-usefulness.mjs --apply --force
+ *   pnpm exec tsx scripts/ops/backfill-usefulness.mjs --apply  # 実際に DB へ書き込む
+ *   pnpm exec tsx scripts/ops/backfill-usefulness.mjs --apply --force
  *     # 署名に関わらず全ブログ投稿を再スコア（キュレーション結果の修正・検証用）
- *   pnpm exec tsx scripts/backfill-usefulness.mjs --limit 20
+ *   pnpm exec tsx scripts/ops/backfill-usefulness.mjs --limit 20
  *     # 候補プールの先頭 20 件だけを対象にする（無料枠内での分割実行用）
- *   pnpm exec tsx scripts/backfill-usefulness.mjs --source note.com --limit 20
+ *   pnpm exec tsx scripts/ops/backfill-usefulness.mjs --source note.com --limit 20
  *     # URL に "note.com" を含む候補（プラン16 Stage 6 のコホート順）に絞った上で先頭 20 件
  *
  * 環境変数（バッチ投入間隔の調整。Gemini 無料枠 15 req/min を踏まえたデフォルト値）:
@@ -52,7 +52,7 @@ if (HELP) {
   console.log(`
 有用度スコア バックフィルスクリプト
 \n使い方:
-  pnpm exec tsx scripts/backfill-usefulness.mjs [オプション]
+  pnpm exec tsx scripts/ops/backfill-usefulness.mjs [オプション]
 
 オプション:
   --help, -h       このヘルプを表示する（Gemini / DB に接続しません）
@@ -111,7 +111,7 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// .env.local の簡易パーサ（scripts/apply-migrations-remote.mjs と同じ作法）。
+// .env.local の簡易パーサ（scripts/ops/apply-migrations-remote.mjs と同じ作法）。
 if (existsSync(".env.local")) {
   for (const line of readFileSync(".env.local", "utf-8").split("\n")) {
     const trimmed = line.trim();
@@ -161,23 +161,23 @@ function logGeminiRequest(reqNumber, chunkIdx, totalChunks, articleCount) {
 // env を設定した後に import する（src/lib/db/index.ts はモジュール読み込み時に
 // process.env を読んで接続を作るため）。
 const { getStaleCurationCandidates, markCurated, getRationaleByPostId } =
-  await import("../src/lib/db/repository.ts");
-const { curatePosts } = await import("../src/lib/llm/batch.ts");
+  await import("../../src/lib/db/repository.ts");
+const { curatePosts } = await import("../../src/lib/llm/batch.ts");
 const { computeContentHash, computeCurationSignature } =
-  await import("../src/lib/llm/signature.ts");
-const { LLM_MODEL } = await import("../src/lib/llm/client.ts");
-const { RATIONALE_PROMPT_VERSION } = await import("../src/lib/constants.ts");
-const { validateTopicAnchor } = await import("../src/lib/publish/gate.ts");
-const { shouldRegenerateAnchor } = await import("./lib/backfill-anchor-gate.mjs");
-const { disciplinedFetch } = await import("../src/lib/sources/access-discipline.ts");
+  await import("../../src/lib/llm/signature.ts");
+const { LLM_MODEL } = await import("../../src/lib/llm/client.ts");
+const { RATIONALE_PROMPT_VERSION } = await import("../../src/lib/constants.ts");
+const { validateTopicAnchor } = await import("../../src/lib/publish/gate.ts");
+const { shouldRegenerateAnchor } = await import("../lib/backfill-anchor-gate.mjs");
+const { disciplinedFetch } = await import("../../src/lib/sources/access-discipline.ts");
 const {
   extractArticleContainer,
   extractVisibleText,
   selectJudgmentSlice,
   computeEvidenceSignals,
   computeEvidenceSufficiency,
-} = await import("../src/lib/sources/article-text.ts");
-const { assertNoSliceLeak } = await import("./lib/mwed-anchor-backfill.mjs");
+} = await import("../../src/lib/sources/article-text.ts");
+const { assertNoSliceLeak } = await import("../lib/mwed-anchor-backfill.mjs");
 const {
   partitionCandidates,
   selectCandidatesForRun,
@@ -186,7 +186,7 @@ const {
   summarizeBackfillOutcomes,
   buildBackfillUpdates,
   toMarkCuratedInput,
-} = await import("./lib/backfill-plan.mjs");
+} = await import("../lib/backfill-plan.mjs");
 
 // 本番の対象件数（数十件想定）を十分に上回る上限。無限に伸びないための保険であり、
 // --limit とは別物: --source によるコホート絞り込みを --limit 適用前に行うため、

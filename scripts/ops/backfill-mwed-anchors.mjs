@@ -7,7 +7,7 @@
  * `category` / `tag` / `topicAnchor` / 有用度スコア / 署名を更新する
  * 使い捨てスクリプト。
  *
- * なぜ通常のバックフィル（`scripts/backfill-usefulness.mjs`）で直らないか:
+ * なぜ通常のバックフィル（`scripts/ops/backfill-usefulness.mjs`）で直らないか:
  *   通常バックフィルはプレフライト `shouldRegenerateAnchor()` が「本文が無い」
  *   候補を一律スキップする。discovery 経路の投稿は `original_excerpt` が
  *   常に空なので永久にスキップされ、プロンプト/gate を改善しても
@@ -26,10 +26,10 @@
  *   → 公開状態は一切変わらない。
  *
  * 使い方（pnpm 経由。npx/npm は使わない）:
- *   pnpm exec tsx scripts/backfill-mwed-anchors.mjs            # dry-run（Gemini 1 回呼んでプレビュー、DB 未書き込み）
- *   pnpm exec tsx scripts/backfill-mwed-anchors.mjs --apply    # 実際に DB へ書き込む
- *   pnpm exec tsx scripts/backfill-mwed-anchors.mjs --limit 5  # 対象を先頭 5 件に絞る
- *   pnpm exec tsx scripts/backfill-mwed-anchors.mjs --host www.mwed.jp  # 対象ホスト（既定 www.mwed.jp）
+ *   pnpm exec tsx scripts/ops/backfill-mwed-anchors.mjs            # dry-run（Gemini 1 回呼んでプレビュー、DB 未書き込み）
+ *   pnpm exec tsx scripts/ops/backfill-mwed-anchors.mjs --apply    # 実際に DB へ書き込む
+ *   pnpm exec tsx scripts/ops/backfill-mwed-anchors.mjs --limit 5  # 対象を先頭 5 件に絞る
+ *   pnpm exec tsx scripts/ops/backfill-mwed-anchors.mjs --host www.mwed.jp  # 対象ホスト（既定 www.mwed.jp）
  */
 import { existsSync, readFileSync } from "node:fs";
 
@@ -44,7 +44,7 @@ function readFlagValue(flag) {
 
 if (HELP) {
   console.log(
-    "使い方: pnpm exec tsx scripts/backfill-mwed-anchors.mjs [--apply] [--limit N] [--host www.mwed.jp]",
+    "使い方: pnpm exec tsx scripts/ops/backfill-mwed-anchors.mjs [--apply] [--limit N] [--host www.mwed.jp]",
   );
   process.exit(0);
 }
@@ -90,22 +90,22 @@ console.log(`接続先スキーム: ${process.env.TURSO_DATABASE_URL.split(":")[
 
 // env を設定した後に import する（DB 接続がモジュール読み込み時に張られるため）。
 const { getPublishedSlicelessCurationCandidates, markCurated, getRationaleByPostId } =
-  await import("../src/lib/db/repository.ts");
-const { curateBatch } = await import("../src/lib/llm/batch.ts");
+  await import("../../src/lib/db/repository.ts");
+const { curateBatch } = await import("../../src/lib/llm/batch.ts");
 const { computeContentHash, computeCurationSignature } =
-  await import("../src/lib/llm/signature.ts");
-const { LLM_MODEL } = await import("../src/lib/llm/client.ts");
-const { RATIONALE_PROMPT_VERSION } = await import("../src/lib/constants.ts");
-const { disciplinedFetch } = await import("../src/lib/sources/access-discipline.ts");
+  await import("../../src/lib/llm/signature.ts");
+const { LLM_MODEL } = await import("../../src/lib/llm/client.ts");
+const { RATIONALE_PROMPT_VERSION } = await import("../../src/lib/constants.ts");
+const { disciplinedFetch } = await import("../../src/lib/sources/access-discipline.ts");
 const {
   extractArticleContainer,
   extractVisibleText,
   selectJudgmentSlice,
   computeEvidenceSignals,
   computeEvidenceSufficiency,
-} = await import("../src/lib/sources/article-text.ts");
+} = await import("../../src/lib/sources/article-text.ts");
 const { classifyMwedOutcomes, buildMwedUpdates, assertNoSliceLeak } =
-  await import("./lib/mwed-anchor-backfill.mjs");
+  await import("../lib/mwed-anchor-backfill.mjs");
 
 const currentSignature = computeCurationSignature();
 console.log(`対象シグネチャ: ${currentSignature} / モデル: ${LLM_MODEL} / ホスト: ${HOST}`);

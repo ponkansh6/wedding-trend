@@ -54,6 +54,7 @@ run("pnpm exec oxlint --nextjs-plugin --react-plugin --react-perf-plugin src/");
 run("bash scripts/gates/check-spec-refs.sh");
 run("oxfmt --check .");
 run("bash scripts/gates/check-security.sh");
+run("node scripts/gates/check-script-imports.mjs");
 run("node scripts/gates/check-migrations-additive.mjs");
 run("pnpm run type-check");
 

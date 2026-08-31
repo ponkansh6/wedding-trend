@@ -7,8 +7,8 @@
  * openspec/specs/wedding-trend/spec.md §7.1.
  *
  * Usage:
- *   node scripts/check-coverage-tiers.mjs           # check generated report
- *   COVERAGE_JSON=path node scripts/check-coverage-tiers.mjs  # custom path
+ *   node scripts/gates/check-coverage-tiers.mjs           # check generated report
+ *   COVERAGE_JSON=path node scripts/gates/check-coverage-tiers.mjs  # custom path
  *
  * Exit codes:
  *   0 - All tiers pass

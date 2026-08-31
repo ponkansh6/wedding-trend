@@ -3,7 +3,7 @@
  * 手動エバーグリーン URL 投入スクリプト。
  *
  * 使い方:
- *   pnpm exec tsx scripts/submit-evergreen.mjs [--source-name <名>] [--file <path>] [url...]
+ *   pnpm exec tsx scripts/ops/submit-evergreen.mjs [--source-name <名>] [--file <path>] [url...]
  *
  * --source-name を指定すると、og:site_name が取得できない場合でも捏造せずに
  * その値を情報源クレジットとして使う（Plan 04 §7 P2）。未指定かつ
@@ -60,7 +60,7 @@ for (let i = 0; i < args.length; i++) {
 
 if (urls.length === 0) {
   console.log(
-    "使い方: pnpm exec tsx scripts/submit-evergreen.mjs [--source-name <名>] [--file <path>] [url...]",
+    "使い方: pnpm exec tsx scripts/ops/submit-evergreen.mjs [--source-name <名>] [--file <path>] [url...]",
   );
   process.exit(1);
 }

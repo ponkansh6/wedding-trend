@@ -12,7 +12,7 @@
  * 趣旨。CI を外部要因で赤くしない）。
  *
  * 使い方:
- *   pnpm exec tsx scripts/check-discovery-freshness.mjs
+ *   pnpm exec tsx scripts/gates/check-discovery-freshness.mjs
  */
 import { existsSync, readFileSync } from "node:fs";
 
@@ -67,7 +67,7 @@ if (existsSync(WORKFLOW_PATH)) {
   }
 }
 
-const { getLatestDiscoveryRunStartedAt } = await import("../src/lib/db/repository.ts");
+const { getLatestDiscoveryRunStartedAt } = await import("../../src/lib/db/repository.ts");
 
 const startedAt = await getLatestDiscoveryRunStartedAt();
 

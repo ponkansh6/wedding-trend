@@ -3,7 +3,7 @@
  * 週次発見ランナー（plan 06 §5.1/§5.5、P7b/P7c）。
  *
  * 使い方:
- *   pnpm exec tsx scripts/run-discovery.mjs [--host www.mwed.jp]
+ *   pnpm exec tsx scripts/ops/run-discovery.mjs [--host www.mwed.jp]
  *
  * GitHub Actions の discovery.yml から呼ばれることを想定する。
  * 1) sitemap 差分発見（初回実行は seed のみ・本文は取りに行かない）
@@ -51,9 +51,9 @@ if (!sitemaps) {
   process.exit(1);
 }
 
-const { discoverNewUrls } = await import("../src/lib/sources/sitemap-discovery.ts");
+const { discoverNewUrls } = await import("../../src/lib/sources/sitemap-discovery.ts");
 const { ingestDiscoveredUrls, revalidatePublishedPosts } =
-  await import("../src/lib/pipeline/discovery-ingest.ts");
+  await import("../../src/lib/pipeline/discovery-ingest.ts");
 
 console.log(`[1/3] sitemap 差分発見: ${host}`);
 const discovery = await discoverNewUrls(host, sitemaps);

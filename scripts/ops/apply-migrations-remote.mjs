@@ -19,8 +19,8 @@
  * テーブルへの CREATE/ALTER を含む文が現れた時点で異常終了する。
  *
  * 使い方:
- *   node scripts/apply-migrations-remote.mjs          # dry-run（実行計画のみ表示）
- *   node scripts/apply-migrations-remote.mjs --apply  # 実際に適用
+ *   node scripts/ops/apply-migrations-remote.mjs          # dry-run（実行計画のみ表示）
+ *   node scripts/ops/apply-migrations-remote.mjs --apply  # 実際に適用
  */
 import { createClient } from "@libsql/client";
 import { readFileSync, existsSync } from "node:fs";
@@ -30,7 +30,7 @@ import {
   extractCreatedName,
   loadOwnedTables,
   EXTERNAL_DENYLIST,
-} from "./migrations-additive.mjs";
+} from "../gates/migrations-additive.mjs";
 
 const APPLY = process.argv.includes("--apply");
 

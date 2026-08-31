@@ -2,8 +2,8 @@
  * マイグレーション SQL の「安全に適用してよい文か」を判定するロジックを
  * 一箇所に集約する共有モジュール。
  *
- * `scripts/apply-migrations-remote.mjs`（適用時ガード）と
- * `scripts/check-migrations-additive.mjs`（作成時ゲート・pre-push）の両方から
+ * `scripts/ops/apply-migrations-remote.mjs`（適用時ガード）と
+ * `scripts/gates/check-migrations-additive.mjs`（作成時ゲート・pre-push）の両方から
  * import される。判定基準が 2 箇所に複製されると、いずれ乖離して
  * 「安全装置が通っているのに実は非適合な文を通す」状態になりうるため、
  * ロジックの実体はここ 1 箇所だけに置く。

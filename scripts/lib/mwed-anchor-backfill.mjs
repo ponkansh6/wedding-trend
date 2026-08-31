@@ -1,5 +1,5 @@
 /**
- * `scripts/backfill-mwed-anchors.mjs` の中核ロジックを、DB 接続・LLM 呼び出し・
+ * `scripts/ops/backfill-mwed-anchors.mjs` の中核ロジックを、DB 接続・LLM 呼び出し・
  * ネットワーク I/O・`process.exit` を一切含まない純粋関数として切り出したもの。
  *
  * このスクリプトが救済する対象は discovery 経路（`posts.original_excerpt` が
