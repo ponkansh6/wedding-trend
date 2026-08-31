@@ -400,17 +400,35 @@ eslint 一本でもよい — 重要なのは「二重でないこと」**。
 #### Stage 6. S2 パイプライン単一化（最大の効果・最大のリスク）
 
 - 前提: Stage 1（S1）・Stage 3（S3）・Stage 4（S6）が完了していること。
-- 担当: @explorer がゴールデンセット取得 → 結果を Orchestrator が確認 → @fixer が統合実装
-- 内容: 3コミットに分割する。
-  1. ゴールデンセット取得（既存3経路の実データで入出力を記録。`eval-golden-set.mjs` と
-     `snapshots/anchors-*.json` を素地とする）— 担当 @explorer
-  2. 統合実装（候補供給/原文取得/判定/公開ゲートの4段構造への切り替え。中間状態では
-     **旧経路を権威とし新経路の出力を比較のみに使う shadow mode** でリスクを封じ込める）—
-     担当 @fixer
-  3. 旧経路削除（shadow mode で完全一致を確認できてから）— 担当 @fixer
-     cooldown の経路非依存化はこの Stage で併せて解決する（Stage 7-3 の調査結果を踏まえる）。
-- 検証: Orchestrator がゴールデンセットとの完全一致、`gate.ts` の不変条件テーブルに対する
-  9項目それぞれのテスト、既存テストスイート全体を実行して確認する。
+- **設計確定（2026-08-31, Oracle レビュー）**: 実測により「LLM 層（`curateSingle`/`curatePosts`
+  = `src/lib/llm/batch.ts`）と公開ファネル（`recordPublication` = `src/lib/db/publication.ts`）は
+  既に全経路が共有済み」で、残る複製は各経路に内蔵されたオーケストレーション骨格のみ。
+  スコープを「複製された制御フロー（候補供給→原文取得→判定→公開ゲート）を単一の
+  `runPipeline(candidates, fetchFn, options)` に抽出し、4経路（rss / evergreen / discovery /
+  admin submit）を薄いアダプタ化する」に絞る。**LLM 層・recordPublication 内部・新抽象層
+  （PipelineStage 等）は触らない（YAGNI）**。shadow mode（本番二重走行）は課金倍増＋
+  非決定性ドリフトのため採用しない。代わりに**決定的リプレイ＋LLM モック**で検証する:
+  ゴールデンセットの入力候補に新経路を走らせ、`recordPublication` 引数（bodyHash/hashKind/
+  curatedTitle/publishedAt/hosts/evidence/cooldown 等）が記録済みの決定的出力と一致することを
+  保証する（LLM は `vi.fn()` 固定レスポンスで非決定性を排除）。
+- 担当: @fixer が各コミットを実装、Orchestrator が検証ゲート・golden-replay を実行。
+- 内容: 7段階のコミット。各コミットは lint / type-check / 該当経路の golden-replay /
+  spec-refs 更新に合格すること。
+  1. ゴールデンセット抽出スクリプト新設（`scripts/ops/extract-golden-set.mjs`。本番 Turso を
+     READ-ONLY で読み、posts / post_publications / hosts / evidence_signal_observations /
+     post_retry_queue の決定的フィールドを JSONL として抽出。LLM・ネットワーク呼び出しなし。
+     本文由来テキスト（長文抜粋等）は含めず bodyHash 等のフィンガープリントのみ。
+     `eval-golden-set.mjs` は用途が違う（有用性評価スケルトン）ため流用しない）
+  2. 共通オーケストレータ `src/lib/pipeline/orchestrator.ts` 新設（約80-120行の純粋関数）
+  3. RSS 経路を薄いアダプタ化（`ingest.ts` は候補供給＋原文取得のみ）
+  4. Evergreen 経路を薄いアダプタ化
+  5. Discovery 経路を薄いアダプタ化（`bodyHashSimilarity` 再検証ロジック含む）
+  6. Admin Submit 経路を薄いアダプタ化（条件付き `curateSingle` 分岐含む）
+  7. 旧オーケストレーション骨格の削除
+     cooldown の経路非依存化は共通化の一部としてこの Stage 内で解決する。
+- 検証: Orchestrator が golden-replay（決定的出力の完全一致）、`gate.ts` の不変条件テーブルに
+  対する9項目それぞれのテスト（凍結した黄金テストとして維持）、既存テストスイート全体、
+  type-check・lint・migrations-additive ゲートを実行して確認する。
   articlePathPatterns の2段強制が維持されていることを個別に確認する。
 
 #### Stage 7. S8 テスト整理
