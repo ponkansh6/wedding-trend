@@ -65,6 +65,10 @@ describe("SQL score (USEFULNESS_SCORE_SQL) matches computeUsefulnessScore()", ()
     await setupTestDb();
   });
 
+  // 3125 通りを 1 ケースで回す網羅テストのため、既定の 5000ms では
+  // マシン負荷（並列実行・カバレッジ計測）次第で超過する。実測は単独実行で
+  // 約 6.3 秒。負荷に依存して赤くなるのを防ぐため明示的に上限を与える
+  // （shared_plan/17 S8 のテスト並列化で顕在化した）。
   it("all 3125 combinations of the 5 criteria (each over representative 0-9 levels): getFeedCards() order matches computeUsefulnessScore() order", async () => {
     // publishedAt をすべて別の値にしておくことで、スコアが同点になった場合でも
     // 期待順序が publishedAt 降順で一意に決まるようにする（id タイブレークに
@@ -109,7 +113,7 @@ describe("SQL score (USEFULNESS_SCORE_SQL) matches computeUsefulnessScore()", ()
 
     const feedCards = await getFeedCards({ sourceType: "blog", limit: 4000 });
     expect(feedCards.map((c) => c.url)).toEqual(expectedOrder);
-  });
+  }, 30000);
 
   it("a criteria_json missing a key is treated as false for that key (COALESCE hardening), not as a NULL-propagation crash", async () => {
     await upsertPosts([
