@@ -262,13 +262,13 @@ export class RssAdapter implements PipelineAdapter {
   }
 
   async onTerminalDrop(
-    candidate: PipelineCandidate,
+    _candidate: PipelineCandidate,
     _reason: TerminalReason,
     _now: string,
   ): Promise<void> {
-    if (candidate.retry) {
-      await completeRetry(candidate.retry.urlHash);
-    }
+    // No adapter-specific side effect: the core (`runPipelineOnCandidates`)
+    // already calls `completeRetryIfQueued` on every terminal-drop path when
+    // the candidate originated from the retry queue.
   }
 
   async buildFeedCard(

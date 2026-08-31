@@ -168,7 +168,10 @@ export class EvergreenAdapter implements PipelineAdapter {
     _reason: TerminalReason,
     _now: string,
   ): Promise<void> {
-    // Evergreen legacy leaves retry queue zombie on non-giveUp terminals; preserve parity.
+    // No adapter-specific side effect: the core (`runPipelineOnCandidates`)
+    // now calls `completeRetryIfQueued` on every terminal-drop path when the
+    // candidate originated from the retry queue, so the queue row is already
+    // cleaned up before this hook runs.
   }
 
   async buildFeedCard(

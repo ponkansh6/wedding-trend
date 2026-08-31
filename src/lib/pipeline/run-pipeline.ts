@@ -52,6 +52,19 @@ async function saveEmbedIfFetched(candidate: PipelineCandidate, now: string): Pr
   });
 }
 
+/**
+ * 終端棄却（公開に至らない確定的な却下）で候補が再試行キュー由来
+ * （`candidate.retry` が存在する）の場合にキュー行を削除する。
+ * 呼ばないと `attempts`/`nextAttemptAt` が更新されないまま due が
+ * 恒久化し、cron のたびに無駄な再処理（LLM 呼び出し含む）が発生する
+ * ゾンビ行になる（レーン非依存。分岐を持ち込まないこと）。
+ */
+async function completeRetryIfQueued(candidate: PipelineCandidate): Promise<void> {
+  if (candidate.retry) {
+    await completeRetry(candidate.retry.urlHash);
+  }
+}
+
 function backoffHoursFor(attempts: number, customBackoff?: number[]): number {
   const backoffArray =
     customBackoff && customBackoff.length > 0 ? customBackoff : RETRY_BACKOFF_HOURS;
@@ -344,15 +357,17 @@ export async function runPipelineOnCandidates(
   const removedIds =
     options.enforceRemovedFilter !== false ? await filterRemoved(candidateIds) : new Set<number>();
 
-  const workingCandidates = toCurate.filter((c) => {
+  const workingCandidates: PipelineCandidate[] = [];
+  for (const c of toCurate) {
     const id = states.get(c.url)?.id ?? null;
     if (id !== null && removedIds.has(id)) {
       addDrop("removed");
+      await completeRetryIfQueued(c);
       setOutcome(c.url, { url: c.url, ok: true, reason: "removed", card: null });
-      return false;
+      continue;
     }
-    return true;
-  });
+    workingCandidates.push(c);
+  }
 
   let curated = 0;
   let geminiCalls = 0;
@@ -380,6 +395,7 @@ export async function runPipelineOnCandidates(
           }
           await saveEmbedIfFetched(c, now);
           await adapter.onTerminalDrop(c, "extraction_insufficient", now);
+          await completeRetryIfQueued(c);
           setOutcome(c.url, {
             url: c.url,
             ok: true,
@@ -451,6 +467,7 @@ export async function runPipelineOnCandidates(
               await saveEmbedIfFetched(post, now);
               await adapter.onTerminalDrop(post, "title_filter", now);
             }
+            await completeRetryIfQueued(post);
             addDrop("title_filter");
             setOutcome(post.url, { url: post.url, ok: true, reason: "title_filter", card: null });
             continue;
