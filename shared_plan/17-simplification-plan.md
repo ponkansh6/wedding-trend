@@ -2,7 +2,7 @@
 
 - 対象: `wedding-trend`（本プロジェクト）全体
 - 作成日: 2026-08-31
-- 状態: **提案段階。本文書は計画であり実装ではない。着手前に Stage ごとにユーザー承認を得る。**
+- 状態: **実行中。Stage 1/2/3/4/8 は完了・実装済み、Stage 5 は調査結果により対象ゼロでクローズ済み（下記）。残: Stage 6（S2）/ Stage 7（S8）/ Stage 9（S9）。着手前に Stage ごとにユーザー承認を得る。**
 - 前提: `openspec/specs/wedding-trend/spec.md` §10（法務制約）・§11（不変条件）を一切緩めない。
   本計画のいかなる Stage も、法務不変条件そのものを弱める変更を含んではならない。
   緩めてよいのは「同じ不変条件を守るためのコードが分散している」という実装上の偶発的複雑性のみ。
@@ -389,6 +389,13 @@ eslint 一本でもよい — 重要なのは「二重でないこと」**。
 - 内容: `aiTitle` は明示的に対象外（N3）。
 - 検証: Orchestrator が type-check・test・migrations-additive ゲートを実行し、
   物理 DROP をしていないことを確認する。
+- **実績（2026-08-31）: 調査完了 → 墓碑化対象ゼロでクローズ（コード変更なし）。**
+  14テーブル全て read/write 参照あり（本番行数≧1）で、休眠カラムもゼロ。
+  S7 の前提「evidenceSignalObservations / discoveryHostMetrics / postRetryQueue /
+  post_publication_kind は実験由来で参照ゼロ」は計測により反証。
+  `aiTitle` は spec.md §11 どおり「値が常に null の休眠カラム」として維持（N3 遵守）。
+  旧 `post_usefulness` 孤児テーブル（本番43行）は schema.ts / spec.md /
+  migrations-additive.mjs（`LEGACY_ORPHANED_OWNED_TABLES`）に既に文書化済みで放置判断。
 
 #### Stage 6. S2 パイプライン単一化（最大の効果・最大のリスク）
 
@@ -498,7 +505,9 @@ AGENTS.md の原則をそのまま適用する。**S3 の型ガードと S4 の�
 3. **vitest OOM の実際の原因ファイル** — 全体直列化が過剰対処である可能性。per-file の
    ピークヒープ測定が必要（S8 の前提。Stage 7 で調査）
 4. **14テーブルの本番における実書き込み実績** — どれが本当に死んでいるか（S7 の前提。
-   Stage 5 で調査）
+   Stage 5 で調査）→ **2026-08-31 調査済み: 全テーブルに書込経路・本番行数あり。死んでいる
+   テーブル・休眠カラムはゼロ。旧 `post_usefulness`（schema.ts 未定義の孤児）のみ残存で
+   文書化・放置判断済み。**
 5. **`scripts/` の使い捨て15個が CI/docs/spec から参照されていないか** — archive 移動前に
    grep が必要（Stage 1 の一部として @fixer が実施前に確認）
 6. **cooldown が `/admin` 経路のみに掛かる理由** — 意図的な設計（手動操作の連打防止）なのか、
