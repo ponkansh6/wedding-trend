@@ -21,13 +21,13 @@ Next.js 16 (App Router), React 19, TypeScript strict, Tailwind CSS v4, Drizzle O
 - **sitemap 差分による発見・本文取得（discovery 経路）**:
   - RSS フィードが存在しないセクション（第1対象: `mwed.jp` 体験談）を sitemap の差分から発見し、アクセス規律レイヤー経由で本文を取得して判定する。本文は判定後に破棄し永続化しない (`src/lib/sources/sitemap-discovery.ts`, `src/lib/sources/access-discipline.ts`, `src/lib/sources/article-text.ts`, `src/lib/pipeline/discovery-ingest.ts`, `scripts/run-discovery.mjs`)。また、有用度スコア等の全件バックフィルスクリプト `scripts/backfill-usefulness.mjs` にも discovery 経路由来のプレフライト・バイパス機能が統合されており、本文をメモリ上で一時取得して再スコア対象にルーティングする。詳細は §6.3 を参照。
 - **管理者による URL 投入 API**:
-  - SNS 投稿等の URL を受け取り、oEmbed を取得してカード化 (`src/app/api/submit-url/route.ts`, `src/lib/pipeline/submit-url.ts`, `src/lib/embed/oembed.ts`, `src/lib/embed/providers.ts`)
+  - SNS 投稿等の URL を受け取り、oEmbed を取得してカード化 (`src/app/api/submit-url/route.ts`, `src/lib/pipeline/submit-via-pipeline.ts`, `src/lib/embed/oembed.ts`, `src/lib/embed/providers.ts`)
 - **AI による見出し・要約生成**:
   - Google Gemini API を用いた一括抽出・サマライズ（バッチサイズ: `LLM_BATCH_SIZE = 30`。`src/lib/llm/client.ts`, `src/lib/llm/batch.ts`, `src/lib/llm/prompts.ts`, `src/lib/llm/schemas.ts`, `src/lib/llm/signature.ts`)
 - **定期巡回 API**:
   - `src/app/api/ingest/route.ts` / `src/lib/pipeline/ingest.ts` による一括インジェスト
 - **収集トリガー（2 経路）**:
-  - `/admin`（`src/middleware.ts` の Basic 認証配下。オーナー限定）から叩く Server Action (`src/app/actions.ts`) と、`vercel.json` の Vercel Cron による定期実行。両者とも実処理は `src/lib/pipeline/ingest.ts` / `src/lib/pipeline/submit-url.ts` に一本化されている（詳細は §6）。収集ボタンは以前、無認証で本番の公開トップページに置かれていたが、デプロイをまたいで残る ISR の stale ページが原因の誤解（「体験談 0 件なのに更新制限」）をきっかけに `/admin` へ移した。加えて、両経路とも同時実行を防ぐ排他ロック（lease）と、`/admin` 経路のみ連打防止のクールダウンを DB 側で必ず取得する（`src/lib/pipeline/cooldown.ts`。詳細は §6.4）
+  - `/admin`（`src/middleware.ts` の Basic 認証配下。オーナー限定）から叩く Server Action (`src/app/actions.ts`) と、`vercel.json` の Vercel Cron による定期実行。両者とも実処理は `src/lib/pipeline/ingest.ts` / `src/lib/pipeline/submit-via-pipeline.ts` に一本化されている（詳細は §6）。収集ボタンは以前、無認証で本番の公開トップページに置かれていたが、デプロイをまたいで残る ISR の stale ページが原因の誤解（「体験談 0 件なのに更新制限」）をきっかけに `/admin` へ移した。加えて、両経路とも同時実行を防ぐ排他ロック（lease）と、`/admin` 経路のみ連打防止のクールダウンを DB 側で必ず取得する（`src/lib/pipeline/cooldown.ts`。詳細は §6.4）
 - **ヘルスチェック**:
   - `src/app/api/health/route.ts`
 
@@ -45,7 +45,7 @@ Next.js 16 (App Router), React 19, TypeScript strict, Tailwind CSS v4, Drizzle O
 - **FR-001: 記事・投稿の自動巡回とインジェスト**
   - `src/app/api/ingest/route.ts` を呼び出すことで、`src/lib/sources/registry.ts` に登録された各アダプタから RSS データを取得し、データベースに保存する。実処理本体は `src/lib/pipeline/ingest.ts` の `runIngest()` に実装されている。
 - **FR-002: 管理者 URL 投入と oEmbed 取得**
-  - `src/app/api/submit-url/route.ts` を介して手動で投稿 URL を登録し、`src/lib/embed/oembed.ts` で埋め込みデータを取得して保存する。実処理本体は `src/lib/pipeline/submit-url.ts` の `runSubmitUrl()` に実装されている。
+  - `src/app/api/submit-url/route.ts` を介して手動で投稿 URL を登録し、`src/lib/embed/oembed.ts` で埋め込みデータを取得して保存する。実処理本体は `src/lib/pipeline/submit-via-pipeline.ts` の `runSubmitUrlViaPipeline()` に実装されている。
 - **FR-003: AI による要約・見出し生成**
   - Google Gemini API (`src/lib/llm/client.ts`) を用い、取得したコンテンツから短尺の要約、カテゴリ、タグ等を抽出・生成する。
 - **FR-004: 2レーン構成のフィード表示**
@@ -53,7 +53,7 @@ Next.js 16 (App Router), React 19, TypeScript strict, Tailwind CSS v4, Drizzle O
 - **FR-005: セキュリティおよび環境検証**
   - `src/middleware.ts` および `src/lib/auth.ts` によるベーシック認証等の保護、`src/lib/constants.ts` や `src/lib/url.ts` 等の共通ユーティリティ。`src/lib/auth.ts` の `isBearerAuthorized` は **fail-closed**: 検証用の secret（既定 `CRON_SECRET`）が未設定の場合、実行環境（`NODE_ENV` / `VERCEL_ENV` 等）によらず常にリクエストを拒否する。環境によって認証ロジックが変わる設計（未設定時はローカル開発向けに無認証で許可する fail-open）を避けるための意図的な制約であり、ローカル開発でも `.env.local` に secret を設定しない限り `/api/ingest` `/api/submit-url` は 401 を返す。
 - **FR-006: 収集トリガーの管理画面化と定期実行**
-  - `src/app/actions.ts` の Server Action（`triggerIngest` / `submitSnsUrl`）により、`/admin`（`src/middleware.ts` の Basic 認証配下・オーナー限定）上のボタン操作から `src/lib/pipeline/ingest.ts` / `src/lib/pipeline/submit-url.ts` を直接呼び出す。加えて `vercel.json` の Vercel Cron 設定により `GET /api/ingest` を定期実行する。両トリガー経路の詳細・認可モデルは §6 を参照。
+  - `src/app/actions.ts` の Server Action（`triggerIngest` / `submitSnsUrl`）により、`/admin`（`src/middleware.ts` の Basic 認証配下・オーナー限定）上のボタン操作から `src/lib/pipeline/ingest.ts` / `src/lib/pipeline/submit-via-pipeline.ts` を直接呼び出す。加えて `vercel.json` の Vercel Cron 設定により `GET /api/ingest` を定期実行する。両トリガー経路の詳細・認可モデルは §6 を参照。
 - **FR-007: 収集トリガーの排他ロックとクールダウン**
   - 収集パイプラインを起動する両経路（`/admin` の手動トリガー・Cron）は、`src/lib/pipeline/cooldown.ts` の `acquireIngestLease()` により実行排他ロック（lease）を必ず取得する。取得できなければ「実行中」として `runIngest()` を呼ばずに返す（`/admin` 経路では `IngestResult.busy: true`）。加えて `/admin` 経路のみ、`claimIngestSlot()` により 15 分のクールダウンを DB 側で原子的に確保し、`runIngest()` が実際に Gemini を呼んでいれば `extendIngestCooldownAfterRun()` が 4 時間へ延長する。クールダウン中は lease を解放し `runIngest()` を呼ばずに待機状態を返す。詳細は §6.4 を参照。
 - **FR-008: sitemap 差分発見と本文取得による判定（discovery 経路）**
@@ -267,7 +267,7 @@ kill gate K1（robots.txt 変化検知）の入力。取得のたびに内容ハ
 ## 6. Architecture
 
 投稿の摂取経路は 3 本ある: (1) RSS フィードの自動巡回（`src/lib/pipeline/ingest.ts`）、
-(2) `/admin` からの手動 URL 投入（`src/lib/pipeline/submit-url.ts`）、
+(2) `/admin` からの手動 URL 投入（`src/lib/pipeline/submit-via-pipeline.ts`）、
 (3) sitemap 差分による発見・本文取得（`src/lib/pipeline/discovery-ingest.ts`、GitHub Actions
 の日次実行）。(1)(2) は §6.1 の収集トリガー（Vercel Cron・Server Action）を経由するが、
 (3) は Vercel Cron を増やさず GitHub Actions で独立して動く（§6.3 を参照）。
@@ -282,7 +282,7 @@ kill gate K1（robots.txt 変化検知）の入力。取得のたびに内容ハ
   - `src/lib/embed/oembed.ts` 及び `src/lib/embed/providers.ts` による堅牢な埋め込み取得と障害時フォールバック。
 - **Pipeline modules（実処理の単一実装）**:
   - `src/lib/pipeline/ingest.ts`（`runIngest`）: RSS 巡回 → 正規化 URL での重複排除 → upsert → 未キュレーション/再キュレーション対象の予算内選定 → LLM 一括キュレーション、までの一連の処理。`/` は `export const dynamic = "force-dynamic"` でキャッシュを経由しないため、以前ここにあったフィードキャッシュの明示的失効（`revalidateTag`）は不要になった（詳細は §6.5）。
-  - `src/lib/pipeline/submit-url.ts`（`runSubmitUrl`）: URL 正規化 → oEmbed 取得 → LLM 単体キュレーション（失敗時は原文ベースのフォールバックで `"pending"` 保存）→ upsert → 埋め込み保存、までの一連の処理。
+  - `src/lib/pipeline/submit-via-pipeline.ts`（`runSubmitUrlViaPipeline`）: URL 正規化 → oEmbed 取得 → 候補構築までを `SubmitAdapter` が担い、以降（LLM キュレーション → 公開ゲート → upsert → 埋め込み保存）は共通コア `runPipelineOnCandidates`（`src/lib/pipeline/run-pipeline.ts`）が担う。本関数は `SubmitOutcome` 契約へ写像する薄いラッパーである（2026-08-31, shared_plan/17 S2 でパイプラインを統合）。
   - どちらも「呼び出し元（Route Handler か Server Action か）に依存しない」ことを目的に切り出されており、`src/app/api/ingest/route.ts` / `src/app/api/submit-url/route.ts` および `src/app/actions.ts` はいずれもこれらの薄いラッパーに過ぎない。ロジックを二重実装しないことが本設計の前提。
 
 ### §6.1 収集トリガーの 2 経路
@@ -316,7 +316,7 @@ kill gate K1（robots.txt 変化検知）の入力。取得のたびに内容ハ
 「式決定後の意思決定」に特化した定番記事は RSS フィードが構造的に存在しないため、
 §6.1 の収集トリガーとは独立した手動経路で摂取する。運営が CLI
 `node scripts/submit-evergreen.mjs <url> [--source-name <出典名>]` で URL を投入すると、
-`src/lib/pipeline/evergreen.ts` の `curateEvergreenUrl()` が URL 正規化 → OGP/JSON-LD
+`src/lib/pipeline/evergreen-via-pipeline.ts` の `curateEvergreenUrlViaPipeline()` が URL 正規化 → OGP/JSON-LD
 メタデータ取得（本文 DOM は読まない）→ 原文テキスト（og:description）の有無で分岐し、
 LLM キュレーションまたは pending 保存を行う。原文テキスト不在時の挙動と出典クレジットの
 解決規則は §10-4 に定義する。対象トピックの選定基準（商用排除・当事者の体験談限定）は
@@ -465,7 +465,7 @@ Server Action 自身（Node ランタイム）は `node:crypto` の `timingSafeE
 | Tier 2 パース・判定   | `src/lib/sources/base/feed-parser.ts`, `src/lib/embed/providers.ts`                                                                                                                              | 85%                      |
 | Tier 3 収集アダプタ   | `src/lib/sources/hatena-bookmark.ts`, `src/lib/sources/google-news.ts`, `src/lib/sources/note.ts`, `src/lib/sources/ameblo.ts`, `src/lib/sources/base/rss-fetcher.ts`, `src/lib/embed/oembed.ts` | 80%                      |
 | Tier 4 LLM 制御       | `src/lib/llm/batch.ts`, `src/lib/llm/client.ts`                                                                                                                                                  | 80%                      |
-| Tier 5 API ルート     | `src/app/api/ingest/route.ts`, `src/app/api/submit-url/route.ts`, `src/lib/pipeline/ingest.ts`, `src/lib/pipeline/submit-url.ts`, `src/lib/pipeline/cooldown.ts`                                 | 70%                      |
+| Tier 5 API ルート     | `src/app/api/ingest/route.ts`, `src/app/api/submit-url/route.ts`, `src/lib/pipeline/ingest.ts`, `src/lib/pipeline/submit-via-pipeline.ts`, `src/lib/pipeline/cooldown.ts`                        | 70%                      |
 | Tier 6 データアクセス | `src/lib/db/repository.ts`, `src/lib/db/query.ts`                                                                                                                                                | 65%                      |
 | Tier 7 RSC/UI         | `src/app/page.tsx`, `src/app/layout.tsx`, `src/components/**`                                                                                                                                    | 除外 (smoke test で担保) |
 
@@ -753,8 +753,8 @@ bump しなければならない。bump がないと `getStaleCurationCandidates
     - **公開済みデータの再生成**: DB に保存済みの `post_rationales.rationale_text` には削除前の文言（`promotional` 由来のラベルを含む根拠文）が残存するため、`scripts/` 配下のバックフィルスクリプトで再生成する。
 
 4. **判定に足る原文テキストが存在しない場合は LLM 判定結果を公開しない（経路非依存の不変条件）**: すべての摂取経路において、LLM キュレーション（`curateSingle`）を呼び出す前に「判定対象となる原文テキストが存在するか」を判定する。「原文テキスト」の定義は経路ごとに異なり、新たな摂取経路を追加する際は必ず本項に定義を追記する。
-   - **SNS 手動投入経路**（`src/lib/pipeline/submit-url.ts` の `runSubmitUrl`）: oEmbed が返すキャプション（`embed.title`）と、運営が投稿時に添える補足メモ（`note`、空白のみは「補足なし」として扱う）の 2 つのみを指す。
-   - **エバーグリーン経路**（`src/lib/pipeline/evergreen.ts` の `curateEvergreenUrl`）: OGP メタデータの `og:description` / `<meta name="description">`（`meta.description`）のみを指す。`<title>` / `og:title` は表示ラベルであり判定の材料にしない。本文 DOM は一切読まない（`src/lib/sources/ogp.ts` は meta タグと JSON-LD のみを走査する。`tests/ogp.test.ts` がこの不変条件を固定する）。
+   - **SNS 手動投入経路**（`src/lib/pipeline/submit-via-pipeline.ts` の `runSubmitUrlViaPipeline`）: oEmbed が返すキャプション（`embed.title`）と、運営が投稿時に添える補足メモ（`note`、空白のみは「補足なし」として扱う）の 2 つのみを指す。
+   - **エバーグリーン経路**（`src/lib/pipeline/evergreen-via-pipeline.ts` の `curateEvergreenUrlViaPipeline`）: OGP メタデータの `og:description` / `<meta name="description">`（`meta.description`）のみを指す。`<title>` / `og:title` は表示ラベルであり判定の材料にしない。本文 DOM は一切読まない（`src/lib/sources/ogp.ts` は meta タグと JSON-LD のみを走査する。`tests/ogp.test.ts` がこの不変条件を固定する）。
    - **discovery 経路**（`src/lib/pipeline/discovery-ingest.ts` の `ingestDiscoveredUrls`）: 取得した記事 HTML から、まず `src/lib/sources/article-text.ts` の `extractArticleContainer()` がホストごとの許可リスト `articleContainerSelectors`（`src/lib/constants.ts` の `HOST_ALLOWLIST` 各エントリ）に従って**記事本文コンテナ**（`www.mwed.jp` は `div.story-detail` を第一候補、`div.produce-story-detail` を次点とする優先順のセレクタ配列）を切り出す。いずれのセレクタにも一致しない場合は `null` を返し、コンテナが存在しない記事は判定対象にしない（破損シグナルとしての扱いは §11 参照）。切り出したコンテナの innerHTML から `extractVisibleText()` でノイズ除去後、その**先頭から最大 1,500 字**を**判定スライス**として抽出する（コンテナ抽出前段が入る以前は「ページ全体の先頭 1,200 字をスキップした後続 1,500 字」であったが、口コミ等の第三者 UGC やナビが判定対象に混入する欠陥があったため、コンテナ抽出後の先頭スライスに変更した）。§10-5 の禁止事項と対になる規律であり、この判定スライスは LLM 入力としてのみ使い DB には一切保存しない。この節は `shared_plan/06-rationale-and-scraping.md` §5.3 に対応する運用規律であり、`src/lib/sources/article-text.ts` と `src/lib/pipeline/discovery-ingest.ts` のコード内コメントが参照する「§5.3」は当該 plan ドキュメントの節番号を指す（spec.md 側の対応内容は本項 §10-3〜§10-5 である）。
    - Instagram のキーなし oEmbed エンドポイント（`graph.facebook.com/.../instagram_oembed`）はキャプション本文を一切返さない（`version` / `provider_name` / `provider_url` / `type` / `width` / `html` のみで `title` が欠落する。2026-08-22 の実リクエストで確認済み）。これに対し YouTube の oEmbed は `title` を返す。
    - SNS 経路で原文テキストが両方とも存在しない場合、`runSubmitUrl` は `curateSingle` を一切呼ばず、`status: "pending"` のまま投稿を保存する（`aiSummary` は null のまま）。取得済みの embed（`embedProvider` / `embedHtml` / `embedFetchedAt`）と `url` は保存し、再取得コストを避ける。呼び出し元には安定コード `"needs_source_text"` を返す。
@@ -923,7 +923,7 @@ bump しなければならない。bump がないと `getStaleCurationCandidates
 2. **K2（規約変更検知）と allowlist の関係**: `source_policy.tosUrl` は `HOST_ALLOWLIST`（`src/lib/constants.ts` の各エントリの `tosUrl`）から解決する。**allowlist 側が真実の源（source of truth）であり、DB（`source_policy` テーブル）に格納された古い値は allowlist の値で上書きして解決する**（`src/lib/sources/access-discipline.ts`）。allowlist に未登録、または `tosUrl` が未設定のホストは `tosUrl: null` のまま維持され、K2 の対象にならない。
    - **既知の許容トレードオフ（遅延）**: K2 の実行間隔は「1ホストあたり1日1回」であり、`source_policy.checkedAt` 列を robots.txt チェック側と共有している。そのため **robots.txt の変化を検知した直後は、規約チェックが最大1日遅延しうる**。追加専用（append-only）のマイグレーション制約下では列を新設するだけで解決できず、テーブルを分離すると `tosHash` が再び休眠カラム化するリスクを招くため、この遅延は仕様上許容する。
 3. **記事パスのホワイトリスト（`HOST_ALLOWLIST.articlePathPatterns`）**: discovery 対象の URL パスは `src/lib/constants.ts` の `AllowlistedHost.articlePathPatterns` で定義し、**取得前に**2段階で強制する——sitemap からの URL 収集（seed）段階と、本文取得直前の段階。口コミ投稿ページ（`/hall/{hallId}/rev/{commentId}/` 等、記事とはパス構造が異なる投稿単位のページ）はこのパターンに一致しないため、構造的に discovery 対象から除外される。
-4. **日次公開サーキットブレーカー**: `DAILY_PUBLISH_CAP = 150`（`src/lib/constants.ts`）。当日 JST の公開総数がこれに達している場合、以後の新規公開を打ち切る（終端棄却ではなく `rate_capped` として再試行キューへ繰り延べる）。SNS 手動投入・エバーグリーン・discovery の全経路（`src/lib/pipeline/submit-url.ts`・`src/lib/pipeline/evergreen.ts`・`src/lib/pipeline/ingest.ts`・`src/lib/pipeline/discovery-ingest.ts`）で共通の判定関数 `isDailyPublishCapReached()`（`src/lib/pipeline/rate-cap.ts`）を用いる。
+4. **日次公開サーキットブレーカー**: `DAILY_PUBLISH_CAP = 150`（`src/lib/constants.ts`）。当日 JST の公開総数がこれに達している場合、以後の新規公開を打ち切る（終端棄却ではなく `rate_capped` として再試行キューへ繰り延べる）。SNS 手動投入・エバーグリーン・discovery の全経路（`src/lib/pipeline/submit-via-pipeline.ts`・`src/lib/pipeline/evergreen-via-pipeline.ts`・`src/lib/pipeline/ingest.ts`・`src/lib/pipeline/discovery-ingest.ts`）で共通の判定関数 `isDailyPublishCapReached()`（`src/lib/pipeline/rate-cap.ts`）を用いる。
    - **2026-08-29 の方針転換（オーナー判断）**: 旧仕様（`DAILY_PUBLISH_CAP = 15` ＋ `HOST_DAILY_SHARE_MAX = 0.5` で単一ホスト最大 7件/日）は、供給スロットルであると同時に「1ホストがフィードを埋めると、個々のカードが正しくても『中立キュレーション』の主張が集約レベルで偽になる」ことを防ぐ安全弁（旧 plan 07 §6-Q4）だった。**集約レベルの中立性を運用ポリシーから外す**ことに伴い、`HOST_DAILY_SHARE_MAX` を廃止し、単一ホストの当日公開シェアは一切制限しない。`DAILY_PUBLISH_CAP` は供給目標（旧 15件/日）から切り離し、DOM 変更等で一晩に数百件を誤公開する相関カスケード事故だけを止める上限（150）として残す。通常運用でこの値に達することは想定しない。
    - **回帰防止（plan 07 §14）**: この上限を無効値（10^9 等）に戻すと境界テストが素通りした過去の回帰を踏まえ、`tests/pipeline-ingest.test.ts` / `tests/discovery-ingest.test.ts` の境界テストは `149→公開 / 150→rate_capped` をリテラルで固定する。
 5. **目標フィード供給量**: 明示的な数値目標は置かない（2026-08-29 に旧「15件/日」を撤廃）。供給量は抽出品質ゲート（§11 項1）とキュレーションの通過率に委ね、上限は項4 のサーキットブレーカー（150/日）のみとする。

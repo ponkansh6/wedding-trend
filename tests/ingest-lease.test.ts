@@ -15,9 +15,9 @@ import { setupTestDb } from "./helpers/test-db";
  * runIngest() が二重に走る」という脆弱性そのもの。
  */
 
-const { runIngestMock, runSubmitUrlMock } = vi.hoisted(() => ({
+const { runIngestMock, runSubmitUrlViaPipelineMock } = vi.hoisted(() => ({
   runIngestMock: vi.fn(),
-  runSubmitUrlMock: vi.fn(),
+  runSubmitUrlViaPipelineMock: vi.fn(),
 }));
 
 vi.mock("@/lib/pipeline/ingest", () => ({
@@ -26,8 +26,8 @@ vi.mock("@/lib/pipeline/ingest", () => ({
 
 // triggerIngest 自体は呼ばないが actions.ts が静的 import しているため、
 // 実モジュール（Gemini/oEmbed クライアントを持つ）が読み込まれないようにする。
-vi.mock("@/lib/pipeline/submit-url", () => ({
-  runSubmitUrl: runSubmitUrlMock,
+vi.mock("@/lib/pipeline/submit-via-pipeline", () => ({
+  runSubmitUrlViaPipeline: runSubmitUrlViaPipelineMock,
 }));
 
 // このファイルは @/lib/auth（isBasicAuthorized）もモックしない。lease/cooldown

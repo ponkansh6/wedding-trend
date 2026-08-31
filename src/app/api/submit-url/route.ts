@@ -21,7 +21,8 @@ function parseBody(raw: unknown): SubmitUrlBody | null {
  * 認証 → body 検証 → パイプライン実行 → JSON 応答、という薄いラッパー。
  * 実処理は `@/lib/pipeline/submit-via-pipeline`（`runSubmitUrlViaPipeline`、
  * 内部で `runPipeline` コアを使う）に一本化されており、ここに実装を重複させない
- * （S2 配線: 旧 `runSubmitUrl` は `ingest.ts` の再試行キュー消費ループ専用に残る）。
+ * （S2 完了: 旧 `runSubmitUrl` は削除済み。再試行キューの消費も `retry-runner.ts` が
+ * 同じコアを通して行う）。
  */
 export async function POST(request: Request) {
   if (!isBearerAuthorized(request)) {

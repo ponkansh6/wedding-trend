@@ -2,9 +2,12 @@
  * Purpose: Thin wrapper adapting `runPipeline`/`runPipelineOnCandidates` (core,
  * lane-agnostic) to the `SubmitOutcome` contract that `/api/submit-url` and
  * `submitSnsUrl` (Server Action) depend on. Introduced in S2 (shared_plan/17)
- * to switch the submit lane's production path onto the unified pipeline core
- * while `runSubmitUrl` (legacy) remains the implementation used by the
- * rss/evergreen/submit retry-queue consumer in `ingest.ts` (untouched here).
+ * to switch the submit lane's production path onto the unified pipeline core.
+ * The legacy skeleton (`runSubmitUrl`, formerly `@/lib/pipeline/submit-url.ts`)
+ * was removed in Stage 6 S2 Commit 4 once the rss/evergreen/submit
+ * retry-queue consumer moved onto `retry-runner.ts`; this wrapper (and its
+ * `SubmitOutcome` contract, moved here from the deleted legacy module) is
+ * now the sole production implementation for this lane.
  */
 
 import {
@@ -15,8 +18,25 @@ import {
 } from "@/lib/constants";
 import { runPipelineOnCandidates } from "@/lib/pipeline/run-pipeline";
 import { SubmitAdapter } from "@/lib/pipeline/adapters/submit-adapter";
-import type { SubmitOutcome } from "@/lib/pipeline/submit-url";
+import type { FeedCard } from "@/lib/types";
 import { computeCurationSignature } from "@/lib/llm/signature";
+
+/**
+ * SNS 単発投稿の取り込み結果。
+ * `reason` は表示用文言そのものではなく、呼び出し側（Route Handler / Server Action）が
+ * HTTP ステータスや日本語メッセージへ変換するための安定した内部コード。
+ * - 失敗時（`ok:false`）: `"invalid_url"` | `"save_failed"`
+ * - 終端棄却（`ok:true`・plan 07 §7）: `"extraction_insufficient"`（要約対象の
+ *   原文テキストが存在しない） | `"title_filter"`
+ * - 撤回済み（`ok:true`・sticky）: `"removed"`
+ * - 一時的失敗を再試行キューへ繰り延べ（`ok:true`）: `"queued_for_retry"` | `"rate_limited"`
+ * - 成功: `null`
+ */
+export type SubmitOutcome = {
+  ok: boolean;
+  reason: string | null;
+  card: FeedCard | null;
+};
 
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
 
@@ -29,14 +49,13 @@ function jstDayStartIso(nowIso: string): string {
 }
 
 /**
- * `runPipeline`（コア）経由で単一 URL の SNS 投稿を取り込み、旧
- * `runSubmitUrl`（`@/lib/pipeline/submit-url`）と同一契約の `SubmitOutcome`
+ * `runPipeline`（コア）経由で単一 URL の SNS 投稿を取り込み、`SubmitOutcome`
  * を返す。`/api/submit-url` の Route Handler と `submitSnsUrl` Server Action
- * から呼ばれる新しい本番経路（S2 配線）。
+ * から呼ばれる本番経路。
  *
- * `ingest.ts` の再試行キュー消費ループ（rss/evergreen/submit 共通）は、
- * まだ旧 `runSubmitUrl` / `terminateSubmitRetry` を呼び続けており、
- * この関数の対象外（今回は初回投入経路のみを切り替える）。
+ * `ingest.ts` の再試行キュー消費ループ（rss/evergreen/submit 共通）は
+ * `retry-runner.ts`（同じく `runPipelineOnCandidates` 経由）に配線されており、
+ * この関数とは別経路（初回投入 vs 再試行キュー消費）。
  */
 export async function runSubmitUrlViaPipeline(url: string, note?: string): Promise<SubmitOutcome> {
   const adapter = new SubmitAdapter();

@@ -2,7 +2,25 @@
 
 - 対象: `wedding-trend`（本プロジェクト）全体
 - 作成日: 2026-08-31
-- 状態: **実行中。Stage 1/2/3/4/8 は完了・実装済み、Stage 5 は調査結果により対象ゼロでクローズ済み（下記）。残: Stage 6（S2）/ Stage 7（S8）/ Stage 9（S9）。着手前に Stage ごとにユーザー承認を得る。**
+- 状態: **実行中。Stage 1/2/3/4/8 完了、Stage 5 は対象ゼロでクローズ。Stage 6（S2）は 2026-08-31 に完了（3レーンの統合・旧骨格の削除まで）。残: Stage 7（S8）/ Stage 9（S9）。着手前に Stage ごとにユーザー承認を得る。**
+
+  S2 完了時の記録（2026-08-31）:
+  - 統合対象は rss / evergreen / submit の3レーン。discovery は設計判断どおり現状維持。
+  - 旧骨格（`curateEvergreenUrl` / `runSubmitUrl` / `reprocessRssRetry` / `terminate*Retry`）と
+    `evergreen.ts` / `submit-url.ts` を削除。純粋関数は `source-name.ts` へ移設し、
+    discovery がスコープ外レーンから evergreen モジュールに依存する逆流も解消した。
+  - **M1 の「9項目」は列挙が存在しなかった**（`INV-` アンカーも0件）。数は初期診断由来の
+    見積もりに過ぎない。実際に機械的強制があるものを棚卸しし、8項目を
+    `src/lib/publish/invariants.ts` に記録した。うち INV-7（逐語タイトル）と
+    INV-8（本文非永続化）は型やゲートではなく**規約**による強制であり、その旨も記録した。
+  - diff テストは**正しさを保証しない**（旧新の双方に同じ欠陥が入ると差分がゼロになる）。
+    実測でも `filterTitle` を壊して diff テストは1件も落ちなかった。安全網は
+    `tests/pipeline/invariants.test.ts` の境界テストに移し、8項目すべて変異で赤くなることを
+    確認したうえで diff テスト5本を削除した。
+  - 副作用として、統合でゲート強制が `run-pipeline.ts` へ移った結果、**どの coverage tier にも
+    属さなくなり計測から外れていた**。tier 定義を追随させ、パターン単位の陳腐化検出も追加した。
+  - 残課題: 非 giveUp 終端時に再試行キュー行が残るゾンビ挙動は parity のため温存（独立コミット予定）。
+
 - 前提: `openspec/specs/wedding-trend/spec.md` §10（法務制約）・§11（不変条件）を一切緩めない。
   本計画のいかなる Stage も、法務不変条件そのものを弱める変更を含んではならない。
   緩めてよいのは「同じ不変条件を守るためのコードが分散している」という実装上の偶発的複雑性のみ。

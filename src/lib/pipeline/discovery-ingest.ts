@@ -63,7 +63,7 @@ import {
 import { curateSingle } from "@/lib/llm/batch";
 import type { CurationResult } from "@/lib/llm/batch";
 import { computeContentHash, computeCurationSignature } from "@/lib/llm/signature";
-import { registrableDomain } from "@/lib/pipeline/evergreen";
+import { registrableDomain } from "@/lib/pipeline/source-name";
 import { isDailyPublishCapReached } from "@/lib/pipeline/rate-cap";
 import { checkTermsOfServiceChange, disciplinedFetch } from "@/lib/sources/access-discipline";
 import {

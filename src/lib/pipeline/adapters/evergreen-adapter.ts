@@ -14,9 +14,8 @@ import type { CurationResult } from "@/lib/llm/batch";
 import { canonicalizeUrl } from "@/lib/url";
 import { dueRetries } from "@/lib/db/publication";
 import { getPostsByUrls, upsertPosts } from "@/lib/db/repository";
-import { registrableDomain } from "@/lib/pipeline/evergreen";
+import { registrableDomain, resolveSourceName } from "@/lib/pipeline/source-name";
 import { fetchOgpMetadata } from "@/lib/sources/ogp";
-import { resolveSourceName } from "@/lib/pipeline/evergreen";
 
 export class EvergreenAdapter implements PipelineAdapter {
   /**

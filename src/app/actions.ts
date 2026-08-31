@@ -93,7 +93,7 @@ export type SubmitUrlResult = {
 const ADMIN_DISABLED_MESSAGE = "この操作は現在無効になっています。管理者にお問い合わせください。";
 
 /**
- * `runSubmitUrl` が `"needs_source_text"` を返した場合に画面へそのまま表示する文言。
+ * `runSubmitUrlViaPipeline` が `"needs_source_text"` を返した場合に画面へそのまま表示する文言。
  * Instagram のキーなし oEmbed はキャプション本文を返さないため、原文が無いまま
  * AI に要約させることができない（=させてはいけない）。埋め込み自体は保存済みなので、
  * 運営が「補足メモ」を添えて再投入すれば oEmbed を取り直さずに公開できる。

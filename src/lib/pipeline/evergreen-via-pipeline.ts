@@ -3,9 +3,12 @@
  * lane-agnostic) to the `EvergreenOutcome` contract that
  * `scripts/ops/submit-evergreen.mjs` (manual admin CLI) depends on.
  * Introduced in S2 (shared_plan/17) to switch the evergreen lane's manual
- * ingestion path onto the unified pipeline core while `curateEvergreenUrl`
- * (legacy, `@/lib/pipeline/evergreen.ts`) remains the implementation used by
- * the retry-queue consumer in `ingest.ts` (untouched here).
+ * ingestion path onto the unified pipeline core. The legacy skeleton
+ * (`curateEvergreenUrl`, formerly `@/lib/pipeline/evergreen.ts`) was removed
+ * in Stage 6 S2 Commit 4 once the rss/evergreen/submit retry-queue consumer
+ * moved onto `retry-runner.ts`; this wrapper (and its `EvergreenOutcome`
+ * contract, moved here from the deleted legacy module) is now the sole
+ * production implementation for this lane.
  */
 
 import {
@@ -16,8 +19,18 @@ import {
 } from "@/lib/constants";
 import { runPipelineOnCandidates } from "@/lib/pipeline/run-pipeline";
 import { EvergreenAdapter } from "@/lib/pipeline/adapters/evergreen-adapter";
-import type { EvergreenOutcome } from "@/lib/pipeline/evergreen";
+import type { FeedCard } from "@/lib/types";
 import { computeCurationSignature } from "@/lib/llm/signature";
+
+/**
+ * `reason` の主な値:
+ * - 失敗（`ok:false`）: `"invalid_url"` | `"no_metadata"` | `"no_source_name"` | `"save_failed"`
+ * - 終端棄却（`ok:true`・plan 07 §7）: `"extraction_insufficient"` | `"title_filter"`
+ * - 撤回済み（`ok:true`・sticky）: `"removed"`
+ * - 一時的失敗を再試行キューへ繰り延べ（`ok:true`）: `"queued_for_retry"` | `"rate_limited"`
+ * - 成功: `null`
+ */
+export type EvergreenOutcome = { ok: boolean; reason: string | null; card: FeedCard | null };
 
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
 
@@ -30,14 +43,13 @@ function jstDayStartIso(nowIso: string): string {
 }
 
 /**
- * `runPipeline`（コア）経由で単一 URL のエバーグリーン記事を取り込み、旧
- * `curateEvergreenUrl`（`@/lib/pipeline/evergreen`）と同一契約の
+ * `runPipeline`（コア）経由で単一 URL のエバーグリーン記事を取り込み、
  * `EvergreenOutcome` を返す。`scripts/ops/submit-evergreen.mjs`（管理者手動
- * CLI）から呼ばれる新しい本番経路（S2 配線）。
+ * CLI）から呼ばれる本番経路。
  *
- * `ingest.ts` の再試行キュー消費ループ（rss/evergreen/submit 共通）は、
- * まだ旧 `curateEvergreenUrl` / `terminateEvergreenRetry` を呼び続けており、
- * この関数の対象外（今回は初回投入経路のみを切り替える）。
+ * `ingest.ts` の再試行キュー消費ループ（rss/evergreen/submit 共通）は
+ * `retry-runner.ts`（同じく `runPipelineOnCandidates` 経由）に配線されており、
+ * この関数とは別経路（初回投入 vs 再試行キュー消費）。
  */
 export async function curateEvergreenUrlViaPipeline(
   url: string,

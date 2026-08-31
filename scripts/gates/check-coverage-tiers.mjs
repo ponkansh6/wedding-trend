@@ -52,6 +52,8 @@ const TIERS = [
       /\/lib\/sources\/(hatena-bookmark|google-news|note|ameblo)\.ts$/,
       /\/lib\/sources\/base\/rss-fetcher\.ts$/,
       /\/lib\/embed\/oembed\.ts$/,
+      // S2（shared_plan/17）でレーン別の候補供給を切り出したアダプタ群。
+      /\/lib\/pipeline\/adapters\/.+\.ts$/,
     ],
   },
   {
@@ -69,7 +71,13 @@ const TIERS = [
       /\/app\/api\/submit-url\/route\.ts$/,
       // ルートハンドラから切り出した本体。以前はルート側で計測されていた。
       /\/lib\/pipeline\/ingest\.ts$/,
-      /\/lib\/pipeline\/submit-url\.ts$/,
+      // S2（shared_plan/17）で3レーンを統合した共通コアと、その薄いラッパー。
+      // 旧 submit-url.ts / evergreen.ts はここに吸収された。公開ゲートの強制が
+      // このコアへ移ったため、tier から漏らすとカバレッジ強制が消える。
+      /\/lib\/pipeline\/run-pipeline\.ts$/,
+      /\/lib\/pipeline\/retry-runner\.ts$/,
+      /\/lib\/pipeline\/submit-via-pipeline\.ts$/,
+      /\/lib\/pipeline\/evergreen-via-pipeline\.ts$/,
     ],
   },
   {
@@ -144,6 +152,29 @@ function main() {
 
   let allPass = true;
   const results = [];
+
+  // 陳腐化したパターンの検出。tier 全体が0件のときしか警告しない実装だと、
+  // 他に有効なパターンがある tier の中で1本だけ死んだパターンが残っても
+  // 見逃される。実際 S2 でファイルを削除・改名した際にこれが起き、
+  // 統合後のコア（run-pipeline.ts 等）が長らく計測対象から外れていた。
+  const stalePatterns = [];
+  for (const tier of TIERS) {
+    for (const pattern of tier.patterns) {
+      if (!allFiles.some((f) => pattern.test(f))) {
+        stalePatterns.push({ tier: tier.name, pattern: String(pattern) });
+      }
+    }
+  }
+  if (stalePatterns.length > 0) {
+    console.error(
+      `\n❌ どのファイルにも一致しない tier パターンがあります（${stalePatterns.length} 件）。\n`,
+    );
+    for (const { tier, pattern } of stalePatterns) {
+      console.error(`   ${tier}\n   パターン: ${pattern}\n`);
+    }
+    console.error("   → ファイルを削除・改名した場合は tier 定義も追随させてください。\n");
+    process.exit(1);
+  }
 
   for (const tier of TIERS) {
     const matchedFiles = allFiles.filter((f) => tier.patterns.some((p) => p.test(f)));
