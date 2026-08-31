@@ -42,7 +42,7 @@ const needTest = hasChanged(
   /^(src\/|tests\/|scripts\/gates\/check-coverage-tiers\.mjs$|vitest\.config\.ts$|tsconfig\.json$|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|\.npmrc$|drizzle\.config\.ts$)/,
 );
 const needSmoke = hasChanged(
-  /^(src\/|public\/|next\.config\.ts$|postcss\.config\.|tsconfig\.json$|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|scripts\/smoke-test\.sh$)/,
+  /^(src\/|public\/|next\.config\.ts$|postcss\.config\.|tsconfig\.json$|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|scripts\/gates\/smoke-test\.sh$)/,
 );
 
 console.log(`[verify] Changed files count: ${changed.length}`);
@@ -59,7 +59,7 @@ run("pnpm run type-check");
 
 // 2. Conditional or full tests & smoke
 if (needSmoke) {
-  run("bash scripts/smoke-test.sh");
+  run("bash scripts/gates/smoke-test.sh");
 } else {
   console.log("[verify] Skipping smoke-test (no relevant files changed)");
 }
