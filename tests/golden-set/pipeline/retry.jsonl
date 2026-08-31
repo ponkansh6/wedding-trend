@@ -1,0 +1,1 @@
+# fields: urlHash, url, host, lane, reason, attempts, firstQueuedAt, nextAttemptAt, expiresAt
