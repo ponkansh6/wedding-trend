@@ -50,7 +50,7 @@ console.log(`[verify] needTest: ${needTest}, needSmoke: ${needSmoke}`);
 
 // 1. Mandatory static/security/sync gates
 run("bash scripts/gates/check-lockfile-sync.sh");
-run("pnpm exec eslint src/");
+run("pnpm exec oxlint --nextjs-plugin --react-plugin --react-perf-plugin src/");
 run("bash scripts/gates/check-spec-refs.sh");
 run("oxfmt --check .");
 run("bash scripts/gates/check-security.sh");

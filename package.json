@@ -7,7 +7,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint",
+    "lint": "oxlint --nextjs-plugin --react-plugin --react-perf-plugin src/",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint:fast": "oxlint --nextjs-plugin --react-plugin --react-perf-plugin",
@@ -52,7 +52,6 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@sbougerel/eslint-plugin-next-use-client-boundary": "^1.1.0",
     "@secretlint/secretlint-rule-pattern": "13.0.4",
     "@secretlint/secretlint-rule-preset-recommend": "^13.0.4",
     "@tailwindcss/postcss": "^4",
@@ -65,8 +64,6 @@
     "@vitest/coverage-v8": "^4.1.11",
     "depcheck": "^1.4.7",
     "drizzle-kit": "^0.31.10",
-    "eslint": "^9",
-    "eslint-config-next": "16.3.1",
     "happy-dom": "^20.11.6",
     "husky": "^9.1.7",
     "lint-staged": "^17.3.0",

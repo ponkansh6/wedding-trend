@@ -10,10 +10,9 @@ This guide details the developer tooling, scripts, formatting, linting, testing,
 
 ## Linting & Formatting
 
-We use blazing fast, Rust-based tools (`oxlint` and `oxfmt`) alongside ESLint.
+We use blazing fast, Rust-based tools (`oxlint` and `oxfmt`).
 
-- **Fast Lint**: `pnpm run lint:fast` runs `oxlint`.
-- **Full ESLint**: `pnpm run lint` runs standard ESLint checks.
+- **Fast & Full Lint**: `pnpm run lint` and `pnpm run lint:fast` run `oxlint` (`--nextjs-plugin --react-plugin --react-perf-plugin src/` and over the whole repository respectively).
 - **Format Verification**: `pnpm run format:check` verifies formatting via `oxfmt`.
 - **Auto-Formatting**: `pnpm run format:fast` formats files using `oxfmt`.
 
@@ -32,11 +31,11 @@ We use blazing fast, Rust-based tools (`oxlint` and `oxfmt`) alongside ESLint.
 - **安全な部分実行**: 特定のファイルだけを検証したい場合は `pnpm exec vitest run tests/url.test.ts` のように個別実行する。
 - **lint-staged 連携**: コミット時の `lint-staged` で走る `vitest related` もこのメモリ制限・直列実行設定の恩恵を受け、安全に動作する。
 - **Coverage Reports**: Run `pnpm exec vitest run --coverage` to output reports to `coverage/`.
-- **Coverage Tiers**: Enforced automatically by `node scripts/check-coverage-tiers.mjs` (refer to `openspec/specs/wedding-trend/spec.md` §7.1).
+- **Coverage Tiers**: Enforced automatically by `node scripts/gates/check-coverage-tiers.mjs` (refer to `openspec/specs/wedding-trend/spec.md` §7.1).
 
 ## Smoke Test
 
-- Run `bash scripts/smoke-test.sh`.
+- Run `bash scripts/gates/smoke-test.sh`.
 - This script builds the application, starts `next start` on an in-memory database at port `3100`, curls `/`, and asserts that:
   1. The page renders successfully **without** an RSC error digest.
   2. The expected empty-state text appears.
@@ -51,15 +50,15 @@ allowed in `src/lib/db/migrations/*.sql`. `drizzle-kit push` is never used
 against production for the same reason — it treats anything absent from the
 current schema as deletable, which would delete the other project's tables.
 
-- **Static gate (creation-time)**: `node scripts/check-migrations-additive.mjs`
+- **Static gate (creation-time)**: `node scripts/gates/check-migrations-additive.mjs`
   scans all migration files and fails if any statement is not additive-only.
   It does not touch the network or a DB, so it runs in the `pre-push` hook and
   can run in CI. This is what catches a non-additive migration (e.g. one
   containing `ALTER TABLE`) before it merges — previously this was only
   discovered when someone tried to deploy, by which point
-  `apply-migrations-remote.mjs` had already permanently blocked applying any
+  `scripts/ops/apply-migrations-remote.mjs` had already permanently blocked applying any
   migration after the offending one.
-- **Runtime safety net (apply-time)**: `scripts/apply-migrations-remote.mjs`
+- **Runtime safety net (apply-time)**: `scripts/ops/apply-migrations-remote.mjs`
   re-checks the same rule immediately before applying to Turso, and also
   queries `sqlite_master` beforehand to list any table/index names that
   already exist in production and would collide with names the migration
@@ -85,16 +84,9 @@ current schema as deletable, which would delete the other project's tables.
 Runs automatically on pushes to `main` and on all Pull Requests:
 
 1. `pnpm install --frozen-lockfile`
-2. `pnpm run lint:fast` & `pnpm run lint`
-3. `pnpm run type-check`
-4. `pnpm run format:check`
-5. `pnpm test -- --coverage`
-6. Coverage tier verification (`node scripts/check-coverage-tiers.mjs`)
-7. Spec references check (`pnpm run spec-refs` or equivalent)
-8. Security checks (`pnpm run security-check`)
-9. Smoke test (`bash scripts/smoke-test.sh`)
+2. `pnpm verify` (which executes `node scripts/gates/verify.mjs` running type-check, lint, formatting check, unit/coverage tests, spec references check, security checks, and smoke tests)
 
-_Note: CI is the ultimate compliance gate; local git hooks are a convenience and developer aid._
+_Note: Pre-push hook and CI execute the exact same `pnpm verify` command._
 
 ## Weekly Monitoring (`.github/workflows/weekly-monitor.yml`)
 
