@@ -14,6 +14,7 @@ import {
   markCurated,
   markDropped,
   recordPublication,
+  saveEmbed,
   upsertPosts,
   type CurationUpdate,
   type PostUpsertInput,
@@ -22,11 +23,32 @@ import { curatePosts, type CurationResult } from "@/lib/llm/batch";
 import { LLM_MODEL } from "@/lib/llm/client";
 import { computeContentHash } from "@/lib/llm/signature";
 import { filterTitle } from "@/lib/publish/gate";
-import type { FeedCard, PostStatus, RetryContext, RetryLane, RetryReason } from "@/lib/types";
+import type {
+  EmbedProvider,
+  FeedCard,
+  PostStatus,
+  RetryContext,
+  RetryLane,
+  RetryReason,
+} from "@/lib/types";
 import { canonicalizeUrl } from "@/lib/url";
 
 function addHoursIso(baseIso: string, hours: number): string {
   return new Date(Date.parse(baseIso) + hours * 60 * 60 * 1000).toISOString();
+}
+
+/**
+ * `candidate.embedFetched` が true の場合のみ embed 情報を永続化する
+ * （旧 `runSubmitUrl` の `saveEmbedIfPresent` 相当）。RSS/evergreen 等
+ * embed を試行しないレーンの候補は `embedFetched` が未指定のため無処理。
+ */
+async function saveEmbedIfFetched(candidate: PipelineCandidate, now: string): Promise<void> {
+  if (!candidate.embedFetched) return;
+  await saveEmbed(candidate.url, {
+    embedProvider: (candidate.embedProvider ?? "none") as EmbedProvider,
+    embedHtml: candidate.embedHtml ?? null,
+    embedFetchedAt: now,
+  });
 }
 
 function backoffHoursFor(attempts: number, customBackoff?: number[]): number {
@@ -104,6 +126,14 @@ export interface PipelineCandidate {
   thumbnailUrl?: string | null;
   embedProvider?: string | null;
   embedHtml?: string | null;
+  /**
+   * oEmbed 等の埋め込み取得を試行し、結果（成否問わず非 null）を得たことを示す。
+   * true の場合、コアは終端棄却／公開が確定した時点で `embedProvider`/`embedHtml`
+   * を `saveEmbed` により `embedFetchedAt` とともに永続化する（旧 `runSubmitUrl`
+   * の `saveEmbedIfPresent` 相当）。レーン名分岐ではなく候補データで表現するため
+   * のフィールド（RSS/evergreen は常に undefined のまま = 従来どおり非呼び出し）。
+   */
+  embedFetched?: boolean;
   note?: string | null;
   /** 既存の再試行キューエントリ（再処理時のみ）。初回候補では undefined。 */
   retry?: RetryContext | null;
@@ -294,6 +324,7 @@ export async function runPipelineOnCandidates(
           if (state?.id != null) {
             await markDropped(state.id, "extraction_insufficient", now);
           }
+          await saveEmbedIfFetched(c, now);
           await adapter.onTerminalDrop(c, "extraction_insufficient", now);
         }
       }
@@ -332,6 +363,7 @@ export async function runPipelineOnCandidates(
             retriedCount++;
             if (gaveUp && postId !== null) {
               await markDropped(postId, "retry_exhausted", now);
+              await saveEmbedIfFetched(post, now);
               await adapter.onTerminalDrop(post, "retry_exhausted", now);
               addDrop("retry_exhausted");
             }
@@ -343,6 +375,7 @@ export async function runPipelineOnCandidates(
           if (!titleGate.ok) {
             if (postId !== null) {
               await markDropped(postId, "title_filter", now);
+              await saveEmbedIfFetched(post, now);
               await adapter.onTerminalDrop(post, "title_filter", now);
             }
             addDrop("title_filter");
@@ -363,6 +396,7 @@ export async function runPipelineOnCandidates(
             retriedCount++;
             if (gaveUp && postId !== null) {
               await markDropped(postId, "retry_exhausted", now);
+              await saveEmbedIfFetched(post, now);
               await adapter.onTerminalDrop(post, "retry_exhausted", now);
               addDrop("retry_exhausted");
             }
@@ -422,6 +456,7 @@ export async function runPipelineOnCandidates(
           for (const rec of publishedRecords) {
             if (markResult.succeeded.includes(rec.candidate.url)) {
               await recordPublication(rec.postId, now, rec.bodyHash, "surrogate");
+              await saveEmbedIfFetched(rec.candidate, now);
               await adapter.buildFeedCard(rec.candidate, rec.result, rec.postId, rec.bodyHash, now);
               publishedCount++;
             }
