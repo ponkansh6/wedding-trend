@@ -426,6 +426,19 @@ eslint 一本でもよい — 重要なのは「二重でないこと」**。
   6. Admin Submit 経路を薄いアダプタ化（条件付き `curateSingle` 分岐含む）
   7. 旧オーケストレーション骨格の削除
      cooldown の経路非依存化は共通化の一部としてこの Stage 内で解決する。
+- **設計詳細（2026-08-31, Oracle レビュー #2）**: 4経路を精読した結果、Discovery は
+  クロール台帳・実本文取得・K1-K6 kill gate・B1 予算・独自キューを持つため、runPipeline への
+  無理な統合はしない（YAGNI・リスク過大）。**統合対象は surrogate ハッシュの3レーン
+  （rss / evergreen / submit）のみ**。Discovery は既に共有している curateSingle /
+  recordPublication コアをそのまま使い現状維持。
+  `src/lib/pipeline/run-pipeline.ts`（runPipeline(adapter, options) → PipelineSummary）を新設し、
+  アダプタが提供するのは fetchCandidates / onTransientFailure / onTerminalDrop /
+  buildFeedCard の4メソッドだけ。オーケストレータは dedupe → 候補選択 → curate → M1/Q4
+  ゲート → markCurated → recordPublication → retry を一貫して担う。Gemini 課金は
+  curationBudget + geminiCalls 返却で制御。移行の安全装置は「**diff test**」: 各レーンの
+  アダプタ化コミットで、同一シードDBへ旧実装と新 runPipeline を順に流し、posts /
+  post_publications / post_removals / post_retry_queue（rss は host_gate_state も）の状態が
+  完全一致することを検証する。
 - 検証: Orchestrator が golden-replay（決定的出力の完全一致）、`gate.ts` の不変条件テーブルに
   対する9項目それぞれのテスト（凍結した黄金テストとして維持）、既存テストスイート全体、
   type-check・lint・migrations-additive ゲートを実行して確認する。
