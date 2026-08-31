@@ -76,7 +76,15 @@ const TIERS = [
     name: "Tier 6: データアクセス",
     target: 65,
     metric: "statements",
-    patterns: [/\/lib\/db\/repository\.ts$/, /\/lib\/db\/query\.ts$/],
+    patterns: [
+      /\/lib\/db\/repository\.ts$/,
+      /\/lib\/db\/query\.ts$/,
+      /\/lib\/db\/feed\.ts$/,
+      /\/lib\/db\/ingest\.ts$/,
+      /\/lib\/db\/publication\.ts$/,
+      /\/lib\/db\/discovery\.ts$/,
+      /\/lib\/db\/gate-state\.ts$/,
+    ],
   },
   {
     name: "Tier 7: RSC / UI",
