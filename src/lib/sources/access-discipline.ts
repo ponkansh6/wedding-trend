@@ -3,10 +3,10 @@ import robotsParser from "robots-parser";
 import {
   CRAWLER_USER_AGENT,
   DAILY_REQUEST_CAP_PER_HOST,
-  getAllowlistedTosUrl,
   MAX_BODY_BYTES,
   MIN_HOST_INTERVAL_MS,
 } from "@/lib/constants";
+import { getAllowlistedTosUrl } from "@/lib/sources/host-allowlist";
 import {
   getHostGateState,
   getSourcePolicy,

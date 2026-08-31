@@ -27,8 +27,6 @@ import {
   BODY_DRIFT_SIMILARITY_MIN,
   DISCOVERY_INGEST_TIME_BUDGET_MS,
   EVERGREEN_SOURCE_ID,
-  HOST_ALLOWLIST_HOSTS,
-  isAllowedArticleUrl,
   LLM_MODEL,
   RATIONALE_PROMPT_VERSION,
   RETRY_BACKOFF_HOURS,
@@ -38,6 +36,7 @@ import {
   YIELD_BASELINE_MIN_DAYS,
   YIELD_DEVIATION_FACTOR,
 } from "@/lib/constants";
+import { HOST_ALLOWLIST_HOSTS, isAllowedArticleUrl } from "@/lib/sources/host-allowlist";
 import {
   completeRetry,
   dueRetries,

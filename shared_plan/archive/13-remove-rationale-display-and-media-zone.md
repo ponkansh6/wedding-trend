@@ -4,7 +4,9 @@
 - 参照: `shared_plan/12-wedding-day-content-criterion.md`（§5 影響範囲・Stage 6 と競合。本文書 §8 参照）
 - 作成日: 2026-08-27
 - 前提コミット: `4f24fe4`（`git log --oneline -3` で確認: `4f24fe4` chore(golden-set) / `0305f67` fix(backfill) / `c75d460` refactor(curation)!。作業ツリーはクリーン（`git status --short` で確認: 未追跡の `shared_plan/12-*.md` / `shared_plan/13-*.md` の2件のみ）。**本文書の初版作成時点で「未コミット差分あり」と記していた `spec.md`/`constants.ts`/`prompts.ts` は、その後 `c75d460` に取り込まれてコミット済みになっている**）
-- 状態: **未着手。本文書は計画であり実装ではない。**
+- 状態: **実装済み**（`1f0b16a` `refactor(feed): remove public rationale summary and media zones`）。
+  2026-08-31 に archive へ移設した際、状態行が未更新のままだったため訂正した。
+  なお本プランの一部（topicAnchor と有用度バッジ）は `shared_plan/14` で意図的に復活している。
 
 ---
 

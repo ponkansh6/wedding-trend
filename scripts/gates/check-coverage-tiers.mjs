@@ -36,6 +36,9 @@ const TIERS = [
       /\/lib\/llm\/schemas\.ts$/,
       /\/lib\/constants\.ts$/,
       /\/lib\/scoring\/usefulness\.ts$/,
+      // S9 で constants.ts から切り出したホスト allowlist。isAllowedArticleUrl は
+      // articlePathPatterns による収集対象の強制そのものなので計測対象に含める。
+      /\/lib\/sources\/host-allowlist\.ts$/,
     ],
   },
   {

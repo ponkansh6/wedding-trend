@@ -2,7 +2,7 @@
 /**
  * topicAnchor 再生成（backfill-usefulness.mjs 等）の前に取る復元用スナップショット。
  *
- * shared_plan/16-anchor-clause-form-and-non-redundancy.md Stage 4「可逆性の確保」用。
+ * shared_plan/archive/16-anchor-clause-form-and-non-redundancy.md Stage 4「可逆性の確保」用。
  * 「次の backfill が可逆でないなら実行してはならない」という教訓に基づき、
  * 再生成によって書き換わりうるフィールドを全件 SELECT で JSON ダンプする。
  *

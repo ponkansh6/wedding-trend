@@ -1,5 +1,6 @@
 import { XMLParser } from "fast-xml-parser";
-import { RSS_USER_AGENT, LASTMOD_DIFF_ALERT_THRESHOLD, HOST_ALLOWLIST } from "@/lib/constants";
+import { RSS_USER_AGENT, LASTMOD_DIFF_ALERT_THRESHOLD } from "@/lib/constants";
+import { HOST_ALLOWLIST } from "@/lib/sources/host-allowlist";
 import {
   startDiscoveryRun,
   finishDiscoveryRun,

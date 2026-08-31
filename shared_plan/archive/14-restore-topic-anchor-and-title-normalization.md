@@ -7,7 +7,9 @@
   （`git log -1 --format='%h %s'` で確認。`shared_plan/13` の計画はこのコミットで実装済み）。
   作業ツリーはクリーン（`git status --short` の出力は未追跡の `shared_plan/12-*.md` と
   `shared_plan/14-*.md` の2件のみ。`shared_plan/13-*.md` は `1f0b16a` に含めてコミット済み）
-- 状態: **未着手。本文書は計画であり実装ではない。**
+- 状態: **実装済み**。成果は現行コードに存在する（`src/components/feed/feed-card.tsx` の
+  topicAnchor 表示・有用度ラベル・`line-clamp-3`）。2026-08-31 に archive へ移設した際、
+  状態行が未更新のままだったため訂正した。
 
 ---
 

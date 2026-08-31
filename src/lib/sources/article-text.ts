@@ -21,12 +21,8 @@
  */
 
 import { parseHTML } from "linkedom";
-import {
-  MIN_EVIDENCE_INPUT_CHARS,
-  MAX_LINK_DENSITY,
-  MIN_PARAGRAPH_COUNT,
-  HOST_ALLOWLIST,
-} from "@/lib/constants";
+import { MIN_EVIDENCE_INPUT_CHARS, MAX_LINK_DENSITY, MIN_PARAGRAPH_COUNT } from "@/lib/constants";
+import { HOST_ALLOWLIST } from "@/lib/sources/host-allowlist";
 import { normalizeTitle } from "./base/feed-parser";
 // 閾値は定数の一元管理のため constants.ts にのみ定義し、ここで再公開する。
 export { MIN_EVIDENCE_INPUT_CHARS };
