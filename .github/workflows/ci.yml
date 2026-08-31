@@ -18,12 +18,4 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm run lint:fast
-      - run: pnpm exec eslint src/
-      - run: pnpm run type-check
-      - run: pnpm run format:check
-      - run: pnpm exec vitest run --coverage
-      - run: node scripts/check-coverage-tiers.mjs
-      - run: bash scripts/check-spec-refs.sh
-      - run: bash scripts/check-security.sh
-      - run: bash scripts/smoke-test.sh
+      - run: pnpm verify

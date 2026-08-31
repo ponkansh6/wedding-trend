@@ -69,6 +69,9 @@ importers:
       '@sbougerel/eslint-plugin-next-use-client-boundary':
         specifier: ^1.1.0
         version: 1.1.0(@typescript-eslint/parser@8.67.0(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3))(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3)
+      '@secretlint/secretlint-rule-pattern':
+        specifier: 13.0.4
+        version: 13.0.4
       '@secretlint/secretlint-rule-preset-recommend':
         specifier: ^13.0.4
         version: 13.0.4
@@ -2174,12 +2177,20 @@ packages:
   '@secretlint/resolver@13.0.4':
     resolution: {integrity: sha512-+s4fRFctBlAbHu4H8lRLj/e6dyDIGpIM2QLAJWgaMJUn9bFxetjRBQEv/HD2U4ohpGHYURLMkDcnS3iZdSTmGg==}
 
+  '@secretlint/secretlint-rule-pattern@13.0.4':
+    resolution: {integrity: sha512-Z/K7EJS56QDkbnU8WwKVa4yI1i06tBQhPBfJFencpM8UxLsXVnaHonyGF9P891vAaYB7hNx+F/ekw9bLKx8egg==}
+    engines: {node: '>=22.0.0'}
+
   '@secretlint/secretlint-rule-preset-recommend@13.0.4':
     resolution: {integrity: sha512-Nbcr7tvyKuRF4BKh7RQSCEOaif4gFPH/qjK2ajcoUDGL7HAY/C6PzcsmVR1Y0qQCRqrBuMuXn1onXE+wxNNNsw==}
     engines: {node: '>=22.0.0'}
 
   '@secretlint/source-creator@13.0.4':
     resolution: {integrity: sha512-YfVVY7GHbHV6CN/tLIf1BGiONVjX2fvmJyvCv2MhonUiWtLPVU4fnOQIrWMLFakeRJ/GVoV8FfqvPW3jnUHfVA==}
+    engines: {node: '>=22.0.0'}
+
+  '@secretlint/tester@13.0.4':
+    resolution: {integrity: sha512-P/2jho4nLTLWUeFXssoOgeRHO9c2+47xxEdk2CMCzwU2VgVELr8amsXt/aHo4TF+hRM638qUsb0Co+8Tq3E1fg==}
     engines: {node: '>=22.0.0'}
 
   '@secretlint/types@13.0.4':
@@ -2332,6 +2343,9 @@ packages:
 
   '@textlint/module-interop@15.8.0':
     resolution: {integrity: sha512-rt+OR1WYGoLOY8HkA/aBPrqufF6yUUEsKEAh7XohTsT3lp9IyZFT6zOIbjul9P4FAzsmSPkcrYjVx3Bz/IUfkg==}
+
+  '@textlint/regexp-string-matcher@2.0.2':
+    resolution: {integrity: sha512-OXLD9XRxMhd3S0LWuPHpiARQOI7z9tCOs0FsynccW2lmyZzHHFJ9/eR6kuK9xF459Qf+740qI5h+/0cx+NljzA==}
 
   '@textlint/resolver@15.8.0':
     resolution: {integrity: sha512-E88tzfX3K8Jykk+38aJ9cy8RquD8ABVOPTO2rFEESq0wcg8x6/ypdAS8ZgR7OKiGqlRF0hkO/m5PbQwVfKM3VA==}
@@ -3962,8 +3976,17 @@ packages:
   lodash.merge@4.6.2:
     resolution: {integrity: sha512-0KpjqXRVvrYyCsX1swR/XTK0va6VQkQM6MNo7PqW77ByjAhoARA8EfrP1N4+KlKj8YS0ZUCtRT/YUuhyYDujIQ==}
 
+  lodash.sortby@4.7.0:
+    resolution: {integrity: sha512-HDWXG8isMntAyRF5vZ7xKuEvOhT4AhlRt/3czTSjvGUxjYCBVRQY48ViDHyfYz9VIoBkW4TMGQNapx+l3RUwdA==}
+
   lodash.truncate@4.4.2:
     resolution: {integrity: sha512-jttmRe7bRse52OsWIMDLaXxWqRAmtIUccAQ3garviCqJjafXOfNMO0yMfNpdD6zbGaTU0P5Nz7e7gAT6cKmJRw==}
+
+  lodash.uniq@4.5.0:
+    resolution: {integrity: sha512-xfBaXQd9ryd9dlSDvnvI0lvxfLJlYAZzXomUYzLKtUeOQvOP5piqAWuGtrhWeqaXK9hhoM/iyJc5AV+XfsX3HQ==}
+
+  lodash.uniqwith@4.5.0:
+    resolution: {integrity: sha512-7lYL8bLopMoy4CTICbxygAUq6CdRJ36vFc80DucPueUee+d5NBRxz3FdT9Pes/HEx5mPoT9jwnsEJWz1N7uq7Q==}
 
   lodash@4.18.1:
     resolution: {integrity: sha512-dMInicTPVE8d1e5otfwmmjlxkZoUpiVLwyeTdUsi/Caj/gfzzblBcCE5sRHV/AsjuCmxWrte2TNGSYuCeCq+0Q==}
@@ -6646,12 +6669,30 @@ snapshots:
 
   '@secretlint/resolver@13.0.4': {}
 
+  '@secretlint/secretlint-rule-pattern@13.0.4':
+    dependencies:
+      '@secretlint/tester': 13.0.4
+      '@secretlint/types': 13.0.4
+      '@textlint/regexp-string-matcher': 2.0.2
+      micromatch: 4.0.8
+    transitivePeerDependencies:
+      - supports-color
+
   '@secretlint/secretlint-rule-preset-recommend@13.0.4': {}
 
   '@secretlint/source-creator@13.0.4':
     dependencies:
       '@secretlint/types': 13.0.4
       istextorbinary: 9.5.0
+
+  '@secretlint/tester@13.0.4':
+    dependencies:
+      '@secretlint/config-loader': 13.0.4
+      '@secretlint/core': 13.0.4
+      '@secretlint/source-creator': 13.0.4
+      '@secretlint/types': 13.0.4
+    transitivePeerDependencies:
+      - supports-color
 
   '@secretlint/types@13.0.4': {}
 
@@ -6793,6 +6834,13 @@ snapshots:
       - supports-color
 
   '@textlint/module-interop@15.8.0': {}
+
+  '@textlint/regexp-string-matcher@2.0.2':
+    dependencies:
+      escape-string-regexp: 4.0.0
+      lodash.sortby: 4.7.0
+      lodash.uniq: 4.5.0
+      lodash.uniqwith: 4.5.0
 
   '@textlint/resolver@15.8.0': {}
 
@@ -8557,7 +8605,13 @@ snapshots:
 
   lodash.merge@4.6.2: {}
 
+  lodash.sortby@4.7.0: {}
+
   lodash.truncate@4.4.2: {}
+
+  lodash.uniq@4.5.0: {}
+
+  lodash.uniqwith@4.5.0: {}
 
   lodash@4.18.1: {}
 

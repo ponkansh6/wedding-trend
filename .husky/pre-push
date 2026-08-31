@@ -1,11 +1,8 @@
 #!/bin/sh
 # ============================================================================
 # pre-push — 分単位 / push 差分スコープ / 「壊れたものを push させない」
-#   Phase 0: 未コミット変更ガード（blocking）
-#   Phase 1: lockfile-sync / eslint / spec-refs / format-check / security / migrations-additive
-#   Phase 2: 本番スキーマ drift (advisory)
-#   変更が src/ tests/ に及ぶ場合のみ smoke + unit/coverage を実行
-#   （news-watch の 2 レーン並列は見送り：本プロジェクトは規模が小さく十分速い）
+#   Delegates to `node scripts/gates/verify.mjs` (pnpm verify) which houses
+#   the uncommitted change guard logic and all quality/test/smoke gates.
 # ============================================================================
 set -eu
 
@@ -35,47 +32,6 @@ if git rev-parse --verify HEAD >/dev/null 2>&1; then
   fi
 fi
 
-BASE=$(git merge-base HEAD origin/main 2>/dev/null || echo "")
-if [ -n "$BASE" ]; then
-  CHANGED=$(git diff --name-only "$BASE" HEAD 2>/dev/null)
-else
-  CHANGED=$(git ls-tree -r --name-only HEAD 2>/dev/null)
-fi
-
-changed_match() { printf '%s\n' "$CHANGED" | grep -qE "$1"; }
-
-NEED_TEST=0; NEED_SMOKE=0
-if changed_match '^(src/|tests/|scripts/check-coverage-tiers\.mjs$|vitest\.config\.ts$|tsconfig\.json$|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|\.npmrc$|drizzle\.config\.ts$)'; then
-  NEED_TEST=1
-fi
-if changed_match '^(src/|public/|next\.config\.ts$|postcss\.config\.|tsconfig\.json$|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|scripts/smoke-test\.sh$)'; then
-  NEED_SMOKE=1
-fi
-
-set -e
-bash scripts/check-lockfile-sync.sh
-eslint src/
-bash scripts/check-spec-refs.sh
-oxfmt --check .
-bash scripts/check-security.sh
-node scripts/check-migrations-additive.mjs
-
-if [ "$NEED_SMOKE" = "1" ]; then
-  bash scripts/smoke-test.sh
-fi
-
-if [ "$NEED_TEST" = "1" ]; then
-  vitest run --coverage
-  node scripts/check-coverage-tiers.mjs
-fi
-
-# Advisory: prod schema drift (only if creds present locally)
-if [ -f "$ROOT/.env.local" ]; then
-  TURSO_URL=$(grep -E "^TURSO_DATABASE_URL=" "$ROOT/.env.local" | head -1 | cut -d= -f2-)
-  TURSO_TOKEN=$(grep -E "^TURSO_AUTH_TOKEN=" "$ROOT/.env.local" | head -1 | cut -d= -f2-)
-  if [ -n "$TURSO_URL" ] && [ -n "$TURSO_TOKEN" ]; then
-    TURSO_DATABASE_URL="$TURSO_URL" TURSO_AUTH_TOKEN="$TURSO_TOKEN" bash scripts/check-prod-schema.sh || true
-  fi
-fi
+node scripts/gates/verify.mjs
 
 exit 0

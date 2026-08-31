@@ -31,6 +31,8 @@ import type {
   TrendTag,
 } from "@/lib/types";
 import type { UsefulnessCriteria } from "@/lib/scoring/usefulness";
+// S3: type-only import to enforce INV-6 (rejects EphemeralArticleSlice via shared __brand key)
+import type { NonEphemeralString } from "@/lib/types/judgment";
 
 /** `getSourcePolicy` / `upsertSourcePolicy` の行の型（schema から導出）。 */
 export type SourcePolicyRow = typeof sourcePolicy.$inferSelect;
@@ -45,7 +47,7 @@ export interface PostUpsertInput {
   sourceId: string;
   sourceName: string;
   originalTitle: string;
-  originalExcerpt: string | null;
+  originalExcerpt: NonEphemeralString | null;
   author: string | null;
   thumbnailUrl: string | null;
   publishedAt: string | null;
@@ -136,7 +138,7 @@ export interface PostCurationState {
   id: number;
   url: string;
   originalTitle: string;
-  originalExcerpt: string | null;
+  originalExcerpt: NonEphemeralString | null;
   aiTitle: string | null;
   contentHash: string | null;
   curationSignature: string | null;
@@ -389,7 +391,7 @@ export interface CurationCandidate {
   id: number | null;
   url: string;
   originalTitle: string;
-  originalExcerpt: string | null;
+  originalExcerpt: NonEphemeralString | null;
   publishedAt: string | null;
 }
 

@@ -31,15 +31,15 @@ jobs:
 
       - name: Check feed sources
         id: check_sources
-        run: node scripts/check-sources.mjs
+        run: node scripts/gates/check-sources.mjs
 
       - name: Check oEmbed contracts
         id: check_oembed
-        run: node scripts/check-oembed-contract.mjs
+        run: node scripts/gates/check-oembed-contract.mjs
 
       - name: Check discovery_run freshness
         id: check_discovery_freshness
-        run: pnpm exec tsx scripts/check-discovery-freshness.mjs
+        run: pnpm exec tsx scripts/gates/check-discovery-freshness.mjs
         env:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}

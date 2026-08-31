@@ -58,11 +58,14 @@ snapshots/
 
 # 一時的な検証・デバッグ用スクリプト（コミット対象外）
 /check-*.ts
-scripts/calc-sig.ts
-scripts/check-db.mjs
-scripts/check-mwed.ts
-scripts/check-sigs.ts
-scripts/count-gemini-requests.mjs
-scripts/inspect-db.ts
-scripts/test-stale-candidates.ts
-scripts/verify-stale-logic.ts
+scripts/archive/calc-sig.ts
+scripts/archive/check-db.ts
+scripts/archive/check-db.mjs
+scripts/archive/check-mwed.ts
+scripts/archive/check-sigs.ts
+scripts/archive/count-gemini-requests.mjs
+scripts/archive/inspect-db.ts
+scripts/archive/test-stale-candidates.ts
+scripts/archive/verify-stale-logic.ts
+# deepwork local state
+.slim/deepwork/

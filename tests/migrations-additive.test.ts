@@ -6,7 +6,7 @@ import {
   loadMigrationStatements,
   loadOwnedTables,
   splitStatements,
-} from "../scripts/migrations-additive.mjs";
+} from "../scripts/gates/migrations-additive.mjs";
 
 /**
  * `scripts/migrations-additive.mjs` の破壊フィクスチャによる検証テスト。

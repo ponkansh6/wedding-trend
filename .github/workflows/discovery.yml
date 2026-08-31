@@ -46,7 +46,7 @@ jobs:
         id: discovery
         run: |
           set +e
-          pnpm exec tsx scripts/run-discovery.mjs
+           pnpm exec tsx scripts/ops/run-discovery.mjs
           ec=$?
           set -e
           echo "exit_code=${ec}" >> "$GITHUB_OUTPUT"
