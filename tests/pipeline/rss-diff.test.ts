@@ -94,7 +94,7 @@ describe("RSS Ingest Diff Test: legacy runIngest vs runPipeline", () => {
 
   it("produces identical DB states between legacy runIngest and runPipeline(rssAdapter)", async () => {
     // Run (a): legacy runIngest
-    await runIngest("manual");
+    const summaryA = await runIngest("manual");
     const postsA = await db.select().from(posts);
     const pubsA = await db.select().from(postPublications);
     const retryA = await db.select().from(postRetryQueue);
@@ -104,7 +104,7 @@ describe("RSS Ingest Diff Test: legacy runIngest vs runPipeline", () => {
     await setupTestDb();
 
     const adapter = new RssAdapter();
-    await runPipeline(adapter, {
+    const summaryB = await runPipeline(adapter, {
       curationBudget: 10,
       dailyPublishCap: 150,
       jstDayStartIso: "2024-01-01T00:00:00.000Z",
@@ -116,6 +116,19 @@ describe("RSS Ingest Diff Test: legacy runIngest vs runPipeline", () => {
       enforceRemovedFilter: true,
       enforceRateCap: true,
     });
+
+    // 戻り値の同値性: runIngest() が実際に呼び出し元へ返す IngestSummary の
+    // 6 フィールドと、この runPipeline() の PipelineSummary から
+    // runIngest() 内部で写像した値が一致することを検証する
+    // （このシナリオは新規投稿のみ・既存の未変更キュレーション済み投稿が
+    // 無いため、fetched/inserted/skipped の意味のズレが顕在化しない）。
+    expect(summaryB.fetched).toBe(2); // hatena 1件 + google-news 1件（生アイテム数）
+    expect(summaryA.fetched).toBe(summaryB.fetched);
+    expect(summaryA.inserted).toBe(summaryB.inserted);
+    expect(summaryA.curated).toBe(summaryB.curated);
+    expect(summaryA.skipped).toBe(summaryB.skipped);
+    expect(summaryA.errors.length).toBe(summaryB.errors.length);
+    expect(summaryA.geminiCalls).toBe(summaryB.geminiCalls);
 
     const postsB = await db.select().from(posts);
     const pubsB = await db.select().from(postPublications);

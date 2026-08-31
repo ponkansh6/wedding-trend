@@ -81,17 +81,40 @@ async function fetchPostSources(urls: string[]): Promise<
 }
 
 export class RssAdapter implements PipelineAdapter {
+  /**
+   * 直近の `fetchCandidates()` 呼び出しで、全ソースから取得できた生アイテム数
+   * （重複排除・キュレーション要否フィルタ適用前）。旧 `runIngest` の
+   * `IngestSummary.fetched`（= `rawPosts.length`）と同じ意味の値を
+   * 呼び出し元（`ingest.ts`）が読み出せるようにするための副産物フィールド。
+   * `PipelineSummary.fetched`（= `rawCandidates.length` = フィルタ後の候補数）
+   * とは意味が異なるため、こちらを別途公開する。
+   */
+  lastRawFetchedCount = 0;
+
+  /**
+   * 直近の `fetchCandidates()` 呼び出しで発生したソース取得エラー
+   * （旧 `runIngest` の `errors.push(\`${id}: ...\`)` と同一メッセージ形式）。
+   * `PipelineSummary.errors` には現れない（コアの `fetchCandidates()` 呼び出しは
+   * try/catch で丸ごと失敗をハンドルする設計のため、アダプタ内部で個別ソース
+   * ごとに catch した失敗はコアへ伝播しない）ので、呼び出し元（`ingest.ts`）が
+   * これを読み出して `errors` に合流させる。
+   */
+  lastFetchErrors: string[] = [];
+
   async fetchCandidates(limit: number): Promise<PipelineCandidate[]> {
+    this.lastFetchErrors = [];
     const perSource = await Promise.all(
       SOURCE_IDS.map(async (id) => {
         try {
           return await fetchAndNormalize(id);
-        } catch {
+        } catch (err) {
+          this.lastFetchErrors.push(`${id}: ${err instanceof Error ? err.message : String(err)}`);
           return [] as PostUpsertInput[];
         }
       }),
     );
     const rawPosts = perSource.flat();
+    this.lastRawFetchedCount = rawPosts.length;
 
     const seen = new Set<string>();
     const deduplicated: PostUpsertInput[] = [];
