@@ -86,6 +86,12 @@ async function handleTransientFailure(
   return false;
 }
 
+export type TerminalReason =
+  | "extraction_insufficient"
+  | "title_filter"
+  | "retry_exhausted"
+  | "ttl_expired";
+
 export interface PipelineCandidate {
   url: string;
   originalTitle: string;
@@ -105,12 +111,13 @@ export interface PipelineCandidate {
 
 export interface PipelineAdapter {
   fetchCandidates(limit: number): Promise<PipelineCandidate[]>;
+  fetchDueRetries(now: string): Promise<PipelineCandidate[]>;
   onTransientFailure(
     candidate: PipelineCandidate,
     reason: "llm_transient" | "rate_capped",
     ctx: RetryContext | null,
   ): Promise<void>;
-  onTerminalDrop(candidate: PipelineCandidate, reason: string, now: string): Promise<void>;
+  onTerminalDrop(candidate: PipelineCandidate, reason: TerminalReason, now: string): Promise<void>;
   buildFeedCard(
     candidate: PipelineCandidate,
     curation: CurationResult,
@@ -159,10 +166,6 @@ export async function runPipeline(
   const errors: string[] = [];
   const droppedCounts: Record<string, number> = {};
 
-  function addDrop(reason: string) {
-    droppedCounts[reason] = (droppedCounts[reason] || 0) + 1;
-  }
-
   // 1. Fetch candidates
   let rawCandidates: PipelineCandidate[] = [];
   try {
@@ -186,6 +189,21 @@ export async function runPipeline(
         retried: 0,
       },
     };
+  }
+
+  return runPipelineOnCandidates(rawCandidates, adapter, options);
+}
+
+export async function runPipelineOnCandidates(
+  rawCandidates: PipelineCandidate[],
+  adapter: PipelineAdapter,
+  options: PipelineOptions,
+): Promise<PipelineSummary> {
+  const errors: string[] = [];
+  const droppedCounts: Record<string, number> = {};
+
+  function addDrop(reason: string) {
+    droppedCounts[reason] = (droppedCounts[reason] || 0) + 1;
   }
 
   // 2. Deduplicate by canonical URL

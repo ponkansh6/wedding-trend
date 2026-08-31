@@ -67,6 +67,7 @@ describe("runPipeline (src/lib/pipeline/run-pipeline.ts)", () => {
           publishedAt: "2026-08-31T00:00:00Z",
         },
       ]),
+      fetchDueRetries: vi.fn().mockResolvedValue([]),
       onTransientFailure: vi.fn().mockResolvedValue(false),
       onTerminalDrop: vi.fn().mockResolvedValue(undefined),
       buildFeedCard: vi.fn().mockResolvedValue({}),
