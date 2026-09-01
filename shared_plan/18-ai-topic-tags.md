@@ -20,9 +20,13 @@
     - 実装ギャップを2件修正してから実行:
       1. `backfill-plan.mjs buildBackfillUpdates` が `result.topics` を落としていた（Stage 3 の `topics` 追加は mwed 側のみ）→ `topics` を update に載せるよう修正（コミット `b784109`）。
       2. `backfill-usefulness.mjs` が `assertNoSliceLeak(u)` を単体オブジェクトで呼んでいた既存バグ（`f4305b53` 由来。`--apply` 経路が 2026-08-30 以降壊れていた）→ `assertNoSliceLeak(applyUpdates)` に修正。
-    - `backfill-usefulness.mjs --apply` 実行: 候補プール 317 件中、プレフライト通過 101 件を再キュレーション（Gemini 4 リクエスト）。**更新成功 101 / 失敗 0**。残り 216 件は本文不足でプレフライトスキップ（既存値温存）。
-    - 本番 `post_topics`: 177 行 / 99 投稿（101 件中 2 件はトピック0件）。全行 `prompt_version = 15`。上位トピック: 準備・美容・式場見学・演出・ご祝儀・見積もり 等。
-    - 残 216 件（本文不足）は恒久的にトピックなし。UI は欠損時非表示（§5-5）で対応済み。`CURATION_PROMPT_VERSION` bump 済みのため定期パイプラインでも波及する。
+    - `backfill-usefulness.mjs --apply` 実行: 候補プール 317 件（`rejected` 193 + `published` 124）。RSS レーンの excerpt 保有分 + mwed discovery バイパスの再取得分をあわせて **101 件を再キュレーション（Gemini 4 リクエスト、更新成功 101 / 失敗 0）**。
+    - 本番 `post_topics`: 177 行 / 99 投稿。全行 `prompt_version = 15`。上位トピック: 準備・美容・式場見学・演出・ご祝儀・見積もり 等。
+    - **published のうちトピック未付与 34 件の内訳**（＝「本文不足」ではない）:
+      - **mwed.jp 29 件**: 記事本文は存在する。バックフィル実行時点で当日の `DAILY_REQUEST_CAP_PER_HOST = 50`（§10-6）を使い切っており、discovery バイパスの `disciplinedFetch` が `budget_exhausted`。**日次カウンタ（UTC 日次リセット）回復後に `pnpm exec tsx scripts/ops/backfill-usefulness.mjs --source mwed.jp --apply` を再実行**すれば取得・付与される（スクリプトは再開可能。1〜2 日で解消）。キャップの緩和・回避は §10-6 法務不変のため不可。
+      - **news.google.com 3 件**: URL が Google News のリダイレクトラッパーで、記事本文への到達経路が無い（discovery バイパスは `www.mwed.jp` ホスト限定）。別課題。
+      - **note.com 2 件**: `og:description` が 32〜34 字と短く、モデルがトピック 0 件を返した。RSS レーンで保持する excerpt はこれで正常。
+    - UI は欠損時非表示（§5-5）で対応済み。`CURATION_PROMPT_VERSION` bump 済みのため定期 discovery/ingest でも同じ再取得経路で徐々に波及する（同じ日次キャップに従う）。
 - 前提: `openspec/specs/wedding-trend/spec.md` §10（法務制約）・§11（アクセス規律）の不変部分を緩めない。
   ただし §10-3 の**自己記述の精緻化**と、§4.x の **ALTER TABLE 記述の実装追随**は本プランのスコープに含む（§6 Stage 0）。
 
