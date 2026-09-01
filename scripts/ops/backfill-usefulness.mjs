@@ -260,6 +260,7 @@ console.log(
 let finalRunnableCandidates = runnableCandidates;
 let bypassedCount = 0;
 let bypassFailedCount = 0;
+let bypassRetryLaterCount = 0;
 
 if (!NO_FETCH && skippedCandidates.length > 0) {
   const slicelessSkipped = skippedCandidates.filter(
@@ -308,7 +309,17 @@ if (!NO_FETCH && skippedCandidates.length > 0) {
       if (verdict.kind !== "ok") {
         bypassFailedCount++;
         remainingSkipped.push(sc);
-        console.log(`  skip ${url}（fetch: ${verdict.kind}）`);
+        // budget_exhausted / rate_limited / cooldown は「本文が無い」のではなく
+        // アクセス規律（§10-6 の日次ホストキャップ等）による一時的な取得不可。
+        // 日次カウンタのリセット後に --source で再実行すれば取得できる。
+        if (verdict.kind === "budget_exhausted" || verdict.kind === "retry_after") {
+          bypassRetryLaterCount++;
+          console.log(
+            `  skip ${url}（fetch: ${verdict.kind} — 一時的。日次バジェット回復後に再実行で取得可）`,
+          );
+        } else {
+          console.log(`  skip ${url}（fetch: ${verdict.kind}）`);
+        }
         continue;
       }
 
@@ -469,15 +480,23 @@ console.log("");
 console.log("── サマリー ──");
 console.log(`候補総数（今回の対象プール）: ${candidates.length} 件`);
 console.log(`LLM を呼んだ件数（プレフライト通過分）: ${runnableCandidates.length} 件`);
-if (bypassedCount > 0) {
+if (bypassedCount > 0 || bypassFailedCount > 0) {
   console.log(
-    `discovery バイパスによる追加件数: ${bypassedCount} 件（失敗: ${bypassFailedCount} 件）`,
+    `discovery バイパス: 成功 ${bypassedCount} 件 / 失敗 ${bypassFailedCount} 件（うち一時的取得不可（日次バジェット等）: ${bypassRetryLaterCount} 件）`,
   );
   console.log(
     `最終 LLM 対象件数（プレフライト通過 + バイパス）: ${finalRunnableCandidates.length} 件`,
   );
 }
-console.log(`スキップ（材料不足のため posts は一切更新しない）: ${skippedCandidates.length} 件`);
+if (bypassRetryLaterCount > 0) {
+  console.log(
+    `⚠ ${bypassRetryLaterCount} 件は本文が無いのではなく §10-6 の日次ホストキャップ等で今回取得できなかっただけ。` +
+      `日次カウンタ回復後に \`--source <host>\` で再実行すれば取得・付与される（このスクリプトは再開可能）。`,
+  );
+}
+console.log(
+  `スキップ（今回 posts を更新しなかった件数。うち上記の一時的取得不可分を含む）: ${skippedCandidates.length} 件`,
+);
 if (skippedCandidates.length > 0) {
   console.log("  スキップ対象 URL:", skippedCandidates.map((rc) => rc.candidate.url).join(", "));
 }
