@@ -8,8 +8,6 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        trend:
-          "bg-[var(--color-trend)] text-[var(--color-on-trend)] shadow-sm hover:brightness-105 active:brightness-95",
         classic:
           "border-2 border-[var(--color-classic)] text-[var(--color-classic)] hover:bg-[var(--color-classic)] hover:text-[var(--color-on-classic-solid)]",
         ghost: "text-[var(--color-foreground)] hover:bg-[var(--color-surface-hover)]",

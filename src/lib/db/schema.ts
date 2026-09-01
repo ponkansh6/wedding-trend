@@ -1,4 +1,12 @@
-import { sqliteTable, text, integer, real, index, primaryKey } from "drizzle-orm/sqlite-core";
+import {
+  sqliteTable,
+  text,
+  integer,
+  real,
+  index,
+  primaryKey,
+  uniqueIndex,
+} from "drizzle-orm/sqlite-core";
 import { CATEGORIES } from "@/lib/types";
 
 /**
@@ -334,7 +342,7 @@ export const postRetryQueue = sqliteTable(
     urlHash: text("url_hash").primaryKey(),
     url: text("url").notNull(),
     host: text("host").notNull(),
-    lane: text("lane", { enum: ["rss", "evergreen", "discovery", "submit"] }).notNull(),
+    lane: text("lane", { enum: ["rss", "evergreen", "discovery"] }).notNull(),
     reason: text("reason", {
       enum: ["fetch_transient", "llm_transient", "rate_capped"],
     }).notNull(),
@@ -385,5 +393,22 @@ export const evidenceSignalObservations = sqliteTable(
   },
   (table) => ({
     urlHashIdx: index("idx_evidence_signal_observations_url_hash").on(table.urlHash),
+  }),
+);
+
+export const postTopics = sqliteTable(
+  "post_topics",
+  {
+    postId: integer("post_id")
+      .notNull()
+      .references(() => posts.id, { onDelete: "cascade" }),
+    position: integer("position").notNull(),
+    topic: text("topic").notNull(),
+    promptVersion: text("prompt_version").notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.postId, table.position] }),
+    topicUniq: uniqueIndex("idx_post_topics_topic_post").on(table.postId, table.topic),
+    topicIdx: index("idx_post_topics_topic").on(table.topic),
   }),
 );

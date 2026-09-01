@@ -25,13 +25,12 @@ import {
 } from "@/lib/pipeline/run-pipeline";
 import { RssAdapter } from "@/lib/pipeline/adapters/rss-adapter";
 import { EvergreenAdapter } from "@/lib/pipeline/adapters/evergreen-adapter";
-import { SubmitAdapter } from "@/lib/pipeline/adapters/submit-adapter";
 
 /** rss/evergreen/submit 共有の due 取得件数上限（旧 `processDueAndExpiredRetries` と同値）。 */
 const RETRY_PROCESS_LIMIT = 50;
 
 /** discovery を除く、このランナーが処理するレーン一覧。 */
-const RSS_ADJACENT_LANES: RetryLane[] = ["rss", "evergreen", "submit"];
+const RSS_ADJACENT_LANES: RetryLane[] = ["rss", "evergreen"];
 
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
 
@@ -47,14 +46,13 @@ function jstDayStartIso(nowIso: string): string {
  * レーン → アダプタの対応表。レーンごとの分岐（`switch`/`if (lane === ...)`）
  * はこのファイル中どこにも書かず、常にこのテーブルを介して解決する。
  */
-const ADAPTERS: Record<"rss" | "evergreen" | "submit", () => PipelineAdapter> = {
+const ADAPTERS: Record<"rss" | "evergreen", () => PipelineAdapter> = {
   rss: () => new RssAdapter(),
   evergreen: () => new EvergreenAdapter(),
-  submit: () => new SubmitAdapter(),
 };
 
-function isRssAdjacentLane(lane: RetryLane): lane is "rss" | "evergreen" | "submit" {
-  return lane === "rss" || lane === "evergreen" || lane === "submit";
+function isRssAdjacentLane(lane: RetryLane): lane is "rss" | "evergreen" {
+  return lane === "rss" || lane === "evergreen";
 }
 
 /**
@@ -85,7 +83,7 @@ export async function processDueAndExpiredRetries(now: string): Promise<{ errors
   // 旧実装と同じく `dueRetries` は 1 回だけ呼び、その結果を 3 レーンで
   // 共有の上限として消費する（レーンごとに別枠にしない）。
   const due = await dueRetries(now, RETRY_PROCESS_LIMIT);
-  const byLane = new Map<"rss" | "evergreen" | "submit", RetryQueueEntry[]>();
+  const byLane = new Map<"rss" | "evergreen", RetryQueueEntry[]>();
   for (const entry of due) {
     if (!isRssAdjacentLane(entry.lane)) continue; // discovery レーンは discovery-ingest.ts が処理する。
     const bucket = byLane.get(entry.lane);

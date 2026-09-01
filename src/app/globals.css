@@ -19,12 +19,6 @@
   --border: #e7dfd3;
   --ring: #b33a24;
 
-  /* トレンド（速報・熱量）: 朱色 */
-  --trend: #b33a24;
-  --on-trend: #fff7f2;
-  --trend-tint-a: #f3ded6;
-  --trend-tint-b: #ead0c5;
-
   /* 定番（安定・信頼）: 紺色 */
   --classic: #2c3b5c;
   --on-classic: #f1f4fb;
@@ -56,11 +50,6 @@
   --border: #3a322a;
   --ring: #e2603d;
 
-  --trend: #e2603d;
-  --on-trend: #16120e;
-  --trend-tint-a: #3a2a22;
-  --trend-tint-b: #2c1f19;
-
   --classic: #8fa6de;
   --on-classic: #16120e;
   --on-classic-solid: #16120e;
@@ -83,11 +72,6 @@
   --color-muted-foreground: var(--muted-foreground);
   --color-border: var(--border);
   --color-ring: var(--ring);
-
-  --color-trend: var(--trend);
-  --color-on-trend: var(--on-trend);
-  --color-trend-tint-a: var(--trend-tint-a);
-  --color-trend-tint-b: var(--trend-tint-b);
 
   --color-classic: var(--classic);
   --color-on-classic: var(--on-classic);

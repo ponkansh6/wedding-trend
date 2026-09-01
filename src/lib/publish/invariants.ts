@@ -9,13 +9,20 @@
  *
  * このモジュールは実行時の制御フローに一切関与しない（新しい抽象層を
  * パイプラインに足さない）。`tests/pipeline/invariants.test.ts` が、各 id に
- * ついて `runPipelineOnCandidates`（または INV-4/INV-8 のように構造上
- * パイプラインを通せない場合は対象関数を直接）を通した結果で検証する
- * 「境界アサーション」の索引として使う。
+ * ついて `runPipelineOnCandidates`（または INV-4 のように構造上パイプライン
+ * を通せない場合は対象関数を直接）を通した結果で検証する「境界アサーション」
+ * の索引として使う。
  *
  * `enforcedBy` は強制しているコードの実際の場所（ファイル:関数名）。
- * INV-7 / INV-8 は型・ゲートによる強制ではなく「規約」であることを
- * 正直に記録する（`onViolation` を偽らない）。
+ *
+ * shared_plan/20 P4: 旧 INV-7（逐語タイトル）と旧 INV-8（discovery 抽出本文の
+ * 非永続化）を `INVARIANTS` 配列から外した。両者とも「型・ゲートによる強制では
+ * なく規約」であり、機械強制のレジストリに規約を混ぜると「不変条件」の語の
+ * 信頼性を損なうため。逐語タイトル・非永続化という法務要件そのものは
+ * spec.md §10 に依然として存在し、実装的強制（`aiTitle` 全経路 null 固定、
+ * discovery-ingest.ts の `originalExcerpt: null` 固定、`assertNoSliceLeak`）も
+ * 一切変更していない。運用ポリシーとしての記述は spec.md の運用ポリシー節へ移した。
+ * 残りの ID（INV-1..INV-6）は安定のため振り直さない。
  */
 
 export type InvariantViolationKind = "drop" | "degrade" | "throw" | "convention";
@@ -80,26 +87,6 @@ export const INVARIANTS = [
     enforcedBy: "src/lib/pipeline/run-pipeline.ts runPipelineOnCandidates（Rate Cap 区画）",
     onViolation: "degrade",
     reason: "rate_capped",
-  },
-  {
-    id: "INV-7",
-    summary:
-      "タイトルは originalTitle の逐語表示（AI 書き換えなし・aiTitle は常に null）。型やゲートによる強制ではなく、パイプライン全経路が aiTitle を渡さないという規約。",
-    spec: "spec.md §10",
-    enforcedBy:
-      "規約（src/lib/pipeline/ingest.ts, evergreen.ts, submit-url.ts, discovery-ingest.ts, run-pipeline.ts のいずれも CurationUpdate.aiTitle を渡さない）",
-    onViolation: "convention",
-    reason: null,
-  },
-  {
-    id: "INV-8",
-    summary:
-      "discovery 経路の抽出本文（判定スライス）を DB へ永続化しない。discovery-ingest.ts は originalExcerpt を常に null で upsert し、バックフィルは許可リスト外キーを構造的に throw で弾く。",
-    spec: "spec.md §10",
-    enforcedBy:
-      "src/lib/pipeline/discovery-ingest.ts（originalExcerpt: null 固定）／ scripts/lib/mwed-anchor-backfill.mjs assertNoSliceLeak",
-    onViolation: "throw",
-    reason: null,
   },
 ] as const satisfies readonly InvariantEntry[];
 

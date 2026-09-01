@@ -563,63 +563,7 @@ describe("Database Repository and Queries", () => {
       ]);
     });
 
-    it("sns lane: ignores usefulness and keeps createdAt (newest-first) order", async () => {
-      await upsertPosts([
-        {
-          url: "https://example.com/sns-old",
-          sourceType: "sns",
-          sourceId: "instagram",
-          sourceName: "Instagram",
-          originalTitle: "old",
-          originalExcerpt: null,
-          author: null,
-          thumbnailUrl: null,
-          publishedAt: null,
-        },
-      ]);
-      // createdAt はミリ秒未満での逆転を避けるため、2件目を明示的に後で挿入する。
-      await new Promise((resolve) => setTimeout(resolve, 5));
-      await upsertPosts([
-        {
-          url: "https://example.com/sns-new",
-          sourceType: "sns",
-          sourceId: "instagram",
-          sourceName: "Instagram",
-          originalTitle: "new",
-          originalExcerpt: null,
-          author: null,
-          thumbnailUrl: null,
-          publishedAt: null,
-        },
-      ]);
-
-      await markCurated([
-        {
-          url: "https://example.com/sns-old",
-          aiTitle: "old",
-          aiSummary: "old summary",
-          category: "その他",
-          tag: "trend",
-          contentHash: "hash",
-          curationSignature: "sig",
-        },
-        {
-          url: "https://example.com/sns-new",
-          aiTitle: "new",
-          aiSummary: "new summary",
-          category: "その他",
-          tag: "trend",
-          contentHash: "hash",
-          curationSignature: "sig",
-        },
-      ]);
-
-      const feedCards = await getFeedCards({ sourceType: "sns", limit: 10 });
-      expect(feedCards.map((c) => c.url)).toEqual([
-        "https://example.com/sns-new",
-        "https://example.com/sns-old",
-      ]);
-    });
+    // (sns lane test removed in Plan 19 Stage 1)
   });
 
   describe("Post rationales and evidenceSufficient gating", () => {

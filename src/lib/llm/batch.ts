@@ -23,6 +23,7 @@ import {
 } from "./schemas";
 import {
   validateTopicAnchor,
+  validateTopics,
   extractFeatureTerms,
   renderRationaleText,
   type GateResult,
@@ -36,8 +37,9 @@ import {
  * 廃止したため、この型からは削除されている
  * （破壊的変更。呼び出し元での結線は別レーンが行う。詳細はタスク完了報告を参照）。
  */
-export type CurationResult = Omit<CurationItem, "index" | "topicAnchor"> & {
+export type CurationResult = Omit<CurationItem, "index" | "topicAnchor" | "topics"> & {
   topicAnchor: string | null;
+  topics: string[];
   rationaleText: string | null;
   /**
    * `topicAnchor` が gate（`validateTopicAnchor`）落ちで null に degrade された
@@ -310,10 +312,14 @@ export async function curateBatch(
         degradeReason = reason;
       }
 
+      const topicsRes = validateTopics(item.topics, title);
+      const finalTopics = topicsRes.ok ? topicsRes.topics : [];
+
       return attachRationale({
         title: item.title,
         summary: item.summary,
         topicAnchor: finalAnchor,
+        topics: finalTopics,
         category: item.category,
         tag: item.tag,
         firsthand: item.firsthand,
@@ -407,9 +413,13 @@ export async function curateAnchorWithRetry(
   }
 
   const gateRes = validateTopicAnchor(item.topicAnchor, { corpus, title });
+  const topicsRes = validateTopics(item.topics, title);
+  const finalTopics = topicsRes.ok ? topicsRes.topics : [];
+
   if (gateRes.ok) {
     return {
       ...item,
+      topics: finalTopics,
       degradeReason: null,
       firstAttemptReason: null,
       retryAttemptReason: null,
@@ -427,8 +437,11 @@ export async function curateAnchorWithRetry(
     // リトライ時の LLM 呼び出しは失敗したが、1回目（`item`）は成功しているため
     // 「LLM 失敗」ではなく「1回目の理由で degrade」として扱う（1回目の
     // summary/category 等は有効な内容なので、そこまで捨てる必要はない）。
+    const topicsRes = validateTopics(item.topics, title);
+    const finalTopics = topicsRes.ok ? topicsRes.topics : [];
     return {
       ...item,
+      topics: finalTopics,
       topicAnchor: null,
       degradeReason: reason,
       firstAttemptReason: reason,
@@ -440,9 +453,13 @@ export async function curateAnchorWithRetry(
   }
 
   const retryGateRes = validateTopicAnchor(retryItem.topicAnchor, { corpus, title });
+  const retryTopicsRes = validateTopics(retryItem.topics, title);
+  const finalRetryTopics = retryTopicsRes.ok ? retryTopicsRes.topics : [];
+
   if (retryGateRes.ok) {
     return {
       ...retryItem,
+      topics: finalRetryTopics,
       degradeReason: null,
       firstAttemptReason: reason,
       retryAttemptReason: null,
@@ -456,6 +473,7 @@ export async function curateAnchorWithRetry(
   const retryGateDetails = gateDetails(retryGateRes);
   return {
     ...retryItem,
+    topics: finalRetryTopics,
     topicAnchor: null,
     degradeReason: retryReason,
     firstAttemptReason: reason,

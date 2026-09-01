@@ -17,6 +17,7 @@ const validUsefulness = {
 
 const validRationaleFields = {
   topicAnchor: "会場選びのコツ",
+  topics: ["会場選び", "費用"],
 };
 
 describe("CurationItemSchema", () => {

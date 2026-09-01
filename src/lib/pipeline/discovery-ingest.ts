@@ -422,6 +422,8 @@ async function publishPost(
         modelId: LLM_MODEL,
         promptVersion: RATIONALE_PROMPT_VERSION,
       },
+      topics: curation.topics,
+      promptVersion: computeCurationSignature(),
     },
   ]);
   if (mark.failed.length > 0) {

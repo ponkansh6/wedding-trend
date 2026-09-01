@@ -13,21 +13,18 @@ Next.js 16 (App Router), React 19, TypeScript strict, Tailwind CSS v4, Drizzle O
 
 ### In Scope
 
-- **2つのレーンによるキュレーション表示**:
-  - 上段: 最新トレンド速報 (`sourceType: "sns"`) — 演出・衣装・DIY等のビジュアル情報
-  - 下段: 満足度の高い王道・定番 (`sourceType: "blog"`) — 体験談・費用感・アドバイス
+- **単一フィードによるキュレーション表示**:
+  - 体験談・費用感・アドバイス等のブログ記事を中心とした単一のキュレーションフィード表示 (`src/components/feed/feed-lane-classic.tsx`, `src/components/feed/feed-card.tsx`)
 - **自動巡回コレクター**:
   - RSS フィードに基づくブログ・体験談の収集 (`src/lib/sources/hatena-bookmark.ts`, `src/lib/sources/google-news.ts`, `src/lib/sources/note.ts`, `src/lib/sources/ameblo.ts`, `src/lib/sources/base/rss-fetcher.ts`, `src/lib/sources/base/feed-parser.ts`, `src/lib/sources/registry.ts`)
 - **sitemap 差分による発見・本文取得（discovery 経路）**:
   - RSS フィードが存在しないセクション（第1対象: `mwed.jp` 体験談）を sitemap の差分から発見し、アクセス規律レイヤー経由で本文を取得して判定する。本文は判定後に破棄し永続化しない (`src/lib/sources/sitemap-discovery.ts`, `src/lib/sources/access-discipline.ts`, `src/lib/sources/article-text.ts`, `src/lib/pipeline/discovery-ingest.ts`, `scripts/run-discovery.mjs`)。また、有用度スコア等の全件バックフィルスクリプト `scripts/backfill-usefulness.mjs` にも discovery 経路由来のプレフライト・バイパス機能が統合されており、本文をメモリ上で一時取得して再スコア対象にルーティングする。詳細は §6.3 を参照。
-- **管理者による URL 投入 API**:
-  - SNS 投稿等の URL を受け取り、oEmbed を取得してカード化 (`src/app/api/submit-url/route.ts`, `src/lib/pipeline/submit-via-pipeline.ts`, `src/lib/embed/oembed.ts`, `src/lib/embed/providers.ts`)
 - **AI による見出し・要約生成**:
   - Google Gemini API を用いた一括抽出・サマライズ（バッチサイズ: `LLM_BATCH_SIZE = 30`。`src/lib/llm/client.ts`, `src/lib/llm/batch.ts`, `src/lib/llm/prompts.ts`, `src/lib/llm/schemas.ts`, `src/lib/llm/signature.ts`)
 - **定期巡回 API**:
   - `src/app/api/ingest/route.ts` / `src/lib/pipeline/ingest.ts` による一括インジェスト
 - **収集トリガー（2 経路）**:
-  - `/admin`（`src/middleware.ts` の Basic 認証配下。オーナー限定）から叩く Server Action (`src/app/actions.ts`) と、`vercel.json` の Vercel Cron による定期実行。両者とも実処理は `src/lib/pipeline/ingest.ts` / `src/lib/pipeline/submit-via-pipeline.ts` に一本化されている（詳細は §6）。収集ボタンは以前、無認証で本番の公開トップページに置かれていたが、デプロイをまたいで残る ISR の stale ページが原因の誤解（「体験談 0 件なのに更新制限」）をきっかけに `/admin` へ移した。加えて、両経路とも同時実行を防ぐ排他ロック（lease）と、`/admin` 経路のみ連打防止のクールダウンを DB 側で必ず取得する（`src/lib/pipeline/cooldown.ts`。詳細は §6.4）
+  - `/admin`（`src/middleware.ts` の Basic 認証配下。オーナー限定）から叩く Server Action (`src/app/actions.ts`) と、`vercel.json` の Vercel Cron による定期実行。実処理は `src/lib/pipeline/ingest.ts` に一本化されている（詳細は §6）。収集ボタンは以前、無認証で本番の公開トップページに置かれていたが、デプロイをまたいで残る ISR の stale ページが原因の誤解（「体験談 0 件なのに更新制限」）をきっかけに `/admin` へ移した。加えて、両経路とも同時実行を防ぐ排他ロック（lease）と、`/admin` 経路のみ連打防止のクールダウンを DB 側で必ず取得する（`src/lib/pipeline/cooldown.ts`。詳細は §6.4）
 - **ヘルスチェック**:
   - `src/app/api/health/route.ts`
 
@@ -44,16 +41,14 @@ Next.js 16 (App Router), React 19, TypeScript strict, Tailwind CSS v4, Drizzle O
 
 - **FR-001: 記事・投稿の自動巡回とインジェスト**
   - `src/app/api/ingest/route.ts` を呼び出すことで、`src/lib/sources/registry.ts` に登録された各アダプタから RSS データを取得し、データベースに保存する。実処理本体は `src/lib/pipeline/ingest.ts` の `runIngest()` に実装されている。
-- **FR-002: 管理者 URL 投入と oEmbed 取得**
-  - `src/app/api/submit-url/route.ts` を介して手動で投稿 URL を登録し、`src/lib/embed/oembed.ts` で埋め込みデータを取得して保存する。実処理本体は `src/lib/pipeline/submit-via-pipeline.ts` の `runSubmitUrlViaPipeline()` に実装されている。
 - **FR-003: AI による要約・見出し生成**
   - Google Gemini API (`src/lib/llm/client.ts`) を用い、取得したコンテンツから短尺の要約、カテゴリ、タグ等を抽出・生成する。
-- **FR-004: 2レーン構成のフィード表示**
-  - `src/app/page.tsx` において、SNS トレンド速報 (`src/components/feed/feed-lane-trend.tsx`) とブログ定番 (`src/components/feed/feed-lane-classic.tsx`) を分けて表示する。
+- **FR-004: 単一フィード表示**
+  - `src/app/page.tsx` において、定番ブログ記事等を中心とした単一のフィード (`src/components/feed/feed-lane-classic.tsx` と `feed-card.tsx`) を表示する。
 - **FR-005: セキュリティおよび環境検証**
-  - `src/middleware.ts` および `src/lib/auth.ts` によるベーシック認証等の保護、`src/lib/constants.ts` や `src/lib/url.ts` 等の共通ユーティリティ。`src/lib/auth.ts` の `isBearerAuthorized` は **fail-closed**: 検証用の secret（既定 `CRON_SECRET`）が未設定の場合、実行環境（`NODE_ENV` / `VERCEL_ENV` 等）によらず常にリクエストを拒否する。環境によって認証ロジックが変わる設計（未設定時はローカル開発向けに無認証で許可する fail-open）を避けるための意図的な制約であり、ローカル開発でも `.env.local` に secret を設定しない限り `/api/ingest` `/api/submit-url` は 401 を返す。
+  - `src/middleware.ts` および `src/lib/auth.ts` によるベーシック認証等の保護、`src/lib/constants.ts` や `src/lib/url.ts` 等の共通ユーティリティ。`src/lib/auth.ts` の `isBearerAuthorized` は **fail-closed**: 検証用の secret（既定 `CRON_SECRET`）が未設定の場合、実行環境（`NODE_ENV` / `VERCEL_ENV` 等）によらず常にリクエストを拒否する。環境によって認証ロジックが変わる設計（未設定時はローカル開発向けに無認証で許可する fail-open）を避けるための意図的な制約であり、ローカル開発でも `.env.local` に secret を設定しない限り `/api/ingest` は 401 を返す。
 - **FR-006: 収集トリガーの管理画面化と定期実行**
-  - `src/app/actions.ts` の Server Action（`triggerIngest` / `submitSnsUrl`）により、`/admin`（`src/middleware.ts` の Basic 認証配下・オーナー限定）上のボタン操作から `src/lib/pipeline/ingest.ts` / `src/lib/pipeline/submit-via-pipeline.ts` を直接呼び出す。加えて `vercel.json` の Vercel Cron 設定により `GET /api/ingest` を定期実行する。両トリガー経路の詳細・認可モデルは §6 を参照。
+  - `src/app/actions.ts` の Server Action（`triggerIngest`）により、`/admin`（`src/middleware.ts` の Basic 認証配下・オーナー限定）上のボタン操作から `src/lib/pipeline/ingest.ts` を直接呼び出す。加えて `vercel.json` の Vercel Cron 設定により `GET /api/ingest` を定期実行する。両トリガー経路の詳細・認可モデルは §6 を参照。
 - **FR-007: 収集トリガーの排他ロックとクールダウン**
   - 収集パイプラインを起動する両経路（`/admin` の手動トリガー・Cron）は、`src/lib/pipeline/cooldown.ts` の `acquireIngestLease()` により実行排他ロック（lease）を必ず取得する。取得できなければ「実行中」として `runIngest()` を呼ばずに返す（`/admin` 経路では `IngestResult.busy: true`）。加えて `/admin` 経路のみ、`claimIngestSlot()` により 15 分のクールダウンを DB 側で原子的に確保し、`runIngest()` が実際に Gemini を呼んでいれば `extendIngestCooldownAfterRun()` が 4 時間へ延長する。クールダウン中は lease を解放し `runIngest()` を呼ばずに待機状態を返す。詳細は §6.4 を参照。
 - **FR-008: sitemap 差分発見と本文取得による判定（discovery 経路）**
@@ -126,9 +121,11 @@ Next.js 16 (App Router), React 19, TypeScript strict, Tailwind CSS v4, Drizzle O
 体験談レーン（`sourceType: "blog"`）の掲載順を決めるための採点結果を保持する
 （判定項目・重み・掲載順ルールの詳細は §9 編集方針を参照）。`posts` へのカラム
 追加ではなく別テーブルにしているのは、本番 Turso が news-watch と DB を共有
-しており、追加専用の安全装置 (`scripts/apply-migrations-remote.mjs`) が
-`ALTER TABLE` を含む文を一切許可しない（`CREATE TABLE` / `CREATE INDEX` の
-みを許可し、それ以外が現れると exit 1 する）ためである。さらに、将来的な
+しており、追加専用の安全装置 (`scripts/gates/migrations-additive.mjs` の
+`classifyStatement()`) が許可するのは `CREATE TABLE` / `CREATE INDEX` /
+`CREATE UNIQUE INDEX` / 所有テーブルへの `ALTER TABLE ... ADD COLUMN`
+（`UNIQUE` / `PRIMARY KEY` / 非定数デフォルトを伴わない形に限る）のみで、
+それ以外が現れると exit 1 するためである。さらに、将来的な
 判定項目の追加・変更に際して DDL の変更（マイグレーション）を不要にするため、
 判定結果は個別のカラムではなく単一の JSON カラム `criteria_json` にシリアライズ
 して保存する設計（shared_plan/02 案C）を採用している。
@@ -165,10 +162,12 @@ Next.js 16 (App Router), React 19, TypeScript strict, Tailwind CSS v4, Drizzle O
 ### 判定根拠・discovery 系の 5 テーブル（`src/lib/db/schema.ts`）
 
 いずれも `post_usefulness_criteria` と同じ制約下（本番 Turso が news-watch と
-DB を共有しており、`scripts/apply-migrations-remote.mjs` が `ALTER TABLE` を
-一切許可せず `CREATE TABLE` / `CREATE INDEX` のみ許可）で追加された。
-`posts` テーブル自体には一切カラムを追加しておらず、すべてサイドテーブルで
-拡張している（`src/lib/db/migrations/0004_post_rationales.sql` 〜
+DB を共有しており、`scripts/gates/migrations-additive.mjs` の `classifyStatement()`
+が許可するのは `CREATE TABLE` / `CREATE INDEX` / `CREATE UNIQUE INDEX` /
+所有テーブルへの `ALTER TABLE ... ADD COLUMN`（`UNIQUE` / `PRIMARY KEY` /
+非定数デフォルトを伴わない形に限る）のみ。それ以外が現れると exit 1 する）で
+追加された。`posts` テーブル自体には一切カラムを追加しておらず、すべてサイド
+テーブルで拡張している（`src/lib/db/migrations/0004_post_rationales.sql` 〜
 `0008_host_gate_state.sql`。5本とも `CREATE TABLE`（一部 `CREATE INDEX` 併記）
 のみで構成され、`ALTER TABLE` 文を含まない）。
 
@@ -194,6 +193,18 @@ DB を共有しており、`scripts/apply-migrations-remote.mjs` が `ALTER TABL
   `src/lib/constants.ts`）。将来プロンプト文言を変更した際の
   バックフィル判定に使う。
 - `created_at`: ISO8601 文字列。
+
+#### `post_topics` テーブル（トピックチップ情報）
+
+カードに表示するトピック情報を保持するテーブル。同様にサイドテーブル方式（追加マイグレーション `0013`）で拡張する。
+
+- `post_id`: `posts.id` との外部キー（CASCADE 削除）。
+- `position`: トピックの並び順（整数）。
+- `topic`: 正規化されたトピック文字列。
+- `prompt_version`: タグバージョン（バッチバックフィル用）。
+- PRIMARY KEY (`post_id`, `position`), UNIQUE (`post_id`, `topic`), INDEX `idx_post_topics_topic` (`topic`)
+- **Note**: CREATE TABLE + indexes のみ、additive migration 0013。トピック数（2〜4個）、文字数（2〜10文字）、数字禁止等のバリデーションは LLM スキーマおよびゲート側で行われ、DB 制約としては持たせない。
+- トピックは AI自由生成による短尺ラベルであり、個人識別情報 (PII) denylist およびタイトル由来の固有名詞を原則とし、逐語的接地は要件としない。UI上では `topicAnchor` の下に非対話型のチップリストとしてレンダリングされ、未設定時はプレースホルダー等を非表示とし、ヘッダーに AI 判定に関する免責事項を表示する。法務制約 §10 の「AI自由生成による短尺ラベルは許容される（非創作的な短尺ラベル）」に従う。
 
 #### `discovery_seen` テーブル（既知 URL 集合の正本。§6.3）
 
@@ -266,15 +277,12 @@ kill gate K1（robots.txt 変化検知）の入力。取得のたびに内容ハ
 
 ## 6. Architecture
 
-投稿の摂取経路は 3 本ある: (1) RSS フィードの自動巡回（`src/lib/pipeline/ingest.ts`）、
-(2) `/admin` からの手動 URL 投入（`src/lib/pipeline/submit-via-pipeline.ts`）、
-(3) sitemap 差分による発見・本文取得（`src/lib/pipeline/discovery-ingest.ts`、GitHub Actions
-の日次実行）。(1)(2) は §6.1 の収集トリガー（Vercel Cron・Server Action）を経由するが、
-(3) は Vercel Cron を増やさず GitHub Actions で独立して動く（§6.3 を参照）。
+投稿の摂取経路は複数ある: (1) RSS フィードの自動巡回（`src/lib/pipeline/ingest.ts`）、
+(2) sitemap 差分による発見・本文取得（`src/lib/pipeline/discovery-ingest.ts`、GitHub Actions
+の日次実行）。
 
-- **2-lane design**:
-  - SNS トレンド速報レーン: `src/components/feed/feed-lane-trend.tsx`
-  - ブログ定番レーン: `src/components/feed/feed-lane-classic.tsx`, `src/components/feed/feed-card.tsx`
+- **Single feed design**:
+  - 単一フィードレーン: `src/components/feed/feed-lane-classic.tsx`, `src/components/feed/feed-card.tsx`
 - **Collection pipeline**:
   - `src/lib/sources/registry.ts` -> 各アダプタ (`src/lib/sources/hatena-bookmark.ts`, `src/lib/sources/google-news.ts`, `src/lib/sources/note.ts`, `src/lib/sources/ameblo.ts`) -> RSS フェッチャー (`src/lib/sources/base/rss-fetcher.ts`, `src/lib/sources/base/feed-parser.ts`)
   - discovery 経路（RSS が無いセクション向け）: `src/lib/sources/sitemap-discovery.ts` -> `src/lib/sources/access-discipline.ts` -> `src/lib/sources/article-text.ts` -> `src/lib/pipeline/discovery-ingest.ts`（§6.3）
@@ -282,14 +290,13 @@ kill gate K1（robots.txt 変化検知）の入力。取得のたびに内容ハ
   - `src/lib/embed/oembed.ts` 及び `src/lib/embed/providers.ts` による堅牢な埋め込み取得と障害時フォールバック。
 - **Pipeline modules（実処理の単一実装）**:
   - `src/lib/pipeline/ingest.ts`（`runIngest`）: RSS 巡回 → 正規化 URL での重複排除 → upsert → 未キュレーション/再キュレーション対象の予算内選定 → LLM 一括キュレーション、までの一連の処理。`/` は `export const dynamic = "force-dynamic"` でキャッシュを経由しないため、以前ここにあったフィードキャッシュの明示的失効（`revalidateTag`）は不要になった（詳細は §6.5）。
-  - `src/lib/pipeline/submit-via-pipeline.ts`（`runSubmitUrlViaPipeline`）: URL 正規化 → oEmbed 取得 → 候補構築までを `SubmitAdapter` が担い、以降（LLM キュレーション → 公開ゲート → upsert → 埋め込み保存）は共通コア `runPipelineOnCandidates`（`src/lib/pipeline/run-pipeline.ts`）が担う。本関数は `SubmitOutcome` 契約へ写像する薄いラッパーである（2026-08-31, shared_plan/17 S2 でパイプラインを統合）。
-  - どちらも「呼び出し元（Route Handler か Server Action か）に依存しない」ことを目的に切り出されており、`src/app/api/ingest/route.ts` / `src/app/api/submit-url/route.ts` および `src/app/actions.ts` はいずれもこれらの薄いラッパーに過ぎない。ロジックを二重実装しないことが本設計の前提。
+  - どちらも「呼び出し元（Route Handler か Server Action か）に依存しない」ことを目的に切り出されており、`src/app/api/ingest/route.ts` および `src/app/actions.ts` はいずれもこれらの薄いラッパーに過ぎない。ロジックを二重実装しないことが本設計の前提。
 
 ### §6.1 収集トリガーの 2 経路
 
 収集パイプラインを起動する経路は次の 2 つのみであり、いずれも最終的に上記の pipeline モジュールを呼ぶ。
 
-1. **`/admin` の収集ボタン（Server Action）**: `src/app/actions.ts` の `triggerIngest()` / `submitSnsUrl(url)` を、`src/app/admin/page.tsx` 上のボタン（`src/components/admin/ingest-status-panel.tsx` / `src/components/admin/operator-panel.tsx`）が呼び出す。`/admin/:path*` は `src/middleware.ts` が Basic 認証（`ADMIN_BASIC_AUTH_USER` / `ADMIN_BASIC_AUTH_PASSWORD`）で保護しており、オーナー限定の操作である。UI・ミドルウェアだけでは防御にならないため、`triggerIngest()` / `submitSnsUrl()` はそれ自身の実行時にも `src/lib/auth.ts` の `isBasicAuthorized()` で同じ資格情報を再検証する多層防御を取る（§6.2 参照）。`triggerIngest()` の濫用防止はこれに加えて §6.4 の lease（排他ロック）と DB クールダウンが担う。
+1. **`/admin` の収集ボタン（Server Action）**: `src/app/actions.ts` の `triggerIngest()` を、`src/app/admin/page.tsx` 上のボタン（`src/components/admin/ingest-status-panel.tsx` / `src/components/admin/operator-panel.tsx`）が呼び出す。`/admin/:path*` は `src/middleware.ts` が Basic 認証（`ADMIN_BASIC_AUTH_USER` / `ADMIN_BASIC_AUTH_PASSWORD`）で保護しており、オーナー限定の操作である。UI・ミドルウェアだけでは防御にならないため、`triggerIngest()` はそれ自身の実行時にも `src/lib/auth.ts` の `isBasicAuthorized()` で同じ資格情報を再検証する多層防御を取る（§6.2 参照）。`triggerIngest()` の濫用防止はこれに加えて §6.4 の lease（排他ロック）と DB クールダウンが担う。
 2. **Vercel Cron（定期実行）**: `vercel.json` の `crons` 設定により、Vercel が `GET /api/ingest` を定期的に呼び出す（スケジュールは `0 21 * * *` = UTC 21:00、JST 6:00 の 1 日 1 回）。本番は Vercel Hobby プランで運用しており、Hobby は Cron の実行頻度が 1 日 1 回までに制限される（それを超えるスケジュールを指定すると `vercel deploy` 自体が拒否され、デプロイが失敗する）ため、この頻度としている。
    - `src/app/api/ingest/route.ts` の `GET` ハンドラは単なるヘルスチェック/案内スタブではなく、`POST` と全く同じ認可チェック・同じ `runIngest()` 呼び出しを行う。Vercel Cron は `CRON_SECRET` 環境変数が設定されていれば `Authorization: Bearer <CRON_SECRET>` ヘッダーを自動付与するため、`src/lib/auth.ts` の `isBearerAuthorized` がそのまま両方の HTTP メソッドを検証できる。**`CRON_SECRET` が未設定の場合、この経路は fail-closed により常に 401 を返す**（詳細は §6.4 直前の認証方針、および `src/lib/auth.ts` を参照）。
    - この経路は `/admin` 経路のクールダウンの**評価・更新のどちらにも触れない**が、**lease（排他ロック）は迂回しない**。`acquireIngestLease()` に失敗した場合（＝`/admin` 経路や他の Cron 呼び出しが実行中）は `runIngest()` を呼ばずに `409` を返す。代わりに、Cron が最後にいつ動いたかを観測するためだけの独立したキー `last_cron_ingest_at` を無条件で記録する（`config` の他のキーとは独立しており、何の判定にも使われない）。
@@ -377,12 +384,12 @@ RSS フィードが構造的に存在しないセクション（第1対象: `mwe
 
 ### §6.2 管理操作の認可モデル（Basic 認証・多層防御）
 
-収集トリガー（`triggerIngest`）・SNS URL 投入（`submitSnsUrl`）はいずれも `/admin` 配下（オーナー限定）に置かれ、同一の認可モデルを共有する。以前は 2 つの異なる仕組み（収集ボタン: 無認証で公開 + DB クールダウンのみ、URL 投入: `ENABLE_ADMIN_CONTROLS` 環境変数フラグ）を使い分けていたが、収集ボタンを `/admin` へ移したことで両者を Basic 認証に一本化した。`ENABLE_ADMIN_CONTROLS` は廃止し、`adminControlsEnabled()` は削除した。
+収集トリガー（`triggerIngest`）はいずれも `/admin` 配下（オーナー限定）に置かれ、同一の認可モデルを共有する。以前は 2 つの異なる仕組み（収集ボタン: 無認証で公開 + DB クールダウンのみ、URL 投入: `ENABLE_ADMIN_CONTROLS` 環境変数フラグ）を使い分けていたが、収集ボタンを `/admin` へ移したことで両者を Basic 認証に一本化した。`ENABLE_ADMIN_CONTROLS` は廃止し、`adminControlsEnabled()` は削除した。
 
 **多層防御は 2 段構成**:
 
 1. **ミドルウェア（入口）**: `src/middleware.ts` が matcher `/admin/:path*` で Basic 認証（`ADMIN_BASIC_AUTH_USER` / `ADMIN_BASIC_AUTH_PASSWORD`）を強制する。Edge ランタイムのため Web Crypto (`crypto.subtle`) でタイミングセーフに比較する。未設定の場合、本番環境は `503`、開発環境は無認証で通す（`NODE_ENV` で分岐。ページの入口としてローカル開発の利便性を優先している）。
-2. **Server Action（多層防御）**: `src/lib/auth.ts` の `isBasicAuthorized()` が `triggerIngest()` / `submitSnsUrl()` それぞれの実行時にも同じ資格情報を再検証する。**実際のアクセス制御はこの再検証である**。ミドルウェアだけでは防御にならない（Server Action は URL さえ知っていれば UI・ミドルウェアを経由せず直接呼び出せるため）。`isBasicAuthorized()` は `isBearerAuthorized`（CRON_SECRET）と同じ **fail-closed** 方針を取り、環境変数が未設定なら無条件に拒否し、`NODE_ENV` によって認証ロジックを分岐させない。**そのためミドルウェアと異なり、ローカル開発でも `ADMIN_BASIC_AUTH_USER` / `ADMIN_BASIC_AUTH_PASSWORD` を設定しない限り、収集ボタン・SNS URL 投入フォームの実行は常に失敗する**（詳細は `.env.local.example`）。認証に失敗した場合、両 Server Action とも生の認証エラーの内部情報を含まない固定文言（`ADMIN_DISABLED_MESSAGE`）を返す。
+2. **Server Action（多層防御）**: `src/lib/auth.ts` の `isBasicAuthorized()` が `triggerIngest()` それぞれの実行時にも同じ資格情報を再検証する。**実際のアクセス制御はこの再検証である**。ミドルウェアだけでは防御にならない（Server Action は URL さえ知っていれば UI・ミドルウェアを経由せず直接呼び出せるため）。`isBasicAuthorized()` は `isBearerAuthorized`（CRON_SECRET）と同じ **fail-closed** 方針を取り、環境変数が未設定なら無条件に拒否し、`NODE_ENV` によって認証ロジックを分岐させない。**そのためミドルウェアと異なり、ローカル開発でも `ADMIN_BASIC_AUTH_USER` / `ADMIN_BASIC_AUTH_PASSWORD` を設定しない限り、収集ボタンの実行は常に失敗する**（詳細は `.env.local.example`）。認証に失敗した場合、Server Action とも生の認証エラーの内部情報を含まない固定文言（`ADMIN_DISABLED_MESSAGE`）を返す。
 
 Server Action 自身（Node ランタイム）は `node:crypto` の `timingSafeEqual` を使い、ミドルウェア（Edge ランタイム）とはロジックが別実装になる。ランタイム制約により一本化できない。
 
@@ -451,7 +458,7 @@ Server Action 自身（Node ランタイム）は `node:crypto` の `timingSafeE
 
 **経緯**: 以前は ISR（`unstable_cache` による 5 分キャッシュ + `ingest` / `submit-url` からの `revalidateTag` による明示的失効）だった。しかしデプロイをまたいで残った stale なキャッシュエントリが stale-while-revalidate で配信され続け、「体験談 0 件なのに更新制限」という誤解を招く報告につながった（実測では本番 DB に投稿が存在し収集自体は成功していたが、訪問するたびに前回訪問時点のスナップショットが配信される状態になっていた）。
 
-**判断根拠**: このページのトラフィックはほぼゼロで、`getFeedCards()` のクエリも最大12件×2レーンの単純な SELECT に過ぎない。ISR の利得（DB 負荷の軽減）より、「オーナーが `/admin` から収集した直後に結果をここで確認できない」ことの損失の方が大きいと判断し、キャッシュ層ごと撤去した。これに伴い `FEED_CACHE_TAG` 定数と、`ingest.ts` / `submit-url.ts` の `revalidateTag()` 呼び出しも削除した。`/admin`（`src/app/admin/page.tsx`）も同様に `force-dynamic` とし、クールダウン状態と直近ラン結果（`last_run_summary`）を常に最新の DB 状態で表示する。
+**判断根拠**: このページのトラフィックはほぼゼロで、`getFeedCards()` のクエリも最大12件の単一フィードの単純な SELECT に過ぎない。ISR の利得（DB 負荷の軽減）より、「オーナーが `/admin` から収集した直後に結果をここで確認できない」ことの損失の方が大きいと判断し、キャッシュ層ごと撤去した。これに伴い `FEED_CACHE_TAG` 定数と、`ingest.ts` / `submit-url.ts` の `revalidateTag()` 呼び出しも削除した。`/admin`（`src/app/admin/page.tsx`）も同様に `force-dynamic` とし、クールダウン状態と直近ラン結果（`last_run_summary`）を常に最新の DB 状態で表示する。
 
 ---
 
@@ -459,15 +466,27 @@ Server Action 自身（Node ランタイム）は `node:crypto` の `timingSafeE
 
 ### §7.1 Tiered Coverage Targets
 
-| Tier                  | 対象モジュール・ファイル                                                                                                                                                                         | ターゲット網羅率         |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------ |
-| Tier 1 純粋ロジック   | `src/lib/url.ts`, `src/lib/llm/signature.ts`, `src/lib/llm/schemas.ts`, `src/lib/constants.ts`, `src/lib/scoring/usefulness.ts`                                                                  | 95%                      |
-| Tier 2 パース・判定   | `src/lib/sources/base/feed-parser.ts`, `src/lib/embed/providers.ts`                                                                                                                              | 85%                      |
-| Tier 3 収集アダプタ   | `src/lib/sources/hatena-bookmark.ts`, `src/lib/sources/google-news.ts`, `src/lib/sources/note.ts`, `src/lib/sources/ameblo.ts`, `src/lib/sources/base/rss-fetcher.ts`, `src/lib/embed/oembed.ts` | 80%                      |
-| Tier 4 LLM 制御       | `src/lib/llm/batch.ts`, `src/lib/llm/client.ts`                                                                                                                                                  | 80%                      |
-| Tier 5 API ルート     | `src/app/api/ingest/route.ts`, `src/app/api/submit-url/route.ts`, `src/lib/pipeline/ingest.ts`, `src/lib/pipeline/submit-via-pipeline.ts`, `src/lib/pipeline/cooldown.ts`                        | 70%                      |
-| Tier 6 データアクセス | `src/lib/db/repository.ts`, `src/lib/db/query.ts`                                                                                                                                                | 65%                      |
-| Tier 7 RSC/UI         | `src/app/page.tsx`, `src/app/layout.tsx`, `src/components/**`                                                                                                                                    | 除外 (smoke test で担保) |
+Tier の区分・対象モジュール・ターゲット網羅率は `scripts/gates/check-coverage-tiers.mjs`
+を単一の真実とする（spec には数値を持たせない。二重管理による乖離を防ぐため）。
+大枠は「法務・公開ゲート系は最も高く / パイプライン・スコア系は中位 / RSC・UI は
+smoke test で担保し網羅率対象から除外」であり、正確な閾値と割り当てはスクリプトを参照。
+2026-09-01（shared_plan/20 P3）に旧 7 段を 3 段（法務・公開ゲート系 / パイプライン・
+スコア系 / その他）へ統合した。あわせて「どの実ファイルにも一致しない tier パターン」の
+検出を fail から warn に変更し、未一致件数と一覧は `pnpm verify`（`scripts/gates/verify.mjs`）の
+実行終了時に「未一致 tier パターン N件」として必ず表示する（ファイル改名・削除で計測
+対象が静かに漏れる事故を検知するための必須の付帯出力）。
+
+### §7.2 機械強制不変条件レジストリ
+
+`src/lib/publish/invariants.ts` の `INVARIANTS` 配列は、パイプライン境界で
+**機械的に強制されている**不変条件（`drop` / `degrade` / `throw`）の棚卸しであり、
+`tests/pipeline/invariants.test.ts` がその索引として使う。型・ゲートによる強制を
+伴わない「規約」はここに載せない（載せると「不変条件」の語の信頼性を損なうため）。
+逐語タイトル（`aiTitle` 全経路 null）と discovery 抽出本文の非永続化
+（`originalExcerpt: null` 固定＋`assertNoSliceLeak()` の許可リスト方式）は
+**運用ポリシー上の規約**であり、その法務要件と実装的強制の詳細は §10 第3項・
+第5項に定める。両者の回帰テスト自体は `tests/pipeline/invariants.test.ts` に
+（レジストリの id とは切り離した通常の `describe` として）残している。
 
 ---
 
@@ -539,19 +558,26 @@ LLM には次の 5 項目を **0〜9 の整数**で判定させ（0=完全に該
 組み合わせ（5^5 = 3125 通り）で検証する）:
 
 ```
-gate  = (ceremonyDecision >= 1 && weddingDayContent >= 1) ? USEFULNESS_GATE_BONUS(70) : 0
+gate  = (ceremonyDecision >= 1 && weddingDayContent >= 1) ? USEFULNESS_GATE_BONUS : 0
 score = gate
-      + USEFULNESS_WEIGHT_CEREMONY_DECISION(2) * ceremonyDecision
-      + USEFULNESS_WEIGHT_FIRSTHAND(3)         * firsthand
-      + USEFULNESS_WEIGHT_SPECIFIC(2)          * specific
-      + USEFULNESS_WEIGHT_WEDDING_DAY(2)       * weddingDayContent
-      - USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY(4) * (promotional >= 7)
+      + USEFULNESS_WEIGHT_CEREMONY_DECISION      * ceremonyDecision
+      + USEFULNESS_WEIGHT_FIRSTHAND              * firsthand
+      + USEFULNESS_WEIGHT_SPECIFIC               * specific
+      + USEFULNESS_WEIGHT_WEDDING_DAY            * weddingDayContent
+      - USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY    * (promotional が減点発火閾値以上)
 ```
 
+これらの重み定数・ゲート分の**数値**は `src/lib/constants.ts`
+（`USEFULNESS_GATE_BONUS` / `USEFULNESS_WEIGHT_CEREMONY_DECISION` /
+`USEFULNESS_WEIGHT_FIRSTHAND` / `USEFULNESS_WEIGHT_SPECIFIC` /
+`USEFULNESS_WEIGHT_WEDDING_DAY` / `USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY`）を
+単一の真実とする（spec には値を持たせない）。`promotional` の減点発火閾値は
+`src/lib/scoring/usefulness.ts` の `computeUsefulnessScore()` と
+`src/lib/db/query.ts` の `USEFULNESS_SCORE_SQL` を真実とする。
 各項目は `重み × 値(0〜9)` を独立に加算する。`ceremonyDecision` と
 `weddingDayContent` はそれぞれ加算項でありつつ、両方 `>= 1` のときだけ
-`USEFULNESS_GATE_BONUS` を付ける**ゲート**でもある。`promotional` は `>= 7` の
-ときのみ `USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY(4)` を引く（`0〜6` は無罰則）。
+`USEFULNESS_GATE_BONUS` を付ける**ゲート**でもある。`promotional` は減点発火閾値
+以上のときのみ `USEFULNESS_WEIGHT_PROMOTIONAL_PENALTY` を引く（それ未満は無罰則）。
 
 **ゲートの意義**: 単純な加算項だけにすると「衣装だけの記事だが firsthand=2・
 specific=2・weddingDayContent=2」が「式の中身に効くが浅い記事」を上回り、
@@ -564,15 +590,16 @@ specific=2・weddingDayContent=2」が「式の中身に効くが浅い記事」
 `promotional >= 7` の減点を受けていても、ゲート不通過帯のどれだけ質が高い記事にも
 常に勝つ。
 
-- ゲート不通過の最大 = `9×(W_FIRSTHAND + W_SPECIFIC + W_WEDDING_DAY)` = 9×(3+2+2) = 63
+- ゲート不通過の最大 = `9×(W_FIRSTHAND + W_SPECIFIC + W_WEDDING_DAY)`
   （`ceremonyDecision = 0` の場合。`weddingDayContent = 0` かつ `ceremonyDecision = 9`
-  の場合も `9×(W_CEREMONY + W_FIRSTHAND + W_SPECIFIC)` = 63）
+  の場合も `9×(W_CEREMONY + W_FIRSTHAND + W_SPECIFIC)` で同値）
 - ゲート通過の最小 = `GATE_BONUS + W_CEREMONY×1 + W_WEDDING_DAY×1 - PROMO_PENALTY`
-  （`cd=1, wdc=1, firsthand=0, specific=0, promotional=9`）= 70 + 2 + 2 - 4 = 70 > 63
-- 不変条件 `GATE_BONUS + W_CEREMONY + W_WEDDING_DAY - PROMO_PENALTY > 9×(W_FIRSTHAND + W_SPECIFIC + W_WEDDING_DAY)`
-  を `tests/usefulness-score.test.ts` で定数から式を組み立てて固定している。
-  `USEFULNESS_GATE_BONUS` を 16→70 に引き上げたのは、0-9 化で各項の最大寄与が
-  9/2 倍になり 16 ではこの不変条件が破れていたため。
+  （`cd=1, wdc=1, firsthand=0, specific=0, promotional` は減点発火帯）
+- 不変条件（**性質**。具体的な数値ではなくこの不等式の成立が要件）:
+  `GATE_BONUS + W_CEREMONY + W_WEDDING_DAY - PROMO_PENALTY > 9×(W_FIRSTHAND + W_SPECIFIC + W_WEDDING_DAY)`
+  を `tests/usefulness-score.test.ts` が `src/lib/constants.ts` の定数から式を組み立てて
+  固定している。重み定数の値を動かす場合はこの不等式を保つこと（`USEFULNESS_GATE_BONUS`
+  の JSDoc に導出あり）。
 
 **判断材料が無ければ 0 に倒す**: どの項目も抜粋から情報が得られない場合は 0
 とする（あるだろうと推測して 1/2 にしない。§9.4）。これにより情報不足の記事を
@@ -669,10 +696,6 @@ bump しなければならない。bump がないと `getStaleCurationCandidates
     `WHEN` 節に置き、壊れた行だけを個別にフォールバックさせている。破損した
     行は次回 ingest で signature 不一致として再スコア対象に検出され、自然に
     正しい位置へ復帰する。
-- **速報レーン**（`sourceType: "sns"`、手動 URL 投入）: `publishedAt` 降順を
-  維持する（本セクションの採点対象外）。速報性そのものが価値であることに加え、
-  SNS 投稿には体験談レーンのような本文抜粋が無く、同じルーブリックで採点
-  できないため。
 
 ### §9.7 不変条件
 
@@ -729,7 +752,7 @@ bump しなければならない。bump がないと `getStaleCurationCandidates
 
 1. **元ソースへの導線が最優先 CTA**: すべてのカードにおいて、元投稿・記事へのリンク（または公式埋め込み）を明確なメインアクションとして配置する。
 2. **著作者名の必須クレジット**: 引用（著作権法第32条）の要件を満たすため、カード上に著者名・情報源名を必ず表示する。`sourceName` は常時表示し、`author` は非 null の場合に表示する。
-3. **出力は記事の性質についての言明であり、内容の配達ではない**（ゼロクリック化の回避）:
+3. **出力は記事の性質についての言明であり、内容の配達ではない（トピックタグ等を含む。また公開は (a) 他人の表現（記事本文の逐語断片）を含まず (b) 自らの出力は非創作的な短ラベル（トピックタグ等）に限り (c) 根拠文は決定的テンプレートのみ、という自己記述）**（ゼロクリック化の回避）:
    - **タイトルは `originalTitle`（元記事タイトル）の逐語表示**。AI によるタイトルの生成・書き換えは行わない（`src/components/feed/feed-card.tsx` は `card.originalTitle` をそのまま表示する）。他人の記事タイトルを AI が書き換えて表示する行為は同一性保持権（著作権法第20条、非営利免除の無い人格権）への配慮上、本システムで最も改変に近い操作になるため。`aiTitle` カラムは `posts` に残っているが、`ALTER TABLE` 不可の制約上休眠カラムとして残しているだけで、いずれの摂取経路（RSS 自動巡回・`/admin` 手動投入・discovery）も `markCurated()` 呼び出し時に `aiTitle` を渡さず、値は常に null のままである。discovery 経路では、`extractArticleContainer()` が切り出したコンテナ内の見出し要素（`www.mwed.jp` は `h1.story-detail-main-visual-header__title`）から `originalTitle` を取得し、取得できない場合のみ従来どおり `<title>` タグ由来の値（`記事見出し - 会場名の事例 | みんなのウェディング` のようにサイト名・定型句が付随する）にフォールバックする。これは「元記事タイトルの逐語表示」という本項の要件により忠実な取得手段への変更であり、フォールバック経路自体は引き続き存在する。**この変更は今後取得する記事にのみ適用され、既に `published` として保存済みの投稿（id 233〜237 を含む）の `originalTitle` はバックフィルされない**（h1 由来の値を得るには記事本文の再フェッチが必要なため）。
    - **判定根拠文（`rationaleText`、`post_rationales.rationale_text`）は 38〜210字**とし、記事固有の具体数値（半角・全角数字）を含めないことを方針とする。**ただしこの禁止は機械的には強制されていない**（2026-08-31 訂正）。`CurationItemSchema` に `rationaleText` フィールドは存在せず（根拠文は LLM 出力ではなく `renderRationaleText()` がテンプレートから合成する設計に転換済み）、根拠文へ数字が混入しうる唯一の経路である `topicAnchor` の数値 denylist も 2026-08-29 のゲート緩和（第2段）で撤廃されている。したがって現在の抑止は `RATIONALE_RULES` のプロンプト指示のみに依拠する。下限は `RATIONALE_TEXT_MIN_CHARS`（`src/lib/constants.ts`。値 38）、上限は `RATIONALE_TEXT_MAX_CHARS`（同ファイル。値 210）として、いずれも `renderRationaleText()` 自身が機械的に強制し、逸脱した根拠文は例外を投げて公開させない。
      - **下限38字の決め方（2026-08-25）**: 上限と同じく構造的な値から決めており、実測分布からの帰納ではない。`renderRationaleText()` の出力は `topicAnchor` と有用度 5 つの 0-2 判定値のみで決まる決定的関数だが、`topicAnchor` の理論上の zod 下限（`CurationItemSchema` は `min(1)`）は公開経路には到達しない——`topicAnchor` が1字の場合、`validateTopicAnchor()`（`src/lib/publish/gate.ts`）内の `checkAnchorGrounding()` の `extractFeatureTerms()` が長さ2未満の語を特徴語として採用しないため特徴語ゼロとなり、接地失敗として扱われ、フィードバック付き再試行ののち `topicAnchor=null` で公開（`post_rationales` 行を生成しない＝デグレード）される（各パイプラインは `curateSingle` / `curateBatch` 経由で `validateTopicAnchor` を通し、アンカー検証失敗時は `topicAnchor=null` で公開する）。一方、有用度 5 項目全 0 の投稿を公開前に止める閾値ゲートは存在しない（`computeUsefulnessScore()`＝`src/lib/scoring/usefulness.ts` はソート用のスコアを返すのみで、公開可否の判定には使われない）ことも確認済み。したがって**公開経路に実際に到達しうる構造的最小値**は「`topicAnchor` が最小の2字、有用度 5 項目すべて 0」のケースであり、`renderRationaleText()` で実測すると38字（2026-08-30 のラベル 4 項目化・`weddingDayContent` ラベル文言変更後も 38 字で不変）（`「あい」に関する記事です。自動判定では特筆すべき特徴は検出されませんでした。`）になる。この値は `tests/publish-gate.test.ts` にリテラルで固定している。テンプレート文言を変更した場合はこの構造的最小値を測り直すこと。**2026-08-31 訂正**: 上記の導出は `validateTopicAnchor()` が `checkAnchorGrounding()` を含んでいた時点の記述である。2026-08-29 のゲート緩和（第3段）で接地検証は撤廃され、現在アンカー長を律するのは `checkAnchorLength`（`ANCHOR_MIN_LENGTH = 6`）のみ。したがって「2字」を起点とする導出はもはや成立しないが、実際の下限が 6 字へ上がったことで構造的最小値は 38 字以上にしかならず、`RATIONALE_TEXT_MIN_CHARS = 38` は依然として下回られない。
@@ -744,7 +767,7 @@ bump しなければならない。bump がないと `getStaleCurationCandidates
        - 210字という新上限も**撤廃ではなく機械的な強制**であり、`RATIONALE_TEXT_MAX_CHARS = 210`（`src/lib/constants.ts`）を超えた根拠文は公開処理で拒否される。
      - **公開済み5件（id 233〜237）の扱い**: 上記のとおり id 234・235・237 は150字上限の下では違反状態だったが、今回の210字への改定によりいずれも仕様に適合する（実測最大166字 < 210字）。したがってこれら5件の撤回・再公開処理は不要である。
 
-- **トピックアンカー（`topicAnchor`、`post_rationales.topic_anchor`）は 40字以内**とし、記事が扱う**「具体的な判断・場面・選択肢」**と**この記事ならではの独自性（読者が続きを読みたくなる切り口）**を提示するものとする。文の形（問いかけ・体言止め・述語で結ぶ 等）は指定しない。結論・結果・具体的数値を開示してはならない（不可: 「席次表は親族優先で決めた」「持ち込み料〇万円が免除された」）。アンカーの機械的検証（`validateTopicAnchor`、`src/lib/publish/gate.ts`）は **長さ下限（`ANCHOR_MIN_LENGTH = 6` 字）と個人識別情報 denylist（SNS ハンドル・敬称付き人名）の2点のみ**。検証に失敗した場合は、アンカー生成を 1 回だけフィードバック付きで再試行し、それでも失敗すれば `topicAnchor` を `null` として**投稿を公開（デグレード）**する。公開に至るまで投稿を破棄（ドロップ）することはない。アンカーの語が原文本文に忠実であること（ハルシネーション抑制）は、プロンプト指示（`RATIONALE_RULES`：記事が扱っていない話題を作らない・煽り表現の禁止）と有用度評価タグに委ねる。- **2026-08-29 のゲート大幅緩和（オーナー判断・4段階）**: (第1段) `checkAnchorDenylist` から clickbait 語群（衝撃・必見・やばい・最高・神・感動 等 16 語）と語尾パターン（`しよう$`・`すべき$`・`\d+つの`）を撤廃。(第2段) 数値・漢数字・金額・日付・元号パターンも撤廃——漢数字パターン `/[一二三四…]/` が「二部制」「三次会」「一緒に」等の非数値語を過剰棄却していたのが契機。denylist に残すのは個人識別情報パターンのみ。(第3段) **語彙的接地検証（`checkAnchorGrounding`＝コーパス許可制度）を `validateTopicAnchor` から撤廃**——アンカーの漢字・カタカナ語が元記事本文に逐語で存在することは要求しない。`checkAnchorLength` の下限を 12 → 6 に緩和。`checkAnchorNovelty`（タイトル冗長性 `anchor_redundant_with_title`）も合否に用いない。(第4段) **プロンプト（`RATIONALE_RULES`）から本文語句の逐語使用指定と文型（「問いを立てる節」）指定を削除**し、代わりに「この記事ならではの独自性を続きを読みたくなる形で提示する」クリック誘引ルールを追加。この第4段のプロンプト変更に伴い `CURATION_PROMPT_VERSION` を 9 → 10 に bump した（`curationSignature` が全ブログ投稿で不一致になり、`scripts/backfill-usefulness.mjs --force` で一括再キュレーションできる）。`checkAnchorGrounding` / `checkAnchorNovelty` 関数はログ・単体テスト・将来の再導入のため export されたまま残る。- **改定の経緯（2026-08-28, shared_plan/16）**: §10-3 のトピックアンカー設計をさらに刷新。`shared_plan/15` が導入した「体言止め（名詞で文を終える）」方針を撤回し、読者が抱く問いの形（問いを立てる節）へ変更。接地検証を `checkAnchorGrounding`（トークンレベル＋接続詞許可リストのみ）から `validateTopicAnchor`（文字種非対称の接地＋禁止リスト `checkAnchorDenylist`＋タイトル冗長性 `checkAnchorNovelty`＋長さ `checkAnchorLength`）の合成ゲートへ置換し、検証失敗時の扱いを「終端棄却（ドロップ）」から「フィードバック付き再試行 1 回 → 失敗時は `topicAnchor=null` で公開（デグレード）」へ変更した。数字・固有名詞の禁止は維持する。
+- **トピックアンカー（`topicAnchor`、`post_rationales.topic_anchor`）は 40字以内**とし、記事が扱う**「具体的な判断・場面・選択肢」**と**この記事ならではの独自性（読者が続きを読みたくなる切り口）**を提示するものとする。文の形（問いかけ・体言止め・述語で結ぶ 等）は指定しない。結論・結果・具体的数値を開示してはならない（不可: 「席次表は親族優先で決めた」「持ち込み料〇万円が免除された」）。アンカーの機械的検証（`validateTopicAnchor`、`src/lib/publish/gate.ts`）は **長さ下限（`ANCHOR_MIN_LENGTH = 6` 字）と個人識別情報 denylist（SNS ハンドル・敬称付き人名）の2点のみ**。検証に失敗した場合は、アンカー生成を 1 回だけフィードバック付きで再試行し、それでも失敗すれば `topicAnchor` を `null` として**投稿を公開（デグレード）**する。公開に至るまで投稿を破棄（ドロップ）することはない。アンカーの語が原文本文に忠実であること（ハルシネーション抑制）は、プロンプト指示（`RATIONALE_RULES`：記事が扱っていない話題を作らない・煽り表現の禁止）と有用度評価タグに委ねる。- **2026-08-29 のゲート大幅緩和（オーナー判断・4段階）**: (第1段) `checkAnchorDenylist` から clickbait 語群（衝撃・必見・やばい・最高・神・感動 等 16 語）と語尾パターン（`しよう$`・`すべき$`・`\d+つの`）を撤廃。(第2段) 数値・漢数字・金額・日付・元号パターンも撤廃——漢数字パターン `/[一二三四…]/` が「二部制」「三次会」「一緒に」等の非数値語を過剰棄却していたのが契機。denylist に残すのは個人識別情報パターンのみ。(第3段) **語彙的接地検証（`checkAnchorGrounding`＝コーパス許可制度）を `validateTopicAnchor` から撤廃**——アンカーの漢字・カタカナ語が元記事本文に逐語で存在することは要求しない。`checkAnchorLength` の下限を 12 → 6 に緩和。`checkAnchorNovelty`（タイトル冗長性 `anchor_redundant_with_title`）も合否に用いない。(第4段) **プロンプト（`RATIONALE_RULES`）から本文語句の逐語使用指定と文型（「問いを立てる節」）指定を削除**し、代わりに「この記事ならではの独自性を続きを読みたくなる形で提示する」クリック誘引ルールを追加。この第4段のプロンプト変更に伴い `CURATION_PROMPT_VERSION` を 9 → 10 に bump した（`curationSignature` が全ブログ投稿で不一致になり、`scripts/backfill-usefulness.mjs --force` で一括再キュレーションできる）。**2026-09-01（shared_plan/20 P4）**: 呼び出し元の無くなった休眠関数 `checkAnchorGrounding`（語彙的接地検証）と `checkAnchorNovelty`（タイトル冗長性）を `src/lib/publish/gate.ts` から削除した（git 履歴に残る）。現在アンカーに対する機械的検証は `checkAnchorLength`（下限6字）と `checkAnchorDenylist`（PII）の2点のみ。- **改定の経緯（2026-08-28, shared_plan/16）**: §10-3 のトピックアンカー設計をさらに刷新。`shared_plan/15` が導入した「体言止め（名詞で文を終える）」方針を撤回し、読者が抱く問いの形（問いを立てる節）へ変更。接地検証を `checkAnchorGrounding`（トークンレベル＋接続詞許可リストのみ）から `validateTopicAnchor`（文字種非対称の接地＋禁止リスト `checkAnchorDenylist`＋タイトル冗長性 `checkAnchorNovelty`＋長さ `checkAnchorLength`）の合成ゲートへ置換し、検証失敗時の扱いを「終端棄却（ドロップ）」から「フィードバック付き再試行 1 回 → 失敗時は `topicAnchor=null` で公開（デグレード）」へ変更した。数字・固有名詞の禁止は維持する。
   - **判定テスト**: 読者がクリックせずに情報要求を満たせる出力は、原文の代替物になっている。カードあたり事実は最大1つ、否定的評価（`promotional = "heavy"` 等）は公開画面に一切出さない（§9.8 のスコア非公開と一貫させる）。
   - **既知の乖離の解消（2026-08-26）**: `promotional` の boolean → 3 段階 enum 化（`a8d4f0f`）の時点では、`src/components/feed/feed-card.tsx` が `card.usefulness.promotional === "heavy"` のとき「PR要素あり」バッジをカード上に表示しており、否定的評価を公開画面に一切出さないという本項の原則と実装が一致していなかった（旧仕様では `promotional === true` のときに同種のバッジを表示しており、この乖離自体は enum 化以前から存在していた）。**調査の結果、露出経路は2つあることが判明し、いずれも撤去して原則に実装を合わせた**:
     1.  **バッジ（`src/components/feed/feed-card.tsx`）**: 「PR要素あり」バッジそのものを削除した。あわせて、表示すべきバッジが1つも無い場合にバッジコンテナ自体を描画しないよう修正し、空要素・余白の残留を避けた。
@@ -753,7 +776,7 @@ bump しなければならない。bump がないと `getStaleCurationCandidates
     - **公開済みデータの再生成**: DB に保存済みの `post_rationales.rationale_text` には削除前の文言（`promotional` 由来のラベルを含む根拠文）が残存するため、`scripts/` 配下のバックフィルスクリプトで再生成する。
 
 4. **判定に足る原文テキストが存在しない場合は LLM 判定結果を公開しない（経路非依存の不変条件）**: すべての摂取経路において、LLM キュレーション（`curateSingle`）を呼び出す前に「判定対象となる原文テキストが存在するか」を判定する。「原文テキスト」の定義は経路ごとに異なり、新たな摂取経路を追加する際は必ず本項に定義を追記する。
-   - **SNS 手動投入経路**（`src/lib/pipeline/submit-via-pipeline.ts` の `runSubmitUrlViaPipeline`）: oEmbed が返すキャプション（`embed.title`）と、運営が投稿時に添える補足メモ（`note`、空白のみは「補足なし」として扱う）の 2 つのみを指す。
+   - **SNS 手動投入経路**（現在は廃止）: 旧仕様における SNS 投稿手動投入経路の名残り。現在は Stage 2（投入経路停止）により完全撤去されている。
    - **エバーグリーン経路**（`src/lib/pipeline/evergreen-via-pipeline.ts` の `curateEvergreenUrlViaPipeline`）: OGP メタデータの `og:description` / `<meta name="description">`（`meta.description`）のみを指す。`<title>` / `og:title` は表示ラベルであり判定の材料にしない。本文 DOM は一切読まない（`src/lib/sources/ogp.ts` は meta タグと JSON-LD のみを走査する。`tests/ogp.test.ts` がこの不変条件を固定する）。
    - **discovery 経路**（`src/lib/pipeline/discovery-ingest.ts` の `ingestDiscoveredUrls`）: 取得した記事 HTML から、まず `src/lib/sources/article-text.ts` の `extractArticleContainer()` がホストごとの許可リスト `articleContainerSelectors`（`src/lib/constants.ts` の `HOST_ALLOWLIST` 各エントリ）に従って**記事本文コンテナ**（`www.mwed.jp` は `div.story-detail` を第一候補、`div.produce-story-detail` を次点とする優先順のセレクタ配列）を切り出す。いずれのセレクタにも一致しない場合は `null` を返し、コンテナが存在しない記事は判定対象にしない（破損シグナルとしての扱いは §11 参照）。切り出したコンテナの innerHTML から `extractVisibleText()` でノイズ除去後、その**先頭から最大 1,500 字**を**判定スライス**として抽出する（コンテナ抽出前段が入る以前は「ページ全体の先頭 1,200 字をスキップした後続 1,500 字」であったが、口コミ等の第三者 UGC やナビが判定対象に混入する欠陥があったため、コンテナ抽出後の先頭スライスに変更した）。§10-5 の禁止事項と対になる規律であり、この判定スライスは LLM 入力としてのみ使い DB には一切保存しない。この節は `shared_plan/06-rationale-and-scraping.md` §5.3 に対応する運用規律であり、`src/lib/sources/article-text.ts` と `src/lib/pipeline/discovery-ingest.ts` のコード内コメントが参照する「§5.3」は当該 plan ドキュメントの節番号を指す（spec.md 側の対応内容は本項 §10-3〜§10-5 である）。
    - Instagram のキーなし oEmbed エンドポイント（`graph.facebook.com/.../instagram_oembed`）はキャプション本文を一切返さない（`version` / `provider_name` / `provider_url` / `type` / `width` / `html` のみで `title` が欠落する。2026-08-22 の実リクエストで確認済み）。これに対し YouTube の oEmbed は `title` を返す。
@@ -763,7 +786,7 @@ bump しなければならない。bump がないと `getStaleCurationCandidates
    - 公開の可否は最終的に §9.9 の表示条件（`RATIONALE_DISPLAY_PHASE`）に従う。`status: "pending"` の投稿と `post_rationales` 行が無い投稿はいずれのフェーズでも表示されない。
    - 決定的ゲートを通過した場合は、`curateSingle` によるキュレーション結果を `published` として保存する。
    - **出典クレジット（第 2 項）の解決規則（エバーグリーン経路）**: 出典名は「運営の明示指定（CLI の `--source-name`、前後空白は trim）→ `og:site_name` → URL ホスト名（`www.` を除去した実在ドメイン）」の順で解決する。いずれも解決できない場合、架空のソース名を捏造せずに保存を拒否する（安定コード `"no_source_name"`）。サイト名を示さない固定文字列へのフォールバック生成は禁止。discovery 経路の `sourceName` は `registrableDomain(url)`（解決できなければ対象ホスト名）で決定する（`src/lib/pipeline/discovery-ingest.ts`）。
-5. **抽出本文の永続化禁止**: discovery 経路で取得した本文（記事本文コンテナ抽出（`extractArticleContainer()`）を経た判定スライスの出力）は LLM 判定の入力としてのみ使用し、**`posts` を含むいかなるカラムにも永続化しない**。`src/lib/pipeline/discovery-ingest.ts` の `upsertPostRow()` は `originalExcerpt: null` を常に渡し、discovery 経路由来の投稿の `originalExcerpt` は常に `null` になる。理由は3つ: (a) §10-3/§10-4 の「取得・判定は情報解析、公開は表現を含まない言明」という二層構造を維持できる、(b) 「他人の著作物のデータベース」を新たに作らない、(c) 本文が DB に存在すると将来誰かがそれを要約の材料に使う drift を構造的に防ぐ（無ければ使えない）。エバーグリーン経路・SNS 経路の `originalExcerpt`（`og:description` やキャプション等、配信者自身が公開用に提供したメタデータ）とは性質が異なるため区別すること——discovery 経路の抽出本文は配信者が要約用に提供したものではなく、記事本文からの機械的な抽出（複製）である。
+5. **抽出本文の永続化禁止**: discovery 経路で取得した本文（記事本文コンテナ抽出（`extractArticleContainer()`）を経た判定スライスの出力）は LLM 判定の入力としてのみ使用し、**`posts` を含むいかなるカラムにも永続化しない**。`src/lib/pipeline/discovery-ingest.ts` の `upsertPostRow()` は `originalExcerpt: null` を常に渡し、discovery 経路由来の投稿の `originalExcerpt` は常に `null` になる。理由は3つ: (a) §10-3/§10-4 の「取得・判定は情報解析、公開は (a) 他人の表現（記事本文の逐語断片）を含まず (b) 自らの出力は非創作的な短ラベル（トピックタグ等）に限り (c) 根拠文は決定的テンプレートのみ、という自己記述」という二層構造を維持できる、(b) 「他人の著作物のデータベース」を新たに作らない、(c) 本文が DB に存在すると将来誰かがそれを要約の材料に使う drift を構造的に防ぐ（無ければ使えない）。エバーグリーン経路・SNS 経路の `originalExcerpt`（`og:description` やキャプション等、配信者自身が公開用に提供したメタデータ）とは性質が異なるため区別すること——discovery 経路の抽出本文は配信者が要約用に提供したものではなく、記事本文からの機械的な抽出（複製）である。
    - **バックフィル修復時も非永続**: プロンプト/gate を改善した後、discovery 経路で公開済みの投稿は `originalExcerpt` が空のため通常のバックフィル（`scripts/backfill-usefulness.mjs`、プレフライト `shouldRegenerateAnchor()` が本文なし候補を一律スキップ）では再キュレーションされず、旧基準のトピックアンカーのまま固定される。この救済は `scripts/backfill-mwed-anchors.mjs` が行う——対象は `status = "published"` かつ署名不一致の投稿に限定し、`disciplinedFetch()` で本文を再取得し `extractArticleContainer()` → 判定スライスをメモリ上で復元し、1 回の Gemini バッチリクエストで再キュレーションする。**判定スライスはこの経路でも DB へ書き戻さない**: `markCurated()` へ渡す update は `scripts/lib/mwed-anchor-backfill.mjs` の `assertNoSliceLeak()` がキー許可リスト（`url` / `aiSummary` / `category` / `tag` / `contentHash` / `curationSignature` / `usefulness` / `rationale`）で検証し、違反時は throw して中断する。プレビュー出力もトピックアンカーの新旧のみで本文は表示しない。`originalTitle`・`post_publications`（bodyHash / M4）・`discovery_seen`・公開ゲート（撤回判定）は変更しないため公開状態は変わらない。
 6. **アクセス規律（discovery 経路の本文取得のみに適用。実装 `src/lib/sources/access-discipline.ts`）**:
    - **robots.txt の遵守**: 取得前に必ず確認し、`isAllowed()` が false を返す URL は取得しない（`blocked_robots` として `discovery_seen` を `skipped` にする）。取得結果は 24 時間以内でキャッシュする（RFC 9309 の推奨）。
@@ -890,11 +913,11 @@ bump しなければならない。bump がないと `getStaleCurationCandidates
    - **決定的ゲートの指標**: コンテナ抽出後のテキストに対して
      `textLength` / `linkDensity` / `paragraphCount` の3指標を算出し、
      いずれも `src/lib/constants.ts` の閾値（`MIN_EVIDENCE_INPUT_CHARS`・
-     `MAX_LINK_DENSITY`・`MIN_PARAGRAPH_COUNT`）で判定する。**2026-08-29 の
-     ゲート大幅緩和（オーナー判断）でこの3閾値を `80 / 0.25 / 3` から
-     `30 / 0.70 / 1` に緩めた**——フィード供給量を増やすことを優先し、
+     `MAX_LINK_DENSITY`・`MIN_PARAGRAPH_COUNT`）で判定する。**この3閾値の数値は
+     `src/lib/constants.ts` を単一の真実とする**（2026-08-29 のゲート大幅緩和で
+     供給量優先に引き下げ済み。各定数の JSDoc に旧値と緩和意図を記載）。
      この決定的ゲートは「判定対象テキストが実質的に存在しない（本文なし・
-     純粋なリンク集約ページ）」ケースだけを弾く水準に位置づけ直した。
+     純粋なリンク集約ページ）」ケースだけを弾く水準に位置づけている。
      `container_not_found`（コンテナ抽出自体の失敗）は緩和対象ではなく従来どおり
      終端棄却する。**旧指標
      `boilerplateLineRatio`（`computeBoilerplateLineRatio()`）は廃止した**
@@ -914,17 +937,17 @@ bump しなければならない。bump がないと `getStaleCurationCandidates
 - **校正日**: 2026-08-25 → **2026-08-29 に方針変更**
 - **データソース**: www.mwed.jp（5件の公開記事）
 - **link_density 分布**: min=0.003, max=0.177, avg=0.114
-- **旧設定値**: MAX_LINK_DENSITY = 0.25（max + 40% マージン）
-- **現設定値**: MAX_LINK_DENSITY = 0.70（2026-08-29 のゲート大幅緩和）。実測分布の
-  上限に対する統計マージンではなく、「本文がほぼ無くリンクだけのページ」を弾く
-  ための粗い上限として位置づけ直した。抽出品質ゲート全体（`MIN_EVIDENCE_INPUT_CHARS`・
-  `MAX_LINK_DENSITY`・`MIN_PARAGRAPH_COUNT`）を供給量優先で緩めた一環（§11 項1）。
+- **設定値**: `MAX_LINK_DENSITY` の数値は `src/lib/constants.ts` を単一の真実とする
+  （旧値と校正履歴は同定数の JSDoc）。2026-08-29 の方針変更で、実測分布の上限に対する
+  統計マージンではなく「本文がほぼ無くリンクだけのページ」を弾くための粗い上限として
+  位置づけ直した。抽出品質ゲート全体（`MIN_EVIDENCE_INPUT_CHARS`・`MAX_LINK_DENSITY`・
+  `MIN_PARAGRAPH_COUNT`）を供給量優先で緩めた一環（§11 項1）。
 
 2. **K2（規約変更検知）と allowlist の関係**: `source_policy.tosUrl` は `HOST_ALLOWLIST`（`src/lib/constants.ts` の各エントリの `tosUrl`）から解決する。**allowlist 側が真実の源（source of truth）であり、DB（`source_policy` テーブル）に格納された古い値は allowlist の値で上書きして解決する**（`src/lib/sources/access-discipline.ts`）。allowlist に未登録、または `tosUrl` が未設定のホストは `tosUrl: null` のまま維持され、K2 の対象にならない。
    - **既知の許容トレードオフ（遅延）**: K2 の実行間隔は「1ホストあたり1日1回」であり、`source_policy.checkedAt` 列を robots.txt チェック側と共有している。そのため **robots.txt の変化を検知した直後は、規約チェックが最大1日遅延しうる**。追加専用（append-only）のマイグレーション制約下では列を新設するだけで解決できず、テーブルを分離すると `tosHash` が再び休眠カラム化するリスクを招くため、この遅延は仕様上許容する。
 3. **記事パスのホワイトリスト（`HOST_ALLOWLIST.articlePathPatterns`）**: discovery 対象の URL パスは `src/lib/constants.ts` の `AllowlistedHost.articlePathPatterns` で定義し、**取得前に**2段階で強制する——sitemap からの URL 収集（seed）段階と、本文取得直前の段階。口コミ投稿ページ（`/hall/{hallId}/rev/{commentId}/` 等、記事とはパス構造が異なる投稿単位のページ）はこのパターンに一致しないため、構造的に discovery 対象から除外される。
-4. **日次公開サーキットブレーカー**: `DAILY_PUBLISH_CAP = 150`（`src/lib/constants.ts`）。当日 JST の公開総数がこれに達している場合、以後の新規公開を打ち切る（終端棄却ではなく `rate_capped` として再試行キューへ繰り延べる）。SNS 手動投入・エバーグリーン・discovery の全経路（`src/lib/pipeline/submit-via-pipeline.ts`・`src/lib/pipeline/evergreen-via-pipeline.ts`・`src/lib/pipeline/ingest.ts`・`src/lib/pipeline/discovery-ingest.ts`）で共通の判定関数 `isDailyPublishCapReached()`（`src/lib/pipeline/rate-cap.ts`）を用いる。
-   - **2026-08-29 の方針転換（オーナー判断）**: 旧仕様（`DAILY_PUBLISH_CAP = 15` ＋ `HOST_DAILY_SHARE_MAX = 0.5` で単一ホスト最大 7件/日）は、供給スロットルであると同時に「1ホストがフィードを埋めると、個々のカードが正しくても『中立キュレーション』の主張が集約レベルで偽になる」ことを防ぐ安全弁（旧 plan 07 §6-Q4）だった。**集約レベルの中立性を運用ポリシーから外す**ことに伴い、`HOST_DAILY_SHARE_MAX` を廃止し、単一ホストの当日公開シェアは一切制限しない。`DAILY_PUBLISH_CAP` は供給目標（旧 15件/日）から切り離し、DOM 変更等で一晩に数百件を誤公開する相関カスケード事故だけを止める上限（150）として残す。通常運用でこの値に達することは想定しない。
-   - **回帰防止（plan 07 §14）**: この上限を無効値（10^9 等）に戻すと境界テストが素通りした過去の回帰を踏まえ、`tests/pipeline-ingest.test.ts` / `tests/discovery-ingest.test.ts` の境界テストは `149→公開 / 150→rate_capped` をリテラルで固定する。
-5. **目標フィード供給量**: 明示的な数値目標は置かない（2026-08-29 に旧「15件/日」を撤廃）。供給量は抽出品質ゲート（§11 項1）とキュレーションの通過率に委ね、上限は項4 のサーキットブレーカー（150/日）のみとする。
+4. **日次公開サーキットブレーカー**: `DAILY_PUBLISH_CAP`（値は `src/lib/constants.ts` を単一の真実とする）。当日 JST の公開総数がこれに達している場合、以後の新規公開を打ち切る（終端棄却ではなく `rate_capped` として再試行キューへ繰り延べる）。エバーグリーン・discovery の全経路（`src/lib/pipeline/evergreen-via-pipeline.ts`・`src/lib/pipeline/ingest.ts`・`src/lib/pipeline/discovery-ingest.ts`）で共通の判定関数 `isDailyPublishCapReached()`（`src/lib/pipeline/rate-cap.ts`）を用いる。
+   - **2026-08-29 の方針転換（オーナー判断）**: 旧仕様（`DAILY_PUBLISH_CAP` ＋ `HOST_DAILY_SHARE_MAX` によるホスト別シェア上限）は、供給スロットルであると同時に「1ホストがフィードを埋めると、個々のカードが正しくても『中立キュレーション』の主張が集約レベルで偽になる」ことを防ぐ安全弁（旧 plan 07 §6-Q4）だった。**集約レベルの中立性を運用ポリシーから外す**ことに伴い、`HOST_DAILY_SHARE_MAX` を廃止し、単一ホストの当日公開シェアは一切制限しない。`DAILY_PUBLISH_CAP` は供給目標から切り離し、DOM 変更等で一晩に数百件を誤公開する相関カスケード事故だけを止める上限として残す（現行値は `src/lib/constants.ts`。通常運用で達することは想定しない）。
+   - **回帰防止（plan 07 §14）**: この上限を無効値（10^9 等）に戻すと境界テストが素通りした過去の回帰を踏まえ、`tests/pipeline-ingest.test.ts` / `tests/discovery-ingest.test.ts` の境界テストは「上限直下の1件は公開 / 上限到達で `rate_capped`」の2ケースを固定する（境界値は `src/lib/constants.ts` の `DAILY_PUBLISH_CAP` を基準とする）。
+5. **目標フィード供給量**: 明示的な数値目標は置かない（2026-08-29 に旧供給目標を撤廃）。供給量は抽出品質ゲート（§11 項1）とキュレーションの通過率に委ね、上限は項4 のサーキットブレーカー（`DAILY_PUBLISH_CAP` / 日）のみとする。
 6. **`RetractionReason` と撤回 CLI**: `RetractionReason`（`src/lib/types.ts`）に `takedown_request` を追加した。4つの客観的トリガ（`source_gone` / `robots_disallowed` / `tos_changed` / `body_changed`）と異なり、**`takedown_request` のみが人間の判断による撤回**であり、自動検知パイプラインからは設定されない。撤回は `pnpm retract`（`scripts/retract.mjs`）で行う——既定は dry-run（対象一覧の表示のみ、DB 変更なし）、接続先を明示し、`--reason` は必須（既定値なし）で人間に毎回明示させる。実際に撤回するには `--yes`（または `--execute`）を要する。

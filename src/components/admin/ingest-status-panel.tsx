@@ -37,7 +37,7 @@ export function IngestStatusPanel({ summary, cooldownUntil }: IngestStatusPanelP
       className={cn(
         "flex flex-col gap-5 rounded-2xl border bg-[var(--color-surface)] p-5 shadow-[var(--shadow-card)] sm:p-6",
         status === "incomplete"
-          ? "border-[var(--color-trend)]/40 border-t-4 border-t-[var(--color-trend)]"
+          ? "border-[var(--color-border)] border-t-4 border-t-[var(--color-muted-foreground)]"
           : "border-[var(--color-border)]",
       )}
     >
@@ -57,8 +57,11 @@ export function IngestStatusPanel({ summary, cooldownUntil }: IngestStatusPanelP
       </header>
 
       {status === "incomplete" && summary && (
-        <div className="flex items-start gap-2.5 rounded-xl border border-[var(--color-trend)]/30 bg-[var(--color-trend-tint-a)]/40 px-4 py-3">
-          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-[var(--color-trend)]" aria-hidden />
+        <div className="flex items-start gap-2.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-hover)] px-4 py-3">
+          <AlertTriangle
+            className="mt-0.5 size-4 shrink-0 text-[var(--color-muted-foreground)]"
+            aria-hidden
+          />
           <p className="text-[13px] leading-jp-body tracking-jp-body text-[var(--color-foreground)]">
             前回の実行が完了していません（タイムアウトまたは異常終了の可能性があります）。開始:{" "}
             <TimeLabel iso={summary.startedAt} />

@@ -35,6 +35,11 @@ const USEFULNESS_FIELDS = {
 // 禁止語を含まず、タイトル「投稿N」に無い語（投稿）を含むため新規性も満たす。
 const RATIONALE_FIELDS = {
   topicAnchor: "投稿の本文を知る理由を比べる",
+  topics: ["テーマ", "進行"],
+};
+
+const TOPIC_FIELDS = {
+  topics: ["テーマ", "進行"],
 };
 
 function batchJson(items: Array<{ index: number; title: string }>) {
@@ -47,6 +52,7 @@ function batchJson(items: Array<{ index: number; title: string }>) {
       tag: "trend",
       ...USEFULNESS_FIELDS,
       ...RATIONALE_FIELDS,
+      ...TOPIC_FIELDS,
     })),
   });
 }
@@ -249,6 +255,7 @@ describe("curatePosts", () => {
       category: "衣装・ドレス" as const,
       tag: "trend" as const,
       ...USEFULNESS_FIELDS,
+      topics: ["会場選び", "費用"],
     };
 
     it("keeps anchor if passing on first try", async () => {
@@ -385,6 +392,7 @@ describe("curateSingle", () => {
           tag: "trend",
           ...USEFULNESS_FIELDS,
           ...RATIONALE_FIELDS,
+          ...TOPIC_FIELDS,
         }),
       ),
     );
@@ -407,6 +415,7 @@ describe("curateSingle", () => {
             tag: "trend",
             ...USEFULNESS_FIELDS,
             topicAnchor: "短",
+            ...TOPIC_FIELDS,
           }),
         ),
       )
@@ -419,6 +428,7 @@ describe("curateSingle", () => {
             tag: "trend",
             ...USEFULNESS_FIELDS,
             topicAnchor: "短",
+            ...TOPIC_FIELDS,
           }),
         ),
       );
@@ -457,6 +467,7 @@ describe("curateBatch gate integration (D5 degrade)", () => {
               tag: "trend",
               ...USEFULNESS_FIELDS,
               topicAnchor: "短",
+              ...TOPIC_FIELDS,
             },
           ],
         }),

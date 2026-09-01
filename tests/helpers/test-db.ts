@@ -27,6 +27,7 @@ const KNOWN_TABLES = [
   "post_usefulness",
   "post_usefulness_criteria",
   "post_rationales",
+  "post_topics",
   "discovery_seen",
   "discovery_run",
   "source_policy",

@@ -70,6 +70,28 @@ const RATIONALE_RULES = `# topicAnchor のルール（必ず守ること）
 - 禁止: 記事固有の具体数値（半角/全角/漢数字・金額・日付）、人物の氏名・ニックネーム・SNS アカウント名・個人と結びつく会場名・店舗名。煽り・価値付与（衝撃/必見/実は/知らないと損/最強/絶対/驚愕/やばい/話題/最高/究極/世界一 等）、二人称命令（〜しよう/〜すべき）、メタ表現（〜についての記事/〜を紹介 等）。
 - 表題非重複: タイトルの単なる言い換えにしない。タイトルに無い視点・場面・争点を必ず一つ足すこと。`;
 
+const TOPIC_RULES = `# トピックタグのルール（topicAnchor とは別物。必ず守ること）
+- 目的: 読者がフィードを走査しやすくするための分類ラベル。閲覧性・分類・将来の絞り込み用。
+- 個数: 2〜4個。必ずしも4個埋める必要はない。素材の薄い記事は少なくてよい。
+- 形式: 短い名詞句（2〜10字）。文の断片・助詞・活用語尾で終わらない。記号・URL・絵文字・句読点を含めない。数字を含めない。
+- 集合として: 重複しないこと。同じ意味の言い換えを複数並べないこと。
+- topicAnchor との関係: トピックが「記事の話題を名指す」分類子である一方、topicAnchor は「読む理由」。トピックとアンカーが話題レベルで重なっても構わない。
+- 固有名詞: 原タイトルに出現する固有名詞（会場名・サービス名等）のみ許可する。タイトルに無い固有名詞は発明とみなし載せない。
+- 禁止: 個人を特定する情報（氏名・SNSアカウント・個人と結びつく会場名）。煽り・優劣断定・医療・法律・金銭の断定。`;
+
+const FEWSHOT_TOPICS = `# トピックタグの例（タイトル → 良いトピック集合）
+[例1]
+タイトル: 結婚式準備を一人で進める心構え
+トピック: ["準備の進め方", "心構え"]  ← 短い名詞句のみ。ここでは節を作らない。
+[例2]
+タイトル: 式場見学で確認すべきポイント
+トピック: ["式場見学", "確認ポイント"]
+[例3]
+タイトル: 見積もりを比較する際の注意点
+トピック: ["見積もり比較", "注意点"]
+
+※上記は topicAnchor の負例（「結婚式準備」「式場見学」「見積もり比較」）と同じ語だが、トピックタグは分類子であり表題との重複は許容される。故に正例として使える。ただし文字数・数字・PII・記号の禁止だけは厳守すること。`;
+
 const FEWSHOT_ANCHOR = `# 例（タイトル → 弱いアンカー → 強いアンカー → なぜ強いか）
 
 [例1]
@@ -150,9 +172,13 @@ ${USEFULNESS_CRITERIA_RULES}
 ${RATIONALE_RULES}
 
 ${FEWSHOT_ANCHOR}
+
+${TOPIC_RULES}
+
+${FEWSHOT_TOPICS}
 ${feedbackBlock}
 出力形式:
-{"title":"...","summary":"...","category":"...","tag":"trend","firsthand":5,"ceremonyDecision":5,"specific":5,"weddingDayContent":5,"promotional":0,"topicAnchor":"..."}
+{"title":"...","summary":"...","category":"...","tag":"trend","firsthand":5,"ceremonyDecision":5,"specific":5,"weddingDayContent":5,"promotional":0,"topicAnchor":"...","topics":["トピック1","トピック2"]}
 `;
 }
 
@@ -177,7 +203,11 @@ ${RATIONALE_RULES}
 
 ${FEWSHOT_ANCHOR}
 
+${TOPIC_RULES}
+
+${FEWSHOT_TOPICS}
+
 出力形式:
-{"items":[{"index":1,"title":"...","summary":"...","category":"...","tag":"trend","firsthand":5,"ceremonyDecision":5,"specific":5,"weddingDayContent":5,"promotional":0,"topicAnchor":"..."}, ...]}
+{"items":[{"index":1,"title":"...","summary":"...","category":"...","tag":"trend","firsthand":5,"ceremonyDecision":5,"specific":5,"weddingDayContent":5,"promotional":0,"topicAnchor":"...","topics":["トピック1","トピック2"]}, ...]}
 `;
 }

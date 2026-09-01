@@ -82,6 +82,7 @@ function geminiResponse(topicAnchor: string, overrides: Partial<Record<string, u
         weddingDayContent: 0,
         promotional: 0,
         topicAnchor,
+        topics: ["トピック1", "トピック2"],
         ...overrides,
       },
     ],
@@ -225,7 +226,7 @@ describe("再試行キュー由来候補の終端棄却でキュー行が削除�
   // 実際に修正したバグは「RSS だけ掃除され、evergreen / submit にゾンビが残る」
   // というレーン限定の欠陥だった。lane を固定したテストだけでは、同型の退行を
   // 入れても1件も落ちないことを変異テストで確認したため、3レーンを回す。
-  it.each(["rss", "evergreen", "submit"] as const)(
+  it.each(["rss", "evergreen"] as const)(
     "%s レーン: title_filter の終端棄却でキュー行が掃除される（レーン非依存）",
     async (lane) => {
       const candidate = makeCandidate({

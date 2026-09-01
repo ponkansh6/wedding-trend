@@ -93,8 +93,8 @@ if ! grep -q "ウエディング・トレンド" "$BODY_FILE"; then
   echo "❌ [smoke] page did not render (missing 'ウエディング・トレンド' heading)"
   exit 1
 fi
-if ! grep -q "速報はまだありません" "$BODY_FILE"; then
-  echo "❌ [smoke] empty-state not rendered (missing '速報はまだありません')"
+if ! grep -q "定番の体験談はまだありません" "$BODY_FILE"; then
+  echo "❌ [smoke] empty-state not rendered (missing '定番の体験談はまだありません')"
   exit 1
 fi
 

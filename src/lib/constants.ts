@@ -61,8 +61,10 @@ export const LLM_SINGLE_MAX_TOKENS = 800;
  * v11 (2026-08-30, オーナー判断): 有用度判定を全項目 boolean → 0/1/2 の三段階へ。`specific` を「当日の実施内容の具体性」、`weddingDayContent` を「フルパッケージ結婚式の当日内容か」に再定義し、`preDecisionOrPhotoShoot` を廃止（`weddingDayContent = 0` に吸収）。判定項目は 5 つ（firsthand / ceremonyDecision / specific / weddingDayContent / promotional、すべて 0-2）。USEFULNESS_CRITERIA_RULES を全面書き換え。bump により全投稿再キュレーション（spec §9.3）。
  * v12 (2026-08-30, オーナー判断): v11 再キュレーションで小モデルが 5 項目ほぼすべて 2 を返し、上位 21 件が同点（score 34）で掲載順が実質新着順になっていた。USEFULNESS_CRITERIA_RULES の「スケールの使い方」を書き換え、`1 = 該当する（標準）` / `2 = 例外的に突出している場合のみ（目安: 上位 2〜3 割）` / 迷ったら低い方、を明示。bump により全投稿再キュレーション。
  * v13 (2026-08-30, オーナー判断): v12 の 0-2 でも小モデルの分解能が不足したため、判定レンジを 0-2 → 0〜9 の整数に拡張（スケール帯を明示）。あわせて weddingDayContent を「厳密に挙式・披露宴が実際に行われた当日の実施内容」と強調し、前撮り・リハーサル・準備・式場探し・後日談のみは 0 とする指示を追加。重み定数据え置き、USEFULNESS_GATE_BONUS 16→70。bump により全投稿再キュレーション。
+ * v14 (2026-08-30, オーナー判断): weddingDayContent のスコアリングを時制・根拠ベースへ。当日に実際に起きた事実（過去形/完了形で記述された挙式・披露宴の実施内容）のみを対象とし、準備・計画・予定表記（未来形）は対象外とした（USEFULNESS_CRITERIA_RULES を書き換え）。bump により全投稿再キュレーション（spec §9.3）。
+ * v15 (2026-08-31, shared_plan/18): トピックタグを追加。USEFULNESS_CRITERIA_RULES は不変のまま、TOPIC_RULES と FEWSHOT_TOPICS を新設して CurationItemSchema に topics（2〜4件・2〜10字・数字禁止）を追加。bump により全投稿の curationSignature が不一致になり、backfill-usefulness.mjs --force で一括再キュレーションできる（spec §10-3）。
  */
-export const CURATION_PROMPT_VERSION = 14;
+export const CURATION_PROMPT_VERSION = 15;
 export const RATIONALE_PROMPT_VERSION = "rationale-v2";
 /** フィード表示条件のフェーズ。phase1: 移行期（レガシー対 OR 根拠存在）/ phase2: 根拠のみ。 */
 export const RATIONALE_DISPLAY_PHASE = "phase1" as const;
@@ -99,19 +101,15 @@ export const MIN_EVIDENCE_INPUT_CHARS = 30;
  * 下限文字数。`renderRationaleText()` 自身がこの値を下回ったら例外を投げる
  * （上限側と対称）。
  *
- * 値は「公開経路に実際に到達しうる」構造的最小値——理論上の zod 下限
- * （`topicAnchor` は `CurationItemSchema` 上 `min(1)`）ではない。`topicAnchor`
- * が1字の場合、`checkAnchorGrounding()`（`src/lib/publish/gate.ts`）の
- * `extractFeatureTerms()` が長さ2未満の語を特徴語として採用しないため
- * 特徴語ゼロとなり `anchor_ungrounded` で終端棄却され、公開経路に乗らない
- * （`src/lib/pipeline/ingest.ts` / `evergreen.ts` / `discovery-ingest.ts` は
- * いずれも `publishPost`/`status: "published"` の前に `checkAnchorGrounding()`
- * を通す）。有用度スコア（`computeUsefulnessScore()`）側には公開を止める
- * 閾値ゲートが無く、有用度6項目すべて false の投稿も公開されうることは
- * 確認済み。したがって公開経路上の構造的最小値は「`topicAnchor` が
- * `checkAnchorGrounding()` を通過する最小の2字、有用度6項目すべて false」
- * のケースであり、`renderRationaleText()` の実測値は 38 字
- * （`tests/publish-gate.test.ts` にリテラル固定）。
+ * 値は構造的最小値——理論上の zod 下限（`topicAnchor` は
+ * `CurationItemSchema` 上 `min(1)`）ではない。公開経路のアンカー長下限は
+ * `validateTopicAnchor()`（`src/lib/publish/gate.ts`）の `checkAnchorLength`
+ * （`ANCHOR_MIN_LENGTH = 6`）で、これを下回るアンカーは再試行後 `topicAnchor=null`
+ * でデグレード公開される。有用度スコア（`computeUsefulnessScore()`）側には
+ * 公開を止める閾値ゲートが無く、有用度6項目すべて false の投稿も公開され
+ * うることは確認済み。`renderRationaleText()` 自身はアンカー長を検証しない
+ * 純関数のため、下限の測定には 2 字アンカー・有用度全 false を用いており、
+ * その実測値が 38 字（`tests/publish-gate.test.ts` にリテラル固定）。
  */
 export const RATIONALE_TEXT_MIN_CHARS = 38;
 /**

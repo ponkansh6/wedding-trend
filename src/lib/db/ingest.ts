@@ -22,10 +22,12 @@ import {
   posts,
   postUsefulnessCriteria,
   postRationales,
+  postTopics,
   config,
   postRemovals,
   sourcePolicy,
 } from "./schema";
+import { CURATION_PROMPT_VERSION } from "@/lib/constants";
 import type { Category, EmbedProvider, PostStatus, SourceType, TrendTag } from "@/lib/types";
 import type { UsefulnessCriteria } from "@/lib/scoring/usefulness";
 import type { NonEphemeralString } from "@/lib/types/judgment";
@@ -229,6 +231,8 @@ export interface CurationUpdate {
     modelId: string;
     promptVersion: string;
   };
+  topics?: string[];
+  promptVersion?: string | number;
 }
 
 /** キュレーション結果を書き込む。バッチ→個別フォールバック。 */
@@ -341,6 +345,20 @@ export async function markCurated(
           .values(rationaleValues)
           .onConflictDoUpdate({ target: postRationales.postId, set: rationaleValues }),
       );
+    }
+    const postId = urlToId.get(u.url);
+    if (postId !== undefined && u.topics) {
+      const promptVersionStr = String(u.promptVersion ?? CURATION_PROMPT_VERSION);
+      stmts.push(db.delete(postTopics).where(eq(postTopics.postId, postId)));
+      if (u.topics.length > 0) {
+        const topicRows = u.topics.map((topic, idx) => ({
+          postId,
+          position: idx,
+          topic,
+          promptVersion: promptVersionStr,
+        }));
+        stmts.push(db.insert(postTopics).values(topicRows));
+      }
     }
     return stmts;
   };

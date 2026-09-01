@@ -1,5 +1,4 @@
 import { ChevronDown, Settings2 } from "lucide-react";
-import { SubmitUrlForm } from "@/components/admin/submit-url-form";
 
 /**
  * 運用者専用コントロール（SNS URL 投入）をまとめた折りたたみパネル。
@@ -25,7 +24,9 @@ export function OperatorPanel() {
         <p className="text-[12px] font-semibold text-[var(--color-foreground)]">
           速報レーンにSNS投稿を追加
         </p>
-        <SubmitUrlForm />
+        <p className="text-[12px] text-[var(--color-muted-foreground)]">
+          SNS投稿の直接投入機能は廃止されました。
+        </p>
       </div>
     </details>
   );

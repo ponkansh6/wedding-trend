@@ -4,10 +4,10 @@
  * ここに置く関数はすべて純粋関数（DB・ネットワーク・ファイルシステムに一切
  * 触れない）。パイプラインへの結線（どこでこれらを呼ぶか）は別レーンが担う。
  *
- * このモジュールが閉じる経路は3つ:
+ * このモジュールが閉じる経路:
  * - `filterTitle`: 第三者（元サイト）が書いた逐語タイトルの無検閲公開
- * - `checkAnchorGrounding`: LLM が出力する `topicAnchor`（プロンプトインジェクション
- *   の主要な出口になりうる）を、取得本文に逐語で存在する語だけに制限する
+ * - `validateTopicAnchor`（`checkAnchorLength` + `checkAnchorDenylist`）:
+ *   LLM が出力する `topicAnchor` の長さ下限と個人識別情報 denylist を機械強制する
  * - `renderRationaleText`: 根拠文を LLM の自由生成から締め出し、
  *   構造化フィールド（`topicAnchor` + 6 boolean）からの決定的なテンプレート
  *   生成に置き換える（plan 07 §6-Q5）
@@ -84,15 +84,15 @@ export function filterTitle(title: string): GateResult {
 }
 
 // ─────────────────────────────────────────────────────────────
-// checkAnchorGrounding（M1: topicAnchor の語彙的接地）
+// トピックアンカーの特徴語抽出（extractFeatureTerms / validateTopics で使用）
 // ─────────────────────────────────────────────────────────────
 
 /**
  * `topicAnchor` を、日本語の助詞・句読点・空白で区切ることで特徴語候補に
  * 分割する。形態素解析には依存しない（plan 07 §5-M1 の方針どおり）ため、
  * 助詞が語の内部に現れるケース（例:「におい」の "に"）を誤って分割する
- * ことがあり得るが、fail-closed な接地チェックとしては安全側に働く
- * （分割された断片が本文に無ければアンカーごと棄却されるため）。
+ * ことがあり得る。現在は `validateTopics` の固有名詞タイトル接地と
+ * `curateBatch` の再試行フィードバック生成でのみ使う。
  */
 const PARTICLE_SPLIT_RE =
   /(?:の|を|に|は|が|で|と|も|や|から|まで|より|へ|・|、|。|「|」|【|】|\[|\]|\(|\)|\s+)/g;
@@ -121,12 +121,8 @@ function normalizeForGrounding(s: string): string {
   return s.normalize("NFKC").replace(/\s+/g, "").toLowerCase();
 }
 
-// ─────────────────────────────────────────────────────────────
-// checkAnchorPersonalInfo / D3 Denylist / D4 Novelty / D6 Length / validateTopicAnchor
-// ─────────────────────────────────────────────────────────────
-
-function isHiraganaContaining(s: string): boolean {
-  return /[ぁ-ゟ]/.test(s);
+function isLikelyProperNoun(topic: string): boolean {
+  return /[\u30A0-\u30FF]/.test(topic);
 }
 
 /**
@@ -157,22 +153,6 @@ export function checkAnchorDenylist(topicAnchor: string): GateResult {
   return { ok: true };
 }
 
-export function checkAnchorNovelty(topicAnchor: string, title: string): GateResult {
-  const anchorTerms = extractFeatureTerms(topicAnchor).filter(
-    (t) => t.length >= 2 && !CONNECTOR_ALLOWLIST.has(t),
-  );
-  if (anchorTerms.length === 0) {
-    return { ok: true };
-  }
-  const titleTerms = new Set(extractFeatureTerms(title).map(normalizeForGrounding));
-  const normalizedAnchorTerms = anchorTerms.map(normalizeForGrounding);
-  const allInTitle = normalizedAnchorTerms.every((term) => titleTerms.has(term));
-  if (allInTitle) {
-    return { ok: false, reason: "anchor_redundant_with_title", missingTerms: [] };
-  }
-  return { ok: true };
-}
-
 /** アンカー長の下限。2026-08-29 のゲート緩和で 12 → 6。 */
 export const ANCHOR_MIN_LENGTH = 6;
 
@@ -193,22 +173,111 @@ export function validateTopicAnchor(
   const denyRes = checkAnchorDenylist(topicAnchor);
   if (!denyRes.ok) return denyRes;
 
-  // 2026-08-29 のゲート緩和:
-  // - 語彙的接地検証（`checkAnchorGrounding` / コーパス許可制度）はオーナー判断で
-  //   `validateTopicAnchor` から外した。アンカーの語が元記事本文に逐語で存在する
-  //   ことは要求しない。ハルシネーション抑制はプロンプト指示（`RATIONALE_RULES`
-  //   で本文語句を使うよう明示）と有用度評価タグに委ねる。
-  // - タイトル冗長性（`checkAnchorNovelty` / `anchor_redundant_with_title`）も
-  //   公開可否には用いない。
-  // 両関数（`checkAnchorGrounding` / `checkAnchorNovelty`）はログ・将来の再導入・
-  // 単体テストのために export されたまま残す。
+  // 2026-08-29 のゲート緩和で、語彙的接地検証（コーパス許可制度）とタイトル冗長性
+  // 検証は `validateTopicAnchor` から外れた。アンカーの語が元記事本文に逐語で存在
+  // することは要求しない。ハルシネーション抑制はプロンプト指示と有用度評価タグに
+  // 委ねる。shared_plan/20 P4 で、呼び出し元の無かった休眠関数
+  // `checkAnchorGrounding` / `checkAnchorNovelty` は削除した（git 履歴に残る）。
+  // 現在アンカーに対する機械的検証は上記2点（長さ下限・PII denylist）のみ。
 
   return { ok: true };
 }
 
-// ─────────────────────────────────────────────────────────────
-// checkAnchorPersonalInfo（個人識別情報の検知）
-// ─────────────────────────────────────────────────────────────
+export type TopicsGateResult =
+  | { ok: true; topics: string[] }
+  | { ok: false; dropped: string[]; reasons: Record<string, string> };
+
+const PUNCTUATION_OR_SYMBOL_RE = /[\p{P}\p{S}\s]+/u;
+const DIGIT_RE = /[0-9０-９]/u;
+
+export function validateTopics(
+  topics: string[],
+  originalTitle: string,
+  opts?: { topicAnchor?: string },
+): TopicsGateResult {
+  const kept: string[] = [];
+  const dropped: string[] = [];
+  const reasons: Record<string, string> = {};
+
+  const titleTerms = new Set(extractFeatureTerms(originalTitle).map(normalizeForGrounding));
+
+  // 重複排除のための Set（normalize 済み文字列をキーにする）
+  const seenNormalized = new Set<string>();
+
+  for (const rawTopic of topics) {
+    const trimmed = rawTopic.trim();
+    const normalized = trimmed.normalize("NFKC");
+
+    // 1. 長さチェック (2〜10字)
+    if (normalized.length < 2 || normalized.length > 10) {
+      dropped.push(rawTopic);
+      reasons[rawTopic] = "length_out_of_bounds";
+      continue;
+    }
+
+    // 2. 数字禁止
+    if (DIGIT_RE.test(normalized)) {
+      dropped.push(rawTopic);
+      reasons[rawTopic] = "contains_digit";
+      continue;
+    }
+
+    // 3. 記号・URL・絵文字・句読点・空白の禁止
+    if (PUNCTUATION_OR_SYMBOL_RE.test(normalized) || EMOJI_RE.test(normalized)) {
+      dropped.push(rawTopic);
+      reasons[rawTopic] = "contains_symbol_or_punctuation";
+      continue;
+    }
+
+    // 4. PII denylist
+    if (containsPersonalInfoPattern(normalized)) {
+      dropped.push(rawTopic);
+      reasons[rawTopic] = "contains_pii";
+      continue;
+    }
+
+    // 5. topicAnchor と同一なら除外
+    if (opts?.topicAnchor && normalized === opts.topicAnchor.normalize("NFKC").trim()) {
+      dropped.push(rawTopic);
+      reasons[rawTopic] = "identical_to_anchor";
+      continue;
+    }
+
+    // 6. 重複排除
+    const key = normalized.toLowerCase();
+    if (seenNormalized.has(key)) {
+      dropped.push(rawTopic);
+      reasons[rawTopic] = "duplicate_topic";
+      continue;
+    }
+
+    // 7. 固有名詞のタイトル接地（カタカナを含むトピックのみ接地チェックを適用。主要語のいずれかがタイトルに含まれれば許可）
+    if (isLikelyProperNoun(normalized)) {
+      const topicTerms = extractFeatureTerms(normalized).filter(
+        (t) => t.length >= 2 && !CONNECTOR_ALLOWLIST.has(t),
+      );
+      if (topicTerms.length > 0) {
+        const hasAny = topicTerms.some((term) => titleTerms.has(normalizeForGrounding(term)));
+        if (!hasAny) {
+          dropped.push(rawTopic);
+          reasons[rawTopic] = "ungrounded_proper_noun";
+          continue;
+        }
+      }
+    }
+
+    seenNormalized.add(key);
+    kept.push(normalized);
+  }
+
+  // 最大4件に切り詰め（安全化）
+  const finalTopics = kept.slice(0, 4);
+
+  return {
+    ok: true,
+    topics: finalTopics,
+  };
+}
 
 /**
  * 敬称の直前に付く一般名詞（人物を指さない用法）。「〜さん」等の敬称
@@ -287,54 +356,6 @@ function containsPersonalInfoPattern(text: string): boolean {
   return findPersonalInfoMatchRule(text) !== null;
 }
 
-/**
- * topicAnchor の語彙的接地（plan 07 §5-M1）。アンカーから抽出した
- * 2文字以上の特徴語すべてが、取得本文（`bodyText`）に逐語で存在することを
- * 要求する。1つでも欠ければ棄却。特徴語が1つも抽出できないアンカーも
- * 棄却する（接地を検証できないため fail-closed）。
- *
- * 個人識別情報らしきパターン（敬称付き氏名・SNS ハンドル）を含む場合も
- * 同じく棄却する。専用の `DropReason` は追加せず、既存の
- * `anchor_ungrounded` を流用している——どちらも「このアンカーは公開できる
- * 形で接地していない」という同じ意味の終端棄却であり、区別が必要になった
- * 場合は `src/lib/types.ts` の担当レーンで新値を検討すること。
- *
- * 誤棄却率を計測できるよう、棄却時は `missingTerms` に本文中に無かった語を
- * 詰めて返す（`missingTerms.length === 0` は「特徴語ゼロ」または個人識別
- * 情報パターンの検知による棄却を表す）。
- */
-export function checkAnchorGrounding(topicAnchor: string, bodyText: string): GateResult {
-  if (containsPersonalInfoPattern(topicAnchor)) {
-    return { ok: false, reason: "anchor_ungrounded", missingTerms: [] };
-  }
-
-  const terms = extractFeatureTerms(topicAnchor);
-  if (terms.length === 0) {
-    return { ok: false, reason: "anchor_ungrounded", missingTerms: [] };
-  }
-
-  const normalizedBody = normalizeForGrounding(bodyText);
-  const missingTerms: string[] = [];
-
-  for (const term of terms) {
-    if (CONNECTOR_ALLOWLIST.has(term)) continue;
-    if (term.length < 2) continue;
-    // D2: hiragana-containing tokens (predicates, connectors, quoted frames) are
-    // free — they carry no fabrication-prone content word. Only kanji-only /
-    // katakana-only / other content tokens must literally exist in the corpus.
-    if (isHiraganaContaining(term)) continue;
-    if (!normalizedBody.includes(normalizeForGrounding(term))) {
-      missingTerms.push(term);
-    }
-  }
-
-  if (missingTerms.length > 0) {
-    return { ok: false, reason: "anchor_ungrounded", missingTerms };
-  }
-
-  return { ok: true };
-}
-
 // ─────────────────────────────────────────────────────────────
 // renderRationaleText（Q5: rationaleText のテンプレート化）
 // ─────────────────────────────────────────────────────────────
@@ -409,10 +430,10 @@ export function renderRationaleText(input: RationaleTemplateInput): string {
 
   // 下限側も上限側と対称に扱う。決定的テンプレートである以上、下限割れも
   // 入力データの異常ではなく実装バグ（ラベル文言の削除・組み立てロジックの
-  // 変更等）を意味する。呼び出し元（ingest / evergreen / discovery-ingest）は
-  // いずれも公開前に `checkAnchorGrounding()` を通しているため、ここに届く
-  // `topicAnchor` は既に2字以上の接地済み特徴語を含む——この関数に単独で
-  // min(1) の入力が渡ることは想定しない。
+  // 変更等）を意味する。呼び出し元は公開前に `validateTopicAnchor()`
+  // （`checkAnchorLength` の下限 6 字）を通しているため、ここに届く
+  // `topicAnchor` は通常 6 字以上——この関数に単独で min(1) の入力が
+  // 渡ることは想定しない。
   if (text.length < RATIONALE_TEXT_MIN_CHARS) {
     throw new Error(
       `[gate] renderRationaleText() produced ${text.length} chars, below ` +

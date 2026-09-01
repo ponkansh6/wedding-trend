@@ -41,6 +41,12 @@ const TitleSchema = z
  */
 const CriterionLevelSchema = z.number().int().min(0).max(9);
 
+const TopicSchema = z
+  .string()
+  .min(2)
+  .max(10)
+  .refine((t) => !/[0-9０-９]/u.test(t), { message: "トピックに数字を含めない" });
+
 export const CurationItemSchema = z.object({
   index: z.number().int(),
   title: TitleSchema,
@@ -54,11 +60,20 @@ export const CurationItemSchema = z.object({
   promotional: CriterionLevelSchema,
   /**
    * 記事の主題となるトピックのアンカー（40字以内）。
-   * plan 07 §5-M1: 公開前に `src/lib/publish/gate.ts` の
-   * `checkAnchorGrounding()` で取得本文への語彙的接地を検証すること
-   * （このスキーマ自体は接地を検証しない —— 本文はここには無いため）。
+   * 公開前に `src/lib/publish/gate.ts` の `validateTopicAnchor()`
+   * （長さ下限6字 + 個人識別情報 denylist）で検証する
+   * （このスキーマ自体はそれらを検証しない）。
    */
   topicAnchor: z.string().min(1).max(40),
+  topics: z.array(z.unknown()).transform((arr) =>
+    arr
+      .map((t) => {
+        const parsed = TopicSchema.safeParse(t);
+        return parsed.success ? parsed.data : null;
+      })
+      .filter((t): t is string => t !== null)
+      .slice(0, 4),
+  ),
   // rationaleText と evidenceSufficient は plan 07 §6-Q1/Q5 によりここでは
   // 受け取らない。根拠文は `renderRationaleText()`（`src/lib/publish/gate.ts`）
   // が topicAnchor + 上記 boolean から決定的に生成し、evidenceSufficient は

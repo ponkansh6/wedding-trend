@@ -9,7 +9,7 @@
   - `shared_plan/14-restore-topic-anchor-and-title-normalization.md`（topicAnchor と有用度バッジの復活）
   - `shared_plan/16-anchor-clause-form-and-non-redundancy.md`（**体言止め撤回。本プランの最大の衝突点。§4 参照**）
   - `shared_plan/17-simplification-plan.md`（実行中。着手順序の調整が必要）
-- 状態: **未着手。本文書は計画であり実装ではない。**
+- 状態: **Stage 2・3 実装完了。Stage 4（UI委譲）待機中**。本文書は計画であり実装ではない。
 - 前提: `openspec/specs/wedding-trend/spec.md` §10（法務制約）・§11（アクセス規律）の不変部分を緩めない。
   ただし §10-3 の**自己記述の精緻化**と、§4.x の **ALTER TABLE 記述の実装追随**は本プランのスコープに含む（§6 Stage 0）。
 

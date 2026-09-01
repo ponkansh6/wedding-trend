@@ -537,6 +537,8 @@ export async function runPipelineOnCandidates(
                     promptVersion: RATIONALE_PROMPT_VERSION,
                   }
                 : undefined,
+            topics: result.topics,
+            promptVersion: options.curationSignature,
           });
 
           if (postId !== null) {

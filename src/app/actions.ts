@@ -1,9 +1,7 @@
 "use server";
 
 import { headers } from "next/headers";
-import { z } from "zod";
 import { isBasicAuthorized } from "@/lib/auth";
-import { detectEmbedProvider } from "@/lib/embed/providers";
 import {
   acquireIngestLease,
   claimIngestSlot,
@@ -12,8 +10,6 @@ import {
   releaseIngestLease,
 } from "@/lib/pipeline/cooldown";
 import { getLastRunSummary, runIngest, type LastRunSummary } from "@/lib/pipeline/ingest";
-import { runSubmitUrlViaPipeline } from "@/lib/pipeline/submit-via-pipeline";
-import type { FeedCard } from "@/lib/types";
 
 /**
  * 収集トリガーの実行結果。クライアントコンポーネントへ渡るため
@@ -70,21 +66,6 @@ export type IngestResult = {
   cooldownUntil: string | null;
 };
 
-export type SubmitUrlResult = {
-  ok: boolean;
-  /** 画面にそのまま表示できる日本語メッセージ。 */
-  message: string;
-  card: FeedCard | null;
-  /**
-   * 補足メモの入力を促すべき失敗かどうか。
-   *
-   * UI はこのフラグだけを見て復帰フロー（補足メモ欄を開いてフォーカス）を
-   * 判断すること。`message` の文面を部分一致で判定してはならない。
-   * 文言の変更で無言に壊れるため。
-   */
-  needsNote: boolean;
-};
-
 /**
  * 管理操作（収集トリガー・URL 投入・ラン結果の閲覧）が未認証・認証失敗の場合に
  * 画面へそのまま表示する文言。生の認証エラーの内部情報（どちらの資格情報が
@@ -98,8 +79,6 @@ const ADMIN_DISABLED_MESSAGE = "この操作は現在無効になっています
  * AI に要約させることができない（=させてはいけない）。埋め込み自体は保存済みなので、
  * 運営が「補足メモ」を添えて再投入すれば oEmbed を取り直さずに公開できる。
  */
-const NEEDS_SOURCE_TEXT_MESSAGE =
-  "この投稿は本文を取得できませんでした。Instagramの埋め込みAPIはキャプション文を返さないため、AIが要約する元の文章が存在しません。埋め込み自体は保存済みです。投稿フォームの「補足メモ」欄に投稿内容の要点を入力し、再度お試しください。";
 
 /**
  * `/admin`（Basic 認証配下）の収集ボタンの初期描画用。実行はせず、現在の
@@ -407,93 +386,5 @@ export async function triggerIngest(): Promise<IngestResult> {
   } finally {
     // 成功・失敗いずれの場合も lease を必ず解放する。
     await releaseIngestLease(now);
-  }
-}
-
-/**
- * SNS 投稿 URL の入力検証。
- * - 構文的に妥当な URL であること（`javascript:` 等の非 http(s) スキームを拒否）
- * - `detectEmbedProvider` で既知のプロバイダ（Instagram / TikTok / YouTube）に
- *   解決できること
- */
-const SnsUrlSchema = z
-  .string()
-  .trim()
-  .min(1, "URLを入力してください。")
-  .superRefine((value, ctx) => {
-    let parsed: URL;
-    try {
-      parsed = new URL(value);
-    } catch {
-      ctx.addIssue({ code: "custom", message: "有効なURL形式ではありません。" });
-      return;
-    }
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-      ctx.addIssue({
-        code: "custom",
-        message: "http または https で始まるURLを指定してください。",
-      });
-      return;
-    }
-    if (detectEmbedProvider(value) === "none") {
-      ctx.addIssue({
-        code: "custom",
-        message:
-          "対応していないURLです。Instagram / TikTok / YouTube の投稿URLを指定してください。",
-      });
-    }
-  });
-
-/**
- * SNS 投稿 URL を 1 件取り込む。`/admin`（Basic 認証配下）の運用フォームから
- * 呼ばれる、オーナー限定の操作。`note` は運営が添える補足メモ（省略可）。
- * 空白のみの入力は「補足なし」として扱う。
- */
-export async function submitSnsUrl(url: string, note?: string): Promise<SubmitUrlResult> {
-  // /admin は src/middleware.ts の Basic 認証で保護されているが、Server Action
-  // は URL さえ知っていれば UI・ミドルウェアを経由せず直接呼び出せるため、
-  // 必ず自身の実行時にも再検証する（多層防御。src/lib/auth.ts の
-  // isBasicAuthorized 参照）。
-  if (!isBasicAuthorized(await headers())) {
-    return { ok: false, message: ADMIN_DISABLED_MESSAGE, card: null, needsNote: false };
-  }
-
-  const parsed = SnsUrlSchema.safeParse(url);
-  if (!parsed.success) {
-    const message = parsed.error.issues[0]?.message ?? "URLの形式が正しくありません。";
-    return { ok: false, message, card: null, needsNote: false };
-  }
-
-  const trimmedNote = note?.trim();
-  const noteArg = trimmedNote && trimmedNote !== "" ? trimmedNote : undefined;
-
-  try {
-    const outcome = await runSubmitUrlViaPipeline(parsed.data, noteArg);
-
-    if (outcome.reason === "needs_source_text") {
-      return { ok: false, message: NEEDS_SOURCE_TEXT_MESSAGE, card: null, needsNote: true };
-    }
-
-    if (!outcome.ok) {
-      const message =
-        outcome.reason === "invalid_url"
-          ? "有効なURLではありません。"
-          : "投稿の保存に失敗しました。時間をおいて再度お試しください。";
-      return { ok: false, message, card: null, needsNote: false };
-    }
-
-    const message =
-      outcome.reason === "needs_review"
-        ? "投稿を取り込みました。AIによる見出し・要約の生成に失敗したため、内容の確認をおすすめします。"
-        : "投稿を取り込みました。";
-    return { ok: true, message, card: outcome.card, needsNote: false };
-  } catch (err) {
-    console.error("[actions] submitSnsUrl failed:", err);
-    return {
-      ok: false,
-      message: "投稿の取り込み中にエラーが発生しました。時間をおいて再度お試しください。",
-      card: null,
-      needsNote: false,
-    };
   }
 }

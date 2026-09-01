@@ -8,35 +8,29 @@ This curation system operates as a neutral curation media outlet. **Annotators a
 
 ---
 
-## 1. Evaluation Criteria (6 Criteria)
+## 1. Evaluation Criteria (5 Criteria)
 
-Each article is evaluated against six binary or ternary criteria, mirroring the LLM evaluation logic:
+Each article is evaluated against five 0-9 integer criteria, mirroring the LLM evaluation logic:
 
-1. **`firsthand` (Boolean)**
-   - `true`: Written from personal, direct wedding planning or execution experience.
-   - `false`: General commentary, third-party aggregation, or industry PR without personal experience.
+1. **`firsthand` (0-9 integer)**
+   - The degree to which the article is written from personal, direct wedding planning or execution experience by the writer or close parties.
+   - `0`: General commentary, third-party aggregation, or industry PR without personal experience.
+   - `9`: Fully grounded in firsthand personal experience.
 
-2. **`ceremony` / `ceremonyDecision` (Boolean)**
-   - `true`: Directly addresses specific decisions regarding wedding ceremony content, venue choice, dress selection, guest handling, or budget allocation.
-   - `false`: Broad general lifestyle content unrelated to wedding decision-making.
+2. **`ceremonyDecision` (0-9 integer)**
+   - The degree to which the article addresses specific decisions regarding wedding ceremony content, venue choice, dress selection, guest handling, or budget allocation.
+   - Requires `>= 1` along with `weddingDayContent >= 1` to pass the curation gate.
 
-3. **`specific` (Boolean)**
-   - `true`: Contains concrete numbers, specific vendor/venue naming details, actual costs, or actionable timelines.
-   - `false`: Vague impressions or abstract advice without concrete details.
+3. **`specific` (0-9 integer)**
+   - The degree of concreteness of actual execution details (concrete choices, numerical data, actual things done or reasons for things not done).
 
-4. **`weddingDayContent` (Boolean)**
-   - `true`: Specifically touches on the actual wedding-day content — ceremony proceedings, production/direction (演出), run-of-show, or what literally happened on the day (e.g., BGM chosen per scene, guest-participation performances, two-part wedding structure, resort-wedding experience narration).
-   - `false`: Focuses on pre-decision planning, format/venue choices, budget, preparation (beauty/etiquette), industry trends, or photo-shoot-only content — without narrating the day's actual proceedings.
-   - NOTE: Distinct from `ceremonyDecision`. `ceremonyDecision` = the article is _about a decision_ concerning the ceremony (venue/dress/form). `weddingDayContent` = the article _describes the day's actual content/proceedings_. An article can be `ceremonyDecision:true` yet `weddingDayContent:false` (e.g., "why we split into two weddings"). Photo-shoot / 前撮り / フォトウェディング content is `weddingDayContent:false`.
+4. **`weddingDayContent` (0-9 integer)**
+   - The degree to which the article strictly deals with the actual wedding-day content (ceremony proceedings, production/direction, run-of-show, or what literally happened on the day).
+   - `0`: Photo weddings, pre-wedding photo shoots (前撮り), preparation stages, venue searching, or after-stories only (absorbing the obsolete `preDecisionOrPhotoShoot`).
 
-5. **`promotional` (Ternary: `"none"` | `"light"` | `"heavy"` )**
-   - `"none"`: Completely independent user experience or neutral discussion.
-   - `"light"`: Minor vendor mention or subtle affiliate/PR context that does not dominate the core narrative.
-   - `"heavy"`: Overt promotional content, direct vendor advertisement, or heavily monetized PR piece.
-
-6. **`preDecisionOrPhotoShoot` (Boolean)**
-   - `true`: Focuses primarily on pre-decision dreaming, initial inspiration, or dedicated photo-shoot-only planning without substantive decision content.
-   - `false`: Focuses on substantive decision-making or execution.
+5. **`promotional` (0-9 integer)**
+   - The degree of commercial promotion or inducement to proprietary services by business entities.
+   - Only penalizes when `>= 7`.
 
 ---
 
@@ -60,12 +54,11 @@ Each entry in `corpus.json` requires:
 - `url`: Canonical URL of the source article.
 - `source_name`: Platform identifier (e.g., `"note"`, `"zexy"`, etc.).
 - `phase_label`: One of the four phase classifications above.
-- `firsthand`: Boolean.
-- `ceremonyDecision`: Boolean.
-- `specific`: Boolean.
-- `weddingDayContent`: Boolean.
-- `promotional`: `"none"` | `"light"` | `"heavy"`.
-- `preDecisionOrPhotoShoot`: Boolean.
+- `firsthand`: 0-9 integer degree.
+- `ceremonyDecision`: 0-9 integer degree.
+- `specific`: 0-9 integer degree.
+- `weddingDayContent`: 0-9 integer degree.
+- `promotional`: 0-9 integer degree.
 - `annotator_notes`: Brief, non-creative justification for the labels (strictly complying with spec.md §10).
 - `excerpt_length`: Length of the excerpt stored for reference.
 - `annotated_by`: Annotator identifier or role (`"orchestrator"` or human identifier).

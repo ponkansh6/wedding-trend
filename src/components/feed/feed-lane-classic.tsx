@@ -32,6 +32,9 @@ export function FeedLaneClassic({ cards }: FeedLaneClassicProps) {
         <p className="text-[13px] leading-jp-body tracking-jp-body text-[var(--color-muted-foreground)]">
           実際に結婚式を挙げた方の体験ブログを紹介します。読み応えのある元記事をぜひご覧ください。
         </p>
+        <p className="text-xs text-muted-foreground">
+          カテゴリ・トピックはAIが自動判定しています。誤りを含む場合があります
+        </p>
       </header>
 
       {cards.length === 0 ? (

@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const {
   runIngestMock,
   getLastRunSummaryMock,
-  runSubmitUrlMock,
   acquireIngestLeaseMock,
   releaseIngestLeaseMock,
   claimIngestSlotMock,
@@ -15,7 +14,6 @@ const {
 } = vi.hoisted(() => ({
   runIngestMock: vi.fn(),
   getLastRunSummaryMock: vi.fn(),
-  runSubmitUrlMock: vi.fn(),
   acquireIngestLeaseMock: vi.fn(),
   releaseIngestLeaseMock: vi.fn(),
   claimIngestSlotMock: vi.fn(),
@@ -27,10 +25,6 @@ const {
 vi.mock("@/lib/pipeline/ingest", () => ({
   runIngest: runIngestMock,
   getLastRunSummary: getLastRunSummaryMock,
-}));
-
-vi.mock("@/lib/pipeline/submit-via-pipeline", () => ({
-  runSubmitUrlViaPipeline: runSubmitUrlMock,
 }));
 
 vi.mock("@/lib/pipeline/cooldown", () => ({
@@ -53,7 +47,7 @@ vi.mock("next/headers", () => ({
   headers: vi.fn().mockResolvedValue(new Headers()),
 }));
 
-import { getIngestCooldown, getIngestStatus, submitSnsUrl, triggerIngest } from "@/app/actions";
+import { getIngestCooldown, getIngestStatus, triggerIngest } from "@/app/actions";
 
 const JAPANESE_CHAR = /[ぁ-んァ-ヶ一-龠]/;
 
@@ -433,152 +427,5 @@ describe("triggerIngest", () => {
     expect(result.ok).toBe(true);
     expect(result.ran).toBe(true);
     expect(runIngestMock).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe("submitSnsUrl", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    isBasicAuthorizedMock.mockReturnValue(true);
-  });
-  afterEach(() => {
-    vi.unstubAllEnvs();
-  });
-
-  it("refuses to run and returns ok:false when Basic auth fails", async () => {
-    isBasicAuthorizedMock.mockReturnValue(false);
-
-    const result = await submitSnsUrl("https://www.instagram.com/p/ABC123/");
-
-    expect(result.ok).toBe(false);
-    expect(result.message).toMatch(JAPANESE_CHAR);
-    expect(result.card).toBeNull();
-    expect(runSubmitUrlMock).not.toHaveBeenCalled();
-  });
-
-  it("rejects a non-URL string with a non-empty Japanese message", async () => {
-    const result = await submitSnsUrl("not a url at all");
-
-    expect(result.ok).toBe(false);
-    expect(result.message.length).toBeGreaterThan(0);
-    expect(result.message).toMatch(JAPANESE_CHAR);
-    expect(runSubmitUrlMock).not.toHaveBeenCalled();
-  });
-
-  it("rejects a javascript: scheme URL with a non-empty Japanese message", async () => {
-    const result = await submitSnsUrl("javascript:alert(document.cookie)");
-
-    expect(result.ok).toBe(false);
-    expect(result.message.length).toBeGreaterThan(0);
-    expect(result.message).toMatch(JAPANESE_CHAR);
-    expect(runSubmitUrlMock).not.toHaveBeenCalled();
-  });
-
-  it("rejects an unsupported host with a non-empty Japanese message naming the supported providers", async () => {
-    const result = await submitSnsUrl("https://example.com/some-wedding-article");
-
-    expect(result.ok).toBe(false);
-    expect(result.message).toContain("対応していない");
-    expect(result.message).toMatch(JAPANESE_CHAR);
-    expect(runSubmitUrlMock).not.toHaveBeenCalled();
-  });
-
-  it("happy path: a valid Instagram URL is trimmed and delegated to runSubmitUrl", async () => {
-    const card = {
-      id: 1,
-      sourceType: "sns" as const,
-      sourceId: "instagram",
-      sourceName: "Instagram",
-      url: "https://www.instagram.com/p/abc123/",
-      author: "someone",
-      publishedAt: null,
-      thumbnailUrl: null,
-      aiTitle: "AI Title",
-      aiSummary: "AI Summary",
-      category: "その他" as const,
-      tag: "trend" as const,
-      embedProvider: "instagram" as const,
-      embedHtml: "<blockquote>ig</blockquote>",
-    };
-    runSubmitUrlMock.mockResolvedValue({ ok: true, reason: null, card });
-
-    const result = await submitSnsUrl("  https://www.instagram.com/p/ABC123/  ");
-
-    expect(result.ok).toBe(true);
-    expect(result.card).toEqual(card);
-    expect(result.message.length).toBeGreaterThan(0);
-    expect(runSubmitUrlMock).toHaveBeenCalledWith("https://www.instagram.com/p/ABC123/", undefined);
-  });
-
-  it("forwards a trimmed note through to runSubmitUrl", async () => {
-    runSubmitUrlMock.mockResolvedValue({ ok: true, reason: null, card: null });
-
-    await submitSnsUrl("https://www.instagram.com/p/ABC123/", "  会場の装花が綺麗でした  ");
-
-    expect(runSubmitUrlMock).toHaveBeenCalledWith(
-      "https://www.instagram.com/p/ABC123/",
-      "会場の装花が綺麗でした",
-    );
-  });
-
-  it("treats a whitespace-only note as absent (passes undefined to runSubmitUrl)", async () => {
-    runSubmitUrlMock.mockResolvedValue({ ok: true, reason: null, card: null });
-
-    await submitSnsUrl("https://www.instagram.com/p/ABC123/", "   ");
-
-    expect(runSubmitUrlMock).toHaveBeenCalledWith("https://www.instagram.com/p/ABC123/", undefined);
-  });
-
-  it('surfaces a "needs review" message without failing when runSubmitUrl used the fallback curation', async () => {
-    runSubmitUrlMock.mockResolvedValue({ ok: true, reason: "needs_review", card: null });
-
-    const result = await submitSnsUrl("https://www.instagram.com/p/ABC123/");
-
-    expect(result.ok).toBe(true);
-    expect(result.message).toContain("確認");
-  });
-
-  it("maps a needs_source_text outcome from runSubmitUrl to ok:false with a Japanese message", async () => {
-    runSubmitUrlMock.mockResolvedValue({ ok: true, reason: "needs_source_text", card: null });
-
-    const result = await submitSnsUrl("https://www.instagram.com/p/ABC123/");
-
-    expect(result.ok).toBe(false);
-    expect(result.message.length).toBeGreaterThan(0);
-    expect(result.message).toMatch(JAPANESE_CHAR);
-    expect(result.card).toBeNull();
-    // UI の復帰フロー（補足メモ欄を開いてフォーカス）はこのフラグだけを見る。
-    // メッセージ文面での判定に戻すと、コピー変更で無言に壊れる。
-    expect(result.needsNote).toBe(true);
-  });
-
-  it("sets needsNote only for the needs_source_text case", async () => {
-    runSubmitUrlMock.mockResolvedValue({ ok: false, reason: "save_failed", card: null });
-    expect((await submitSnsUrl("https://www.instagram.com/p/ABC123/")).needsNote).toBe(false);
-
-    runSubmitUrlMock.mockResolvedValue({ ok: false, reason: "invalid_url", card: null });
-    expect((await submitSnsUrl("https://www.instagram.com/p/ABC123/")).needsNote).toBe(false);
-
-    // URL 形式エラー（runSubmitUrl に到達しない経路）
-    expect((await submitSnsUrl("not-a-url")).needsNote).toBe(false);
-  });
-
-  it("maps a save_failed outcome from runSubmitUrl to ok:false with a Japanese message", async () => {
-    runSubmitUrlMock.mockResolvedValue({ ok: false, reason: "save_failed", card: null });
-
-    const result = await submitSnsUrl("https://www.instagram.com/p/ABC123/");
-
-    expect(result.ok).toBe(false);
-    expect(result.message).toMatch(JAPANESE_CHAR);
-  });
-
-  it("never throws: catches an error from runSubmitUrl and returns ok:false", async () => {
-    runSubmitUrlMock.mockRejectedValue(new Error("network error"));
-
-    const result = await submitSnsUrl("https://www.instagram.com/p/ABC123/");
-
-    expect(result.ok).toBe(false);
-    expect(result.message.length).toBeGreaterThan(0);
-    expect(result.card).toBeNull();
   });
 });

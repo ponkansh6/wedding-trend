@@ -27,6 +27,7 @@ export const ALLOWED_UPDATE_KEYS = Object.freeze([
   "aiSummary",
   "category",
   "tag",
+  "topics",
   "contentHash",
   "curationSignature",
   "usefulness",
@@ -123,6 +124,9 @@ export function buildMwedUpdates(outcomes, deps) {
       // 不変条件3: gate_degrade では署名を進めず、rationale / usefulness も付けない。
       update.contentHash = computeContentHash(c.originalTitle, null);
       update.curationSignature = currentSignature;
+      if (Array.isArray(result.topics) && result.topics.length > 0) {
+        update.topics = result.topics;
+      }
       if (c.id !== null && c.id !== undefined) {
         update.usefulness = {
           postId: c.id,

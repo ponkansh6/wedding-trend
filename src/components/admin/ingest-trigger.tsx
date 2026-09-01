@@ -216,7 +216,7 @@ export function IngestTrigger({ className, compact = false, cooldownUntil }: Ing
     <div className={cn("flex flex-col items-start gap-2 text-left", className)}>
       <Button
         type="button"
-        variant="trend"
+        variant="classic"
         size={compact ? "sm" : "default"}
         onClick={handleClick}
         aria-disabled={isDisabled}

@@ -1,4 +1,4 @@
-import { ExternalLink, Flame, Landmark, Sparkles } from "lucide-react";
+import { ExternalLink, Landmark } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -33,17 +33,10 @@ export function FeedCard({ card, variant, index = 0 }: FeedCardProps) {
     >
       <div className="flex flex-wrap items-center gap-1.5">
         <Badge variant="category">{card.category}</Badge>
-        {card.tag === "trend" ? (
-          <Badge variant="trend">
-            <Flame className="size-3" aria-hidden />
-            トレンド
-          </Badge>
-        ) : (
-          <Badge variant="classic">
-            <Landmark className="size-3" aria-hidden />
-            定番
-          </Badge>
-        )}
+        <Badge variant="classic">
+          <Landmark className="size-3" aria-hidden />
+          定番
+        </Badge>
       </div>
 
       <Title card={card} variant={variant} />
@@ -53,28 +46,24 @@ export function FeedCard({ card, variant, index = 0 }: FeedCardProps) {
           <p className="line-clamp-1 text-[14px] leading-snug text-[var(--color-muted-foreground)]">
             {card.topicAnchor}
           </p>
-          <Badge
-            variant="ai"
-            className="w-fit"
-            title="このアンカー・特徴ラベルはAIが自動判定しており、誤りを含むことがあります"
-          >
-            <Sparkles className="size-2.5" aria-hidden />
-            AI判定
-          </Badge>
+          {card.topics && card.topics.length > 0 && (
+            <ul
+              role="list"
+              className="flex flex-wrap gap-1.5"
+              aria-label="この記事のトピック（AIによる自動判定）"
+              title="このトピック・カテゴリ・特徴ラベルはAIが自動判定しており、誤りを含むことがあります"
+            >
+              {card.topics.map((t) => (
+                <li
+                  key={t}
+                  className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground"
+                >
+                  {t}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
-      )}
-
-      {card.usefulness && (
-        <p className="text-[11px] leading-tight text-muted-foreground">
-          {[
-            card.usefulness.firsthand >= 6 && "当事者",
-            card.usefulness.ceremonyDecision >= 6 && "意思決定",
-            card.usefulness.specific >= 6 && "具体的",
-            card.usefulness.weddingDayContent >= 6 && "当日内容",
-          ]
-            .filter(Boolean)
-            .join("・")}
-        </p>
       )}
 
       <Footer card={card} variant={variant} />
@@ -111,14 +100,9 @@ function Footer({ card, variant }: { card: FeedCardData; variant: FeedCardVarian
         {" ・ "}
         <PublishedTime iso={card.publishedAt} />
       </p>
-      <Button
-        asChild
-        variant={isVisual ? "trend" : "classic"}
-        size="sm"
-        className="w-full shrink-0 sm:w-auto"
-      >
+      <Button asChild variant="classic" size="sm" className="w-full shrink-0 sm:w-auto">
         <a href={card.url} target="_blank" rel="noopener noreferrer">
-          {isVisual ? "投稿を見る" : "原文を読む"}
+          原文を読む
           <ExternalLink className="size-3.5" aria-hidden />
         </a>
       </Button>

@@ -1,7 +1,7 @@
 /**
  * Purpose: Stage 6 (S2) Commit 1 の安全網。`src/lib/publish/invariants.ts` の
  * INVARIANTS レジストリに列挙された各 id を、`runPipelineOnCandidates`
- * （INV-4/INV-8 は構造上パイプラインを通せないため対象関数を直接）を通した
+ * （INV-4 は構造上パイプラインを通せないため対象関数を直接）を通した
  * 「境界」で検証する。`filterTitle` 等のヘルパを直接呼ぶのではなく、公開
  * されるかどうか・drop reason が期待値かどうかという境界の結果でアサート
  * することで、ヘルパのリファクタで強制が薄れてもテストが赤くなるようにする。
@@ -92,6 +92,7 @@ function geminiResponse(topicAnchor: string, overrides: Partial<Record<string, u
         weddingDayContent: 0,
         promotional: 0,
         topicAnchor,
+        topics: ["トピック1", "トピック2"],
         ...overrides,
       },
     ],
@@ -555,10 +556,13 @@ describeInvariant("INV-6", "日次公開上限のサーキットブレーカー"
 });
 
 // ─────────────────────────────────────────────────────────────
-// INV-7: タイトルは originalTitle の逐語表示（aiTitle は常に null）
+// 逐語タイトル（aiTitle は常に null）— shared_plan/20 P4 で旧 INV-7 を
+// INVARIANTS レジストリ（機械強制の索引）から外したが、逐語タイトルは
+// spec.md §10 の法務要件であり、その実装的強制（aiTitle 全経路 null）の
+// 回帰テストとしてここに残す。
 // ─────────────────────────────────────────────────────────────
 
-describeInvariant("INV-7", "タイトルは originalTitle の逐語表示（aiTitle 常に null）", () => {
+describe("逐語タイトル: 公開時に aiTitle を渡さず originalTitle は逐語一致", () => {
   it("公開時に markCurated へ渡す update は aiTitle を含まず、originalTitle は入力と逐語一致する", async () => {
     const verbatimTitle = "これは元サイトが書いた逐語タイトルです";
     const candidate = makeCandidate({
@@ -580,10 +584,13 @@ describeInvariant("INV-7", "タイトルは originalTitle の逐語表示（aiTi
 });
 
 // ─────────────────────────────────────────────────────────────
-// INV-8: discovery 経路の抽出本文（判定スライス）を DB に永続化しない
+// discovery 経路の抽出本文（判定スライス）を DB に永続化しない —
+// shared_plan/20 P4 で旧 INV-8 を INVARIANTS レジストリから外したが、
+// 非永続化は spec.md §10-5 の法務要件であり、その実装的強制
+// （assertNoSliceLeak の許可リスト方式）の回帰テストとしてここに残す。
 // ─────────────────────────────────────────────────────────────
 
-describeInvariant("INV-8", "discovery 経路の判定スライスを DB へ永続化しない", () => {
+describe("discovery 判定スライスの非永続化: assertNoSliceLeak", () => {
   it("assertNoSliceLeak は許可リスト外のキー（本文リーク）を throw で弾く（ぎりぎり落ちる）", () => {
     expect(() =>
       assertNoSliceLeak([

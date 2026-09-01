@@ -81,7 +81,7 @@ export type RetractionReason =
 export type BodyHashKind = "body" | "surrogate";
 
 /** 再試行キュー（`post_retry_queue`）のレーン識別子。 */
-export type RetryLane = "rss" | "evergreen" | "discovery" | "submit";
+export type RetryLane = "rss" | "evergreen" | "discovery";
 
 /**
  * 再試行キューから取り出した既存エントリの文脈（plan 07 D5）。
@@ -161,4 +161,6 @@ export type FeedCard = {
   rationaleText: string | null;
   /** 6 boolean の有用性判定。criteria 未保存・解析失敗なら null。 */
   usefulness: UsefulnessCriteria | null;
+  /** トピックタグのリスト。 */
+  topics?: string[];
 };

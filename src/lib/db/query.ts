@@ -1,6 +1,6 @@
 import { and, desc, eq, isNotNull, or, sql } from "drizzle-orm";
 import { db } from "./index";
-import { posts, postUsefulnessCriteria, postRationales } from "./schema";
+import { posts, postUsefulnessCriteria, postRationales, postTopics } from "./schema";
 import {
   RATIONALE_DISPLAY_PHASE,
   USEFULNESS_GATE_BONUS,
@@ -139,7 +139,7 @@ END`;
  * （fail-soft 契約はキャッシュ撤去後も維持する）。
  */
 export async function getFeedCards(params: {
-  sourceType: SourceType;
+  sourceType?: SourceType;
   limit: number;
   phase?: RationaleDisplayPhase;
 }): Promise<FeedCard[]> {
@@ -154,34 +154,41 @@ export async function getFeedCards(params: {
           );
 
     const whereClause = and(
-      eq(posts.sourceType, params.sourceType),
+      eq(posts.sourceType, "blog"),
       eq(posts.status, "published"),
       visibilityCondition,
     );
 
-    const rows =
-      params.sourceType === "blog"
-        ? await db
-            .select(FEED_ROW_FIELDS)
-            .from(posts)
-            .leftJoin(postRationales, eq(posts.id, postRationales.postId))
-            .leftJoin(postUsefulnessCriteria, eq(posts.id, postUsefulnessCriteria.postId))
-            .where(whereClause)
-            .orderBy(desc(USEFULNESS_SCORE_SQL), desc(posts.publishedAt), desc(posts.id))
-            .limit(params.limit)
-        : await db
-            .select(FEED_ROW_FIELDS)
-            .from(posts)
-            .leftJoin(postRationales, eq(posts.id, postRationales.postId))
-            .leftJoin(postUsefulnessCriteria, eq(posts.id, postUsefulnessCriteria.postId))
-            .where(whereClause)
-            // createdAt（取り込み順）を新着基準にする。publishedAt は元記事側の
-            // 情報が欠けている場合に null になりうるため、並び順の基準には使わない。
-            .orderBy(desc(posts.createdAt))
-            .limit(params.limit);
+    const rows = await db
+      .select(FEED_ROW_FIELDS)
+      .from(posts)
+      .leftJoin(postRationales, eq(posts.id, postRationales.postId))
+      .leftJoin(postUsefulnessCriteria, eq(posts.id, postUsefulnessCriteria.postId))
+      .where(whereClause)
+      .orderBy(desc(USEFULNESS_SCORE_SQL), desc(posts.publishedAt), desc(posts.id))
+      .limit(params.limit);
 
     // category / tag / aiTitle / aiSummary は SQL 条件で non-null のはずだが、
     // 型安全のため念のため防御的にフィルタする。
+    const postIds = rows.map((r) => r.id);
+    const topicsMap = new Map<number, string[]>();
+    if (postIds.length > 0) {
+      try {
+        const topicRows = await db
+          .select({ postId: postTopics.postId, topic: postTopics.topic })
+          .from(postTopics)
+          .where(sql`${postTopics.postId} IN (${sql.join(postIds, sql`, `)})`)
+          .orderBy(postTopics.position);
+        for (const tr of topicRows) {
+          const list = topicsMap.get(tr.postId) ?? [];
+          list.push(tr.topic);
+          topicsMap.set(tr.postId, list);
+        }
+      } catch (err) {
+        console.warn("[db] getFeedCards batch topics error:", err);
+      }
+    }
+
     return rows.flatMap((row): FeedCard[] => {
       if (!row.category || !row.tag) return [];
       // category / tag があっても、表示フェーズの条件を満たさない行は除外
@@ -232,6 +239,7 @@ export async function getFeedCards(params: {
           aiSummary: row.aiSummary,
           category: row.category as Category,
           tag: row.tag as TrendTag,
+          topics: topicsMap.get(row.id) ?? [],
           embedProvider: row.embedProvider,
           embedHtml: row.embedHtml,
           topicAnchor: row.topicAnchor ?? null,
@@ -242,6 +250,24 @@ export async function getFeedCards(params: {
     });
   } catch (err) {
     console.warn("[db] getFeedCards query error:", err);
+    return [];
+  }
+}
+
+/**
+ * 指定された投稿に関連付けられたトピックタグのリストを position 順に取得する。
+ * 存在しない場合は空配列を返す。
+ */
+export async function getPostTopics(postId: number): Promise<string[]> {
+  try {
+    const rows = await db
+      .select({ topic: postTopics.topic })
+      .from(postTopics)
+      .where(eq(postTopics.postId, postId))
+      .orderBy(postTopics.position);
+    return rows.map((r) => r.topic);
+  } catch (err) {
+    console.warn("[db] getPostTopics query error:", err);
     return [];
   }
 }

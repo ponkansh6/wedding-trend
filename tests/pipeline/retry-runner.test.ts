@@ -113,11 +113,9 @@ describe("processDueAndExpiredRetries (src/lib/pipeline/retry-runner.ts)", () =>
     dueRetriesMock.mockResolvedValue([
       makeEntry({ lane: "rss", urlHash: "h1", url: "https://example.com/1" }),
       makeEntry({ lane: "evergreen", urlHash: "h2", url: "https://example.com/2" }),
-      makeEntry({ lane: "submit", urlHash: "h3", url: "https://example.com/3" }),
     ]);
     rssBuildRetryCandidateMock.mockResolvedValue({ url: "https://example.com/1" });
     evergreenBuildRetryCandidateMock.mockResolvedValue({ url: "https://example.com/2" });
-    submitBuildRetryCandidateMock.mockResolvedValue({ url: "https://example.com/3" });
 
     await processDueAndExpiredRetries(NOW);
 
@@ -126,9 +124,8 @@ describe("processDueAndExpiredRetries (src/lib/pipeline/retry-runner.ts)", () =>
     // Each lane's adapter should only see its own entries.
     expect(rssBuildRetryCandidateMock).toHaveBeenCalledTimes(1);
     expect(evergreenBuildRetryCandidateMock).toHaveBeenCalledTimes(1);
-    expect(submitBuildRetryCandidateMock).toHaveBeenCalledTimes(1);
     // runPipelineOnCandidates should be invoked once per lane that has entries.
-    expect(runPipelineOnCandidatesMock).toHaveBeenCalledTimes(3);
+    expect(runPipelineOnCandidatesMock).toHaveBeenCalledTimes(2);
   });
 
   it("does not touch discovery-lane entries returned by dueRetries or expireRetries", async () => {
@@ -143,7 +140,6 @@ describe("processDueAndExpiredRetries (src/lib/pipeline/retry-runner.ts)", () =>
 
     expect(rssBuildRetryCandidateMock).not.toHaveBeenCalled();
     expect(evergreenBuildRetryCandidateMock).not.toHaveBeenCalled();
-    expect(submitBuildRetryCandidateMock).not.toHaveBeenCalled();
     expect(terminateRetryMock).not.toHaveBeenCalled();
     expect(runPipelineOnCandidatesMock).not.toHaveBeenCalled();
   });

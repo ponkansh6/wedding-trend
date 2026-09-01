@@ -43,7 +43,7 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ja" className={`${fraunces.variable} h-full`} suppressHydrationWarning>
       <body className="flex min-h-full flex-col bg-[var(--color-background)] font-sans text-[var(--color-foreground)] antialiased">

@@ -64,6 +64,7 @@ function sufficientCuration(overrides: Partial<CurationResult> = {}): CurationRe
     weddingDayContent: 2,
     promotional: 0,
     topicAnchor: "演出の予算配分",
+    topics: ["演出予算", "予算配分"],
     rationaleText:
       "当事者の体験談として、式後の費用内訳と演出選択における具体的な判断材料が豊富に含まれている。",
     ...overrides,
