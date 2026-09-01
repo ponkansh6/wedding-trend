@@ -528,6 +528,7 @@ if (updates.length > 0) {
       `  [${u._kind}]${reasonSuffix} ${u.url}`,
       `    旧: ${oldAnchor}`,
       `    新: ${newAnchor}`,
+      `    topics: ${Array.isArray(u.topics) && u.topics.length > 0 ? u.topics.join(" / ") : "(なし)"}`,
     ];
     // 要件1〜3: 却下されたアンカーの実際の文言と、missingTerms（anchor_ungrounded）/
     // matchedTerms（anchor_prohibited_term）を1回目・リトライそれぞれ表示する。

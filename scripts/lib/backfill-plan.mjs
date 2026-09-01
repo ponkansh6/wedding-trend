@@ -380,6 +380,11 @@ export function buildBackfillUpdates(outcomes, deps) {
               contentHash: computeContentHash(c.originalTitle, c.originalExcerpt),
               curationSignature: currentSignature,
             }),
+        // トピックタグ（shared_plan/18）。topicAnchor ゲートの合否とは独立
+        // （validateTopics は batch.ts 側で適用済み）。gate_degrade でも
+        // aiTitle/aiSummary/category/tag と同じく更新する。post_topics への
+        // 書き込みは markCurated 経路（src/lib/db/ingest.ts）が担う。
+        ...(c.id !== null && Array.isArray(result.topics) ? { topics: result.topics } : {}),
         _kind: kind,
         _oldTopicAnchor: c.id !== null ? (oldAnchorByPostId?.get(c.id) ?? null) : null,
         _newTopicAnchor: finalTopicAnchor,
