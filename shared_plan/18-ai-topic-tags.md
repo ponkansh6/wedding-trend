@@ -9,7 +9,13 @@
   - `shared_plan/14-restore-topic-anchor-and-title-normalization.md`（topicAnchor と有用度バッジの復活）
   - `shared_plan/16-anchor-clause-form-and-non-redundancy.md`（**体言止め撤回。本プランの最大の衝突点。§4 参照**）
   - `shared_plan/17-simplification-plan.md`（実行中。着手順序の調整が必要）
-- 状態: **Stage 2・3 実装完了。Stage 4（UI委譲）待機中**。本文書は計画であり実装ではない。
+- 状態: **Stage 0〜4・6〜7 実装完了（2026-09-01）。残: Stage 5（本番バックフィル）＝本番 DB 書き込みのためオーナー承認待ち**。
+  - Stage 0-1（golden-set label-schema 乖離解消）・0-2（spec §10-3 精緻化）: 完了（コミット `5579f51`）
+  - Stage 1〜3（schema `post_topics` / migration 0013 / `CurationItemSchema.topics` / `TOPIC_RULES` / `validateTopics()` / `batch.ts` フォールバック / `constants` v15 / `query.ts` join / `ingest.ts` 書き込み / `types.ts`）: 完了（`5579f51`）
+  - Stage 4（UI）: 完了。「AI判定」バッジ・判定基準テキスト行を撤去、`badge.tsx` の `ai`/`trend` バリアント削除、トピックタグを枠なし低コントラストのインライン語列で描画、`<ul role="list">` + `aria-label`/`title` 免責、レーンヘッダ恒常注記、欠損時非表示。
+  - Stage 6（検証）: `pnpm verify` green。`tests/topic-gate.test.ts` が §8 の破壊テスト5項目（数字・11字・未接地固有名詞・5→4切り詰め・重複）を網羅し通過。
+  - Stage 7（spec 最終更新）: §5 `post_topics` テーブル、§10-3 自己記述、§9 フィード表示節（バッジ記述の実態追随）を更新。
+  - **Stage 5 未実施**: 本番 Turso に migration 0013 未適用（`check-prod-schema` が drift 検出）。`scripts/ops/backfill-usefulness.mjs --force --apply` による全ブログ投稿の再キュレーション（トピック付与。カテゴリ・tag・topicAnchor・有用度も引き直し）も未実行。`CURATION_PROMPT_VERSION` は 15 に bump 済み・push 済みのため、定期パイプラインが `getStaleCurationCandidates()` 経由で順次再キュレーションはする。
 - 前提: `openspec/specs/wedding-trend/spec.md` §10（法務制約）・§11（アクセス規律）の不変部分を緩めない。
   ただし §10-3 の**自己記述の精緻化**と、§4.x の **ALTER TABLE 記述の実装追随**は本プランのスコープに含む（§6 Stage 0）。
 

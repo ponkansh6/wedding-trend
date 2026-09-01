@@ -728,9 +728,9 @@ bump しなければならない。bump がないと `getStaleCurationCandidates
 - **phase2**: `post_rationales.post_id IS NOT NULL` のみ。バックフィル完了後に
   切り替える、判定根拠のみを表示条件とする最終形。
 - 判定根拠（`post_rationales` 行）の存在は掲載可否の条件として用いる。
-- `topicAnchor` と有用度判定 4 種（`firsthand`/`ceremonyDecision`/`specific`/`weddingDayContent`）のうち値が `>= 2` のものを公開面にバッジ描画する（`src/components/feed/feed-card.tsx`）。
-- `rationaleText`・`aiSummary`・`promotional` はいずれも公開面には描画しない。根拠文（`renderRationaleText`）のラベルも値 `>= 2` の 4 項目のみ（`promotional` は §10-3 により対象外）。
-- `topicAnchor`・有用度ラベルは LLM 生成物であり、`ai` バリアントの「AI判定」バッジで読者に明示する（`src/components/feed/feed-card.tsx`）。
+- 公開面には `topicAnchor`（1件）と **AI 選定トピックタグ**（`post_topics`、2〜4件・各2〜10字。`src/lib/publish/gate.ts` の `validateTopics()` を通過したもの）を描画する（`src/components/feed/feed-card.tsx`）。トピックタグは分類・走査性のための短ラベルであり、`topicAnchor` とは役割が異なる（重複許容・結論非開示。詳細は §10-3 と `shared_plan/18`）。トピックが存在しない投稿（discovery 由来で再取得に失敗した等の恒久欠損）はタグ群ごと非表示にする。
+- 有用度判定 4 種（`firsthand`/`ceremonyDecision`/`specific`/`weddingDayContent`）は **並び順（`USEFULNESS_SCORE_SQL`）にのみ用い、公開面には描画しない**（旧「判定基準タグ」テキスト行は `shared_plan/18` Stage 4 で撤去）。`rationaleText`・`aiSummary`・`promotional` も公開面には描画しない。根拠文（`renderRationaleText`）のラベルは値 `>= 2` の 4 項目のみ（`promotional` は §10-3 により対象外）。
+- AI 由来である旨の開示（`shared_plan/18` §5-1）: カード単位の「AI判定」バッジ（旧 `Badge` の `ai` バリアント）は撤去し、開示は (1) トピックタグのコンテナ（`<ul role="list">`）の `aria-label` と `title` 属性に免責文、(2) 各レーンヘッダ直下の恒常注記1行（`src/components/feed/feed-lane-classic.tsx`）、(3) `src/app/layout.tsx` のサイト全体注記、の3点で担保する。フッターは無限スクロールで到達不能になるため使わない。
 - 参照行 `src/components/feed/feed-card.tsx` を維持する。
 - タイトル取得の全経路で `normalizeTitle()`（`src/lib/sources/base/feed-parser.ts`）が改行・タブ・U+2028/2029・連続半角空白を単一空白に正規化し前後を trim する（U+3000 全角空白は逐語性維持のため正規化対象外）。
 - `src/lib/publish/gate.ts` の `CONTROL_CHAR_RE` は C0/C1（タブ・改行を除く）を検知する最終防衛線ではなく、ホワイトスペースの正規化は取得段階の `normalizeTitle()` が担う旨をコメントで明記している。
