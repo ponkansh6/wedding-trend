@@ -10,6 +10,10 @@ const badgeVariants = cva(
         /** カテゴリバッジ: 主張を抑えた脇役バッジ */
         category:
           "border border-[var(--color-border)] text-[var(--color-muted-foreground)] bg-transparent px-2.5 py-1 text-xs",
+        /** トピックチップ: カテゴリより一段控えめな、地色に馴染む脇役チップ。
+         *  非クリッカブルなためリンク然とした反応は付けない（hover/focus装飾なし）。 */
+        topic:
+          "border border-[var(--color-topic-border)] bg-[var(--color-topic-chip)] text-[var(--color-muted-foreground)] px-2 py-0.5",
       },
     },
     defaultVariants: {

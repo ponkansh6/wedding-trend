@@ -36,16 +36,18 @@ export function FeedCard({ card, index = 0 }: FeedCardProps) {
       {card.topics && card.topics.length > 0 && (
         <ul
           role="list"
-          className="flex flex-wrap items-center gap-x-2 gap-y-1"
+          className="flex flex-wrap items-center gap-1.5"
           aria-label="AIが自動選定したトピック"
           title="AI による自動判定。誤りを含む場合があります"
         >
           {card.topics.map((topic) => (
-            <li
-              key={topic}
-              className="cursor-default text-badge text-[var(--color-muted-foreground)] before:mr-0.5 before:content-['#']"
-            >
-              {topic}
+            <li key={topic} className="cursor-default">
+              <Badge
+                variant="topic"
+                className="text-badge max-w-[13rem] overflow-hidden before:mr-0.5 before:shrink-0 before:content-['#']"
+              >
+                <span className="min-w-0 truncate">{topic}</span>
+              </Badge>
             </li>
           ))}
         </ul>

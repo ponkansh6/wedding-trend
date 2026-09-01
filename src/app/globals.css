@@ -38,6 +38,11 @@
 
   --skeleton: #ece3d6;
 
+  /* トピックチップ: カテゴリバッジ（境界線のみ）より一段静かな、
+     地色に溶け込む薄塗り。彩色による分類分けはしない（背景色のみの単一トーン）。 */
+  --topic-chip: #f4ede2;
+  --topic-border: #ece2d3;
+
   --shadow-card: 0 1px 2px rgba(34, 29, 25, 0.05), 0 10px 28px -14px rgba(34, 29, 25, 0.18);
 }
 
@@ -68,6 +73,9 @@
 
   --skeleton: #2b241d;
 
+  --topic-chip: #2b241d;
+  --topic-border: #3a322a;
+
   --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4), 0 14px 32px -16px rgba(0, 0, 0, 0.55);
 }
 
@@ -91,6 +99,9 @@
   --color-on-ai-chip: var(--on-ai-chip);
 
   --color-skeleton: var(--skeleton);
+
+  --color-topic-chip: var(--topic-chip);
+  --color-topic-border: var(--topic-border);
 
   /* 欧文の装飾はディスプレイ書体、和文・本文はシステムの和文書体を優先する。
      和文ウェブフォントは重量級のため同梱しない。 */
