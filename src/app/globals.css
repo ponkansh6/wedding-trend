@@ -19,11 +19,26 @@
   --border: #e7dfd3;
   --ring: #b33a24;
 
+  /* plan A（トークン/タイポ精緻化）: 11-13px の極小文字に --muted-foreground
+     の Tailwind 不透明度（/70 等）を重ねる既存パターンは、背景と合成された
+     実効色がAAコントラスト（通常文字 4.5:1）を割り込む（例: 実測 2.98:1）。
+     不透明度合成ではなく、あらかじめAAを満たす専用の単色トークンに置き換える。
+     --muted-foreground（5.54:1）よりわずかに主張を落としつつ、4.5:1の床を
+     割らない値として算出した。実測値・置換対象は各コンポーネント側のコメント
+     および委譲報告を参照。 */
+  --muted-foreground-subtle: #726960; /* vs --background #faf6f0: 4.99:1 */
+
   /* アクセント（朱）: CTA・フォーカスリング・選択状態にのみ希少使用する単色。
      plan 21 §6-2 により、旧 trend/classic の対比構造を廃し「紙と朱」の朱を
      単色アクセントへ転用した。 */
   --accent: #b33a24;
   --on-accent: #fff7f2;
+
+  /* plan A: カテゴリバッジをトピックチップから視覚的に分離するための、
+     朱をごく薄く効かせた枠線色。CTA（原文を読むボタン）の主張を上回らない
+     よう、彩度を強く出さず --border との混色に留める。--accent / --border は
+     .dark 側で個別に上書きされるため、この1行だけで両テーマに追随する。 */
+  --category-border: color-mix(in srgb, var(--accent) 28%, var(--border));
 
   /* 管理画面（ingest-trigger.tsx / ingest-status-panel.tsx）専用のトークン。
      フィード表示層では plan 21 Stage 2-3 で参照ゼロになったが、管理画面が
@@ -64,6 +79,10 @@
   --border: #3a322a;
   --ring: #e2603d;
 
+  /* vs --surface #221d18（背景2色のうち明るい方 = 最も厳しいケース）: 6.09:1
+     vs --background #16120e: 6.79:1 */
+  --muted-foreground-subtle: #a89a89;
+
   --accent: #e2603d;
   --on-accent: #16120e;
 
@@ -94,11 +113,13 @@
   --color-surface-hover: var(--surface-hover);
   --color-foreground: var(--foreground);
   --color-muted-foreground: var(--muted-foreground);
+  --color-muted-foreground-subtle: var(--muted-foreground-subtle);
   --color-border: var(--border);
   --color-ring: var(--ring);
 
   --color-accent: var(--accent);
   --color-on-accent: var(--on-accent);
+  --color-category-border: var(--category-border);
 
   --color-classic: var(--classic);
   --color-on-classic: var(--on-classic);
@@ -172,4 +193,32 @@ body {
 .embed-frame :where(iframe, .instagram-media, blockquote) {
   max-width: 100% !important;
   width: 100% !important;
+}
+
+/* plan B（フィード再構築）: リスト描画時の出現アニメーション。
+   旧実装は tw-animate-css の animate-in（keyframes による一度きりの再生）
+   だったが、@starting-style は「要素が新しくレンダリングツリーに入った
+   瞬間の見た目」から通常状態への遷移をブラウザが自動補間するため、
+   キーフレーム定義なしで同じ効果を transition だけで表現できる。
+   カードごとの出現順ずらしは --enter-delay（transition-delay）で行う。 */
+.card-enter {
+  opacity: 1;
+  transform: translateY(0);
+  transition:
+    opacity 500ms ease-out,
+    transform 500ms ease-out;
+  transition-delay: var(--enter-delay, 0ms);
+}
+
+@starting-style {
+  .card-enter {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-enter {
+    transition: none;
+  }
 }

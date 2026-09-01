@@ -24,7 +24,7 @@ type RunStatus = "never" | "incomplete" | "ok";
  * 件数 → 直近の実行時刻 → 操作ボタン、の縦一列）。
  *
  * `finishedAt === null`（前回のランが完了しなかった）は正常時と明確に
- * 区別する: 状態バッジを赤系（既存の --color-trend。フォームのエラー表示と
+ * 区別する: 状態バッジを朱系（既存の --color-accent。フォームのエラー表示と
  * 同じ色をここでも「異常」として再利用する）にし、カード上部にアクセント
  * バーと注意文を出す。
  */
@@ -102,7 +102,7 @@ export function IngestStatusPanel({ summary, cooldownUntil }: IngestStatusPanelP
                 <dd className="text-[var(--color-foreground)]">{summary.inserted}件</dd>
               </div>
               {summary.errorCount > 0 && (
-                <div className="flex gap-1 text-[var(--color-trend)]">
+                <div className="flex gap-1 text-[var(--color-accent)]">
                   <dt>エラー</dt>
                   <dd>{summary.errorCount}件</dd>
                 </div>
@@ -141,7 +141,7 @@ function StatusPill({ status }: { status: RunStatus }) {
   }
   if (status === "incomplete") {
     return (
-      <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-[var(--color-trend)] px-3 py-1 text-[12px] font-semibold text-[var(--color-on-trend)]">
+      <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-[var(--color-accent)] px-3 py-1 text-[12px] font-semibold text-[var(--color-on-accent)]">
         <AlertTriangle className="size-3.5" aria-hidden />
         未完了
       </span>

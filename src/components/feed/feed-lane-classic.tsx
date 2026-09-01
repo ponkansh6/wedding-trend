@@ -38,7 +38,7 @@ export function FeedLaneClassic({ cards }: FeedLaneClassicProps) {
           description="登録している卒花ブログの新着記事は、まだ取り込まれていません。新着は自動で定期的に確認されます。"
         />
       ) : (
-        <div className="mx-auto flex w-full max-w-2xl flex-col gap-3">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 md:gap-4">
           {cards.map((card, i) => (
             <FeedCard key={card.id} card={card} index={i} />
           ))}

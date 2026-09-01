@@ -10,7 +10,9 @@ function Card({ as: Comp = "div", className, ...props }: CardProps) {
   return (
     <Comp
       className={cn(
-        "rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]",
+        "@container relative rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]",
+        "motion-safe:transition-[transform,box-shadow] motion-safe:duration-200 motion-safe:ease-out",
+        "motion-safe:hover:-translate-y-0.5 motion-safe:hover:shadow-[var(--shadow-card)]",
         className,
       )}
       {...props}

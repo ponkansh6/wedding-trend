@@ -14,7 +14,12 @@ export function OperatorPanel() {
       <summary className="flex cursor-pointer list-none items-center gap-2 rounded-2xl px-4 py-3 text-[13px] font-medium text-[var(--color-muted-foreground)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-background)] group-open:rounded-b-none [&::-webkit-details-marker]:hidden">
         <Settings2 className="size-4" aria-hidden />
         運用ツール
-        <span className="text-[11px] text-[var(--color-muted-foreground)]/70">SNS投稿の追加</span>
+        {/* plan A: /70 で --muted-foreground を背景と合成すると実効コントラストが
+            AAの床(4.5:1)を割る（実測 約2.98:1、ダークは約4.59:1で僅かに通過するのみ）。
+            あらかじめAAを満たす --muted-foreground-subtle に置換。 */}
+        <span className="text-[11px] text-[var(--color-muted-foreground-subtle)]">
+          SNS投稿の追加
+        </span>
         <ChevronDown
           className="ml-auto size-4 shrink-0 transition-transform duration-200 group-open:rotate-180 motion-reduce:transition-none"
           aria-hidden

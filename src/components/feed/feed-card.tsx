@@ -1,3 +1,4 @@
+import type * as React from "react";
 import { ExternalLink } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,8 +17,8 @@ export function FeedCard({ card, index = 0 }: FeedCardProps) {
   return (
     <Card
       as="article"
-      className="flex h-full flex-col gap-2.5 p-4 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-500 motion-safe:fill-mode-both"
-      style={{ animationDelay: `${Math.min(index, 8) * 70}ms` }}
+      className="card-enter flex h-full flex-col gap-2.5 p-4"
+      style={{ "--enter-delay": `${Math.min(index, 8) * 70}ms` } as React.CSSProperties}
     >
       <div className="flex flex-wrap items-center gap-1.5">
         <Badge variant="category" className="text-badge">
@@ -28,7 +29,7 @@ export function FeedCard({ card, index = 0 }: FeedCardProps) {
       <Title originalTitle={card.originalTitle} url={card.url} />
 
       {card.topicAnchor && (
-        <p className="line-clamp-1 text-anchor text-[var(--color-muted-foreground)]">
+        <p className="line-clamp-1 text-anchor text-pretty text-[var(--color-muted-foreground)]">
           {card.topicAnchor}
         </p>
       )}
@@ -77,7 +78,7 @@ function Title({
         href={url}
         target="_blank"
         rel="noopener noreferrer"
-        className="line-clamp-2 rounded-sm underline decoration-transparent underline-offset-2 transition-colors duration-150 hover:decoration-current focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface)]"
+        className="line-clamp-2 text-pretty rounded-sm underline decoration-transparent underline-offset-2 transition-colors duration-150 hover:decoration-current focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface)] after:absolute after:inset-0 after:z-0 after:content-['']"
       >
         {originalTitle}
       </a>
@@ -89,8 +90,8 @@ function Footer({ card }: { card: FeedCardData }) {
   return (
     <footer
       className={cn(
-        "mt-auto flex flex-col gap-2.5 border-t border-[var(--color-border)] pt-3",
-        "sm:flex-row sm:items-center sm:justify-between",
+        "relative z-10 mt-auto flex flex-col gap-2.5 border-t border-[var(--color-border)] pt-3",
+        "@sm:flex-row @sm:items-center @sm:justify-between",
       )}
     >
       <p className="min-w-0 truncate text-meta text-[var(--color-muted-foreground)]">
@@ -99,7 +100,12 @@ function Footer({ card }: { card: FeedCardData }) {
         {" ・ "}
         <PublishedTime iso={card.publishedAt} />
       </p>
-      <Button asChild variant="accent" size="sm" className="w-full shrink-0 sm:w-auto">
+      <Button
+        asChild
+        variant="accent"
+        size="sm"
+        className="relative z-10 w-full shrink-0 @sm:w-auto"
+      >
         <a href={card.url} target="_blank" rel="noopener noreferrer">
           原文を読む
           <ExternalLink className="size-3.5" aria-hidden />
