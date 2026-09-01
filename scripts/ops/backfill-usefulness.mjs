@@ -562,10 +562,9 @@ if (!APPLY) {
 // markCurated に渡す前に dry-run 専用フィールドを取り除く。
 const applyUpdates = toMarkCuratedInput(updates);
 
-// §10-5 漏洩防止の保証: applyUpdates の各要素が許可リスト外のキーや slice／本文を含まないことを機械的にアサート
-for (const u of applyUpdates) {
-  assertNoSliceLeak(u);
-}
+// §10-5 漏洩防止の保証: applyUpdates が許可リスト外のキーや slice／本文を含まないことを機械的にアサート
+// （assertNoSliceLeak は updates 配列を受け取り各要素を検査する）
+assertNoSliceLeak(applyUpdates);
 
 const markResult = await markCurated(applyUpdates);
 

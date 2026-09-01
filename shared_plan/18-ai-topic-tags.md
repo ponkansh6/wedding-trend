@@ -9,13 +9,20 @@
   - `shared_plan/14-restore-topic-anchor-and-title-normalization.md`（topicAnchor と有用度バッジの復活）
   - `shared_plan/16-anchor-clause-form-and-non-redundancy.md`（**体言止め撤回。本プランの最大の衝突点。§4 参照**）
   - `shared_plan/17-simplification-plan.md`（実行中。着手順序の調整が必要）
-- 状態: **Stage 0〜4・6〜7 実装完了（2026-09-01）。残: Stage 5（本番バックフィル）＝本番 DB 書き込みのためオーナー承認待ち**。
+- 状態: **全 Stage 完了（2026-09-01）。** Stage 5（本番 migration + バックフィル）実施済み。詳細は下記。
   - Stage 0-1（golden-set label-schema 乖離解消）・0-2（spec §10-3 精緻化）: 完了（コミット `5579f51`）
   - Stage 1〜3（schema `post_topics` / migration 0013 / `CurationItemSchema.topics` / `TOPIC_RULES` / `validateTopics()` / `batch.ts` フォールバック / `constants` v15 / `query.ts` join / `ingest.ts` 書き込み / `types.ts`）: 完了（`5579f51`）
   - Stage 4（UI）: 完了。「AI判定」バッジ・判定基準テキスト行を撤去、`badge.tsx` の `ai`/`trend` バリアント削除、トピックタグを枠なし低コントラストのインライン語列で描画、`<ul role="list">` + `aria-label`/`title` 免責、レーンヘッダ恒常注記、欠損時非表示。
   - Stage 6（検証）: `pnpm verify` green。`tests/topic-gate.test.ts` が §8 の破壊テスト5項目（数字・11字・未接地固有名詞・5→4切り詰め・重複）を網羅し通過。
   - Stage 7（spec 最終更新）: §5 `post_topics` テーブル、§10-3 自己記述、§9 フィード表示節（バッジ記述の実態追随）を更新。
-  - **Stage 5 未実施**: 本番 Turso に migration 0013 未適用（`check-prod-schema` が drift 検出）。`scripts/ops/backfill-usefulness.mjs --force --apply` による全ブログ投稿の再キュレーション（トピック付与。カテゴリ・tag・topicAnchor・有用度も引き直し）も未実行。`CURATION_PROMPT_VERSION` は 15 に bump 済み・push 済みのため、定期パイプラインが `getStaleCurationCandidates()` 経由で順次再キュレーションはする。
+  - **Stage 5 完了（2026-09-01）**:
+    - migration 0013 を本番 Turso に適用（`apply-migrations-remote.mjs --apply`。3文適用・29スキップ・news-watch 側テーブル消失なし）。
+    - 実装ギャップを2件修正してから実行:
+      1. `backfill-plan.mjs buildBackfillUpdates` が `result.topics` を落としていた（Stage 3 の `topics` 追加は mwed 側のみ）→ `topics` を update に載せるよう修正（コミット `b784109`）。
+      2. `backfill-usefulness.mjs` が `assertNoSliceLeak(u)` を単体オブジェクトで呼んでいた既存バグ（`f4305b53` 由来。`--apply` 経路が 2026-08-30 以降壊れていた）→ `assertNoSliceLeak(applyUpdates)` に修正。
+    - `backfill-usefulness.mjs --apply` 実行: 候補プール 317 件中、プレフライト通過 101 件を再キュレーション（Gemini 4 リクエスト）。**更新成功 101 / 失敗 0**。残り 216 件は本文不足でプレフライトスキップ（既存値温存）。
+    - 本番 `post_topics`: 177 行 / 99 投稿（101 件中 2 件はトピック0件）。全行 `prompt_version = 15`。上位トピック: 準備・美容・式場見学・演出・ご祝儀・見積もり 等。
+    - 残 216 件（本文不足）は恒久的にトピックなし。UI は欠損時非表示（§5-5）で対応済み。`CURATION_PROMPT_VERSION` bump 済みのため定期パイプラインでも波及する。
 - 前提: `openspec/specs/wedding-trend/spec.md` §10（法務制約）・§11（アクセス規律）の不変部分を緩めない。
   ただし §10-3 の**自己記述の精緻化**と、§4.x の **ALTER TABLE 記述の実装追随**は本プランのスコープに含む（§6 Stage 0）。
 
