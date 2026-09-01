@@ -469,7 +469,19 @@ Server Action 自身（Node ランタイム）は `node:crypto` の `timingSafeE
 Tier の区分・対象モジュール・ターゲット網羅率は `scripts/gates/check-coverage-tiers.mjs`
 を単一の真実とする（spec には数値を持たせない。二重管理による乖離を防ぐため）。
 大枠は「法務・公開ゲート系は最も高く / パイプライン・スコア系は中位 / RSC・UI は
-smoke test で担保し網羅率対象から除外」であり、正確な閾値と割り当てはスクリプトを参照。
+網羅率対象から除外」であり、正確な閾値と割り当てはスクリプトを参照。
+
+除外された RSC・UI の担保手段は、`tests/ui/`（`feed-card.test.tsx` /
+`feed-lane.test.tsx`）のコンポーネントテストと `scripts/gates/smoke-test.sh` の
+smoke test の 2 段構えである。両者は担保範囲が異なり、片方だけでは足りない。
+smoke test は in-memory DB（空）で `/` を叩くため、検証できるのはサイトタイトル・
+空状態テキスト・AI 開示テキスト・RSC エラー digest の不在に限られ、フィードカードが
+1 枚でも描画された状態は検証しない。逐語タイトル表示・外部画像非描画・元記事への
+`target="_blank"` + `rel="noopener noreferrer"` 導線・`sourceName` 常時表示と
+`author` の非 null 時のみ表示・`rationaleText` / `aiSummary` 非表示・AI 免責の
+恒常注記描画といった §10 の法務不変条件は、カードが実際に描画されて初めて検証可能
+であり、これらは `tests/ui/` のコンポーネントテスト（`vitest.config.ts` の
+`test.projects` における `ui` プロジェクト、`environment: "happy-dom"`）が担う。
 2026-09-01（shared_plan/20 P3）に旧 7 段を 3 段（法務・公開ゲート系 / パイプライン・
 スコア系 / その他）へ統合した。あわせて「どの実ファイルにも一致しない tier パターン」の
 検出を fail から warn に変更し、未一致件数と一覧は `pnpm verify`（`scripts/gates/verify.mjs`）の

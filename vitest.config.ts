@@ -12,8 +12,37 @@ export default defineConfig({
     // happy-dom の構築だけで 1 回あたり約 20 秒かかっていた（environment 20.81s → 9ms）。
     environment: "node",
     globals: true,
-    include: ["tests/**/*.test.ts"],
     setupFiles: ["./tests/setup-env.ts"],
+    // UI コンポーネントテストのみ happy-dom で走らせる projects 構成。
+    // 注意: vite の mergeConfig は配列を上書きではなく連結（concat）する
+    // （node_modules/.pnpm/vite@*/node_modules/vite/dist/node/index.js の
+    // mergeConfig を実測して確認済み: include:['a'] と include:['b'] を
+    // extends: true でマージすると include:['a','b'] になり、片方を消せない）。
+    // そのためルート（この test ブロック）には include を置かない。
+    // include をルートに置くと、各 project 側の include が「上書き」ではなく
+    // 「ルートの include に追加」される形でマージされ、ui project が
+    // 既存の tests/**/*.test.ts まで拾って happy-dom で二重実行してしまう
+    // （実測: node 37ファイル/530テストに対し ui も 39ファイル/545 = 37+2 を実行）。
+    // include の指定は各 project 側だけに持たせ、ルートは environment 等の
+    // 共通設定のみを残す。
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: "node",
+          environment: "node",
+          include: ["tests/**/*.test.ts"],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "ui",
+          environment: "happy-dom",
+          include: ["tests/ui/**/*.test.tsx"],
+        },
+      },
+    ],
     // 直列実行は 2026-08-31 に撤回した。「RAM 7.4GiB のため OOM する」という
     // 前提を実測で検証したところ、568 テストのピーク RSS は約 415MB であり
     // 2 桁の乖離があった。4 ワーカー並列でもピークは変わらず（413MB）、

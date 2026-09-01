@@ -35,7 +35,7 @@ const STALE_PATTERNS_OUT = resolve(ROOT, "coverage/stale-tier-patterns.json");
 //   Tier 1（純粋ロジック 95%）: これ以上下げない。
 //   Tier 2（パイプライン・スコア・LLM 制御・パース・公開ゲート 85%）
 //   Tier 3（その他: 収集アダプタ・API ルート・データアクセス 70%）
-//   除外（RSC / UI, smoke test で担保）
+//   除外（RSC / UI, tests/ui/ のコンポーネントテスト + smoke test で担保）
 // 対象ファイルは実際の src/ ツリーに合わせて調整済み。
 //
 // 【暫定配置 / 要別計画（shared_plan/20 P3 判断 2026-09-01）】
@@ -91,15 +91,15 @@ const TIERS = [
       /\/lib\/pipeline\/adapters\/.+\.ts$/,
       // 旧 Tier 5（API ルート）。
       /\/app\/api\/ingest\/route\.ts$/,
-      /\/app\/api\/submit-url\/route\.ts$/,
       // ルートハンドラから切り出した本体。以前はルート側で計測されていた。
       /\/lib\/pipeline\/ingest\.ts$/,
       // S2（shared_plan/17）で3レーンを統合した共通コアと、その薄いラッパー。
       // 旧 submit-url.ts / evergreen.ts はここに吸収された。公開ゲートの強制が
       // このコアへ移ったため、tier から漏らすとカバレッジ強制が消える。
+      // submit-url 経路（route.ts / submit-via-pipeline.ts）は plan19 で
+      // トレンドレーン廃止に伴い削除済み（コミット 5579f51）。
       /\/lib\/pipeline\/run-pipeline\.ts$/,
       /\/lib\/pipeline\/retry-runner\.ts$/,
-      /\/lib\/pipeline\/submit-via-pipeline\.ts$/,
       /\/lib\/pipeline\/evergreen-via-pipeline\.ts$/,
       // 旧 Tier 6（データアクセス）。
       /\/lib\/db\/repository\.ts$/,
@@ -113,7 +113,7 @@ const TIERS = [
   },
   {
     name: "除外: RSC / UI",
-    target: null, // Excluded from unit test coverage (verified via smoke test)
+    target: null, // Excluded from unit test coverage (verified via tests/ui/ component tests + smoke test)
     metric: "statements",
     patterns: [/\/app\/page\.tsx$/, /\/app\/layout\.tsx$/, /\/components\/.+\.tsx$/],
   },
@@ -219,7 +219,7 @@ function main() {
       results.push({
         tier: tier.name,
         stmts: pctStr,
-        status: `ℹ️  (${matchedFiles.length} files, excluded — smoke test で担保)`,
+        status: `ℹ️  (${matchedFiles.length} files, excluded — component tests + smoke test で担保)`,
         pass: true,
       });
       continue;
