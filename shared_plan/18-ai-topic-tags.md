@@ -25,6 +25,11 @@
     - **published のうちトピック未付与 34 件の内訳**（＝「本文不足」ではない）:
       - **mwed.jp 29 件**: 記事本文は存在する。バックフィル実行時点で当日の `DAILY_REQUEST_CAP_PER_HOST = 50`（§10-6）を使い切っており、discovery バイパスの `disciplinedFetch` が `budget_exhausted`。**日次カウンタ（UTC 日次リセット）回復後に `pnpm exec tsx scripts/ops/backfill-usefulness.mjs --source mwed.jp --apply` を再実行**すれば取得・付与される（スクリプトは再開可能。1〜2 日で解消）。キャップの緩和・回避は §10-6 法務不変のため不可。
       - **news.google.com 3 件**: URL が Google News のリダイレクトラッパーで、記事本文への到達経路が無い（discovery バイパスは `www.mwed.jp` ホスト限定）。別課題。
+        - 追試（2026-09-01T05:2xZ、`--force --source news.google.com` の dry-run）で確認: 候補 28 件すべてが
+          `disciplinedFetch` の **`blocked_robots`** で停止し、バイパス成功 0 件 / 一時的取得不可 0 件、Gemini 呼び出し 0 件。
+          つまり mwed 29 件の `budget_exhausted`（時間で回復する一時的な停止）とは性質が異なり、**robots による恒久的な取得不可**。
+          日次キャップの回復を待っても解消しない。この 3 件は「バックフィルの積み残し」ではなく**恒久的にトピック 0 件**として扱う。
+          （解消するなら Google News のリダイレクト解決＝別ホストへの到達を新たに設計する必要があり、§11 アクセス規律の再検討を伴う。本プランのスコープ外。）
       - **note.com 2 件**: `og:description` が 32〜34 字と短く、モデルがトピック 0 件を返した。RSS レーンで保持する excerpt はこれで正常。
     - UI は欠損時非表示（§5-5）で対応済み。`CURATION_PROMPT_VERSION` bump 済みのため定期 discovery/ingest でも同じ再取得経路で徐々に波及する（同じ日次キャップに従う）。
 - 前提: `openspec/specs/wedding-trend/spec.md` §10（法務制約）・§11（アクセス規律）の不変部分を緩めない。
