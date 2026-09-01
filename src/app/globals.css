@@ -39,9 +39,12 @@
   --skeleton: #ece3d6;
 
   /* トピックチップ: カテゴリバッジ（境界線のみ）より一段静かな、
-     地色に溶け込む薄塗り。彩色による分類分けはしない（背景色のみの単一トーン）。 */
+     地色に溶け込む薄塗り。彩色による分類分けはしない（背景色のみの単一トーン）。
+     ライトは地が明るいためベベル（内側ハイライト/シャドウ）は不要 -> 透明にして無効化。 */
   --topic-chip: #f4ede2;
   --topic-border: #ece2d3;
+  --topic-chip-highlight: transparent;
+  --topic-chip-shadow: transparent;
 
   --shadow-card: 0 1px 2px rgba(34, 29, 25, 0.05), 0 10px 28px -14px rgba(34, 29, 25, 0.18);
 }
@@ -73,8 +76,14 @@
 
   --skeleton: #2b241d;
 
-  --topic-chip: #2b241d;
-  --topic-border: #3a322a;
+  /* ダークはカード面（--surface: #221d18 / --surface-hover: #2b241d）に
+     埋没しないよう、地を数段持ち上げた温かみのある焦げ茶にし、上辺のわずかな
+     ハイライトと下辺の沈み込みで「浮いた薄いチップ」の厚みを作る。
+     青寄りグレーを避け、暖色のまま明度差だけで階層を出す。 */
+  --topic-chip: #362b20;
+  --topic-border: #4d3f2e;
+  --topic-chip-highlight: rgba(255, 224, 189, 0.08);
+  --topic-chip-shadow: rgba(0, 0, 0, 0.35);
 
   --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4), 0 14px 32px -16px rgba(0, 0, 0, 0.55);
 }
@@ -102,6 +111,8 @@
 
   --color-topic-chip: var(--topic-chip);
   --color-topic-border: var(--topic-border);
+  --color-topic-chip-highlight: var(--topic-chip-highlight);
+  --color-topic-chip-shadow: var(--topic-chip-shadow);
 
   /* 欧文の装飾はディスプレイ書体、和文・本文はシステムの和文書体を優先する。
      和文ウェブフォントは重量級のため同梱しない。 */

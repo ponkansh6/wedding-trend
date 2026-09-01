@@ -13,7 +13,7 @@ const badgeVariants = cva(
         /** トピックチップ: カテゴリより一段控えめな、地色に馴染む脇役チップ。
          *  非クリッカブルなためリンク然とした反応は付けない（hover/focus装飾なし）。 */
         topic:
-          "border border-[var(--color-topic-border)] bg-[var(--color-topic-chip)] text-[var(--color-muted-foreground)] px-2 py-0.5",
+          "border border-[var(--color-topic-border)] bg-[var(--color-topic-chip)] text-[var(--color-muted-foreground)] px-2 py-0.5 shadow-[inset_0_1px_0_var(--color-topic-chip-highlight),inset_0_-1px_1px_var(--color-topic-chip-shadow)]",
       },
     },
     defaultVariants: {
