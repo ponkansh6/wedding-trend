@@ -10,7 +10,7 @@ function Card({ as: Comp = "div", className, ...props }: CardProps) {
   return (
     <Comp
       className={cn(
-        "rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)]",
+        "rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]",
         className,
       )}
       {...props}

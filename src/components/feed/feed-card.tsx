@@ -1,4 +1,4 @@
-import { ExternalLink, Landmark } from "lucide-react";
+import { ExternalLink } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -6,101 +6,98 @@ import { cn } from "@/lib/cn";
 import type { FeedCard as FeedCardData } from "@/lib/types";
 import { PublishedTime } from "@/components/feed/relative-time";
 
-type FeedCardVariant = "visual" | "editorial";
-
 type FeedCardProps = {
   card: FeedCardData;
-  /**
-   * "visual"   = 上段（速報）: テキスト主体の縦積みカード
-   * "editorial" = 下段（王道・定番）: 密なテキスト行
-   */
-  variant: FeedCardVariant;
   /** 出現アニメーションの遅延に使う表示順（任意）。 */
   index?: number;
 };
 
-export function FeedCard({ card, variant, index = 0 }: FeedCardProps) {
-  const isVisual = variant === "visual";
-
+export function FeedCard({ card, index = 0 }: FeedCardProps) {
   return (
     <Card
       as="article"
-      className={cn(
-        "flex h-full flex-col gap-3 p-4 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-500 motion-safe:fill-mode-both",
-        isVisual ? "gap-3.5 p-3.5" : "gap-2.5 p-4",
-      )}
+      className="flex h-full flex-col gap-2.5 p-4 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-500 motion-safe:fill-mode-both"
       style={{ animationDelay: `${Math.min(index, 8) * 70}ms` }}
     >
       <div className="flex flex-wrap items-center gap-1.5">
-        <Badge variant="category">{card.category}</Badge>
-        <Badge variant="classic">
-          <Landmark className="size-3" aria-hidden />
-          定番
+        <Badge variant="category" className="text-badge">
+          {card.category}
         </Badge>
       </div>
 
-      <Title card={card} variant={variant} />
+      <Title originalTitle={card.originalTitle} url={card.url} />
 
       {card.topicAnchor && (
-        <div className="flex flex-col gap-2">
-          <p className="line-clamp-1 text-[14px] leading-snug text-[var(--color-muted-foreground)]">
-            {card.topicAnchor}
-          </p>
-          {card.topics && card.topics.length > 0 && (
-            <ul
-              role="list"
-              className="flex flex-wrap gap-1.5"
-              aria-label="この記事のトピック（AIによる自動判定）"
-              title="このトピック・カテゴリ・特徴ラベルはAIが自動判定しており、誤りを含むことがあります"
-            >
-              {card.topics.map((t) => (
-                <li
-                  key={t}
-                  className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground"
-                >
-                  {t}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+        <p className="line-clamp-1 text-anchor text-[var(--color-muted-foreground)]">
+          {card.topicAnchor}
+        </p>
       )}
 
-      <Footer card={card} variant={variant} />
+      {card.topics && card.topics.length > 0 && (
+        <ul
+          role="list"
+          className="flex flex-wrap items-center gap-x-2 gap-y-1"
+          aria-label="AIが自動選定したトピック"
+          title="AI による自動判定。誤りを含む場合があります"
+        >
+          {card.topics.map((topic) => (
+            <li
+              key={topic}
+              className="cursor-default text-badge text-[var(--color-muted-foreground)] before:mr-0.5 before:content-['#']"
+            >
+              {topic}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <Footer card={card} />
     </Card>
   );
 }
 
-function Title({ card, variant }: { card: FeedCardData; variant: FeedCardVariant }) {
+/**
+ * originalTitle は元記事の逐語タイトル（法務不変・plan 21 §6-3）。
+ * このコンポーネントは originalTitle をそのまま表示する以外の文字列加工
+ * （.replace() 等による言い換え・要約・装飾的な改変）を一切行ってはならない。
+ * line-clamp による視覚上の省略は文字列そのものの改変ではないため許容する。
+ */
+function Title({
+  originalTitle,
+  url,
+}: {
+  originalTitle: FeedCardData["originalTitle"];
+  url: string;
+}) {
   return (
-    <h3
-      className={cn(
-        "font-display leading-jp-heading tracking-jp-heading text-pretty text-[var(--color-foreground)]",
-        variant === "visual" ? "text-[17px] font-semibold" : "text-[15px] font-semibold",
-        "line-clamp-3",
-      )}
-    >
-      {card.originalTitle}
+    <h3 className="text-title font-display font-semibold text-pretty text-[var(--color-foreground)]">
+      <a
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="line-clamp-2 rounded-sm underline decoration-transparent underline-offset-2 transition-colors duration-150 hover:decoration-current focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface)]"
+      >
+        {originalTitle}
+      </a>
     </h3>
   );
 }
 
-function Footer({ card, variant }: { card: FeedCardData; variant: FeedCardVariant }) {
-  const isVisual = variant === "visual";
+function Footer({ card }: { card: FeedCardData }) {
   return (
     <footer
       className={cn(
         "mt-auto flex flex-col gap-2.5 border-t border-[var(--color-border)] pt-3",
-        !isVisual && "sm:flex-row sm:items-center sm:justify-between",
+        "sm:flex-row sm:items-center sm:justify-between",
       )}
     >
-      <p className="min-w-0 truncate text-[12px] text-[var(--color-muted-foreground)]">
+      <p className="min-w-0 truncate text-meta text-[var(--color-muted-foreground)]">
         {card.sourceName}
         {card.author && <> ・ {card.author}</>}
         {" ・ "}
         <PublishedTime iso={card.publishedAt} />
       </p>
-      <Button asChild variant="classic" size="sm" className="w-full shrink-0 sm:w-auto">
+      <Button asChild variant="accent" size="sm" className="w-full shrink-0 sm:w-auto">
         <a href={card.url} target="_blank" rel="noopener noreferrer">
           原文を読む
           <ExternalLink className="size-3.5" aria-hidden />

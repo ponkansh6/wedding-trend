@@ -1,9 +1,8 @@
 import type { ReactNode } from "react";
-import { Landmark } from "lucide-react";
+import { Sparkles } from "lucide-react";
 import { cn } from "@/lib/cn";
 
 type EmptyStateProps = {
-  variant?: "visual" | "editorial";
   title: string;
   description: string;
   /**
@@ -15,29 +14,23 @@ type EmptyStateProps = {
 };
 
 /**
- * 各レーンの初期状態（DB 未投入時）用の空状態。
- * レーンごとのリズムに合わせて見せ方を変え、単なる
- * 「データがありません」で終わらせない。
+ * フィードの初期状態（DB 未投入時）用の空状態。
+ * plan 19 の単一レーン化に伴い、レーンごとに見せ方を変える分岐は廃止した。
  */
 export function EmptyState({ title, description, action }: EmptyStateProps) {
-  const Icon = Landmark;
   return (
     <div
       className={cn(
-        "flex flex-col items-center gap-3 rounded-2xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface)]/60 px-6 py-12 text-center w-full",
+        "flex w-full flex-col items-center gap-3 rounded-lg border border-dashed border-[var(--color-border)] bg-[var(--color-surface-hover)] px-6 py-12 text-center",
       )}
     >
-      <div
-        className={cn(
-          "flex size-11 items-center justify-center rounded-full bg-[linear-gradient(155deg,var(--color-classic-tint-a),var(--color-classic-tint-b))]",
-        )}
-      >
-        <Icon className="size-5 text-[var(--color-foreground)]/50" aria-hidden />
+      <div className="flex size-11 items-center justify-center rounded-full bg-[var(--color-surface)]">
+        <Sparkles className="size-5 text-[var(--color-foreground)]/50" aria-hidden />
       </div>
-      <p className="font-display text-[15px] font-semibold text-[var(--color-foreground)]">
+      <p className="font-display text-title font-semibold text-[var(--color-foreground)]">
         {title}
       </p>
-      <p className="max-w-sm text-[13px] leading-jp-body tracking-jp-body text-[var(--color-muted-foreground)]">
+      <p className="max-w-sm text-meta leading-jp-body tracking-jp-body text-[var(--color-muted-foreground)]">
         {description}
       </p>
       {action && <div className="mt-1 w-full max-w-sm">{action}</div>}

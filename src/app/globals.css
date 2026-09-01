@@ -19,12 +19,18 @@
   --border: #e7dfd3;
   --ring: #b33a24;
 
-  /* 定番（安定・信頼）: 紺色 */
+  /* アクセント（朱）: CTA・フォーカスリング・選択状態にのみ希少使用する単色。
+     plan 21 §6-2 により、旧 trend/classic の対比構造を廃し「紙と朱」の朱を
+     単色アクセントへ転用した。 */
+  --accent: #b33a24;
+  --on-accent: #fff7f2;
+
+  /* 管理画面（ingest-trigger.tsx / ingest-status-panel.tsx）専用のトークン。
+     フィード表示層では plan 21 Stage 2-3 で参照ゼロになったが、管理画面が
+     現役で使用しているため残す。フィード側で再利用しないこと。 */
   --classic: #2c3b5c;
   --on-classic: #f1f4fb;
   --on-classic-solid: #ffffff;
-  --classic-tint-a: #dde2ef;
-  --classic-tint-b: #ccd4e6;
 
   /* AI要約マーカー: 静かな紫 */
   --ai-chip: #ede8fb;
@@ -50,11 +56,12 @@
   --border: #3a322a;
   --ring: #e2603d;
 
+  --accent: #e2603d;
+  --on-accent: #16120e;
+
   --classic: #8fa6de;
   --on-classic: #16120e;
   --on-classic-solid: #16120e;
-  --classic-tint-a: #232c42;
-  --classic-tint-b: #1b2233;
 
   --ai-chip: #2a2347;
   --on-ai-chip: #c9bef0;
@@ -73,11 +80,12 @@
   --color-border: var(--border);
   --color-ring: var(--ring);
 
+  --color-accent: var(--accent);
+  --color-on-accent: var(--on-accent);
+
   --color-classic: var(--classic);
   --color-on-classic: var(--on-classic);
   --color-on-classic-solid: var(--on-classic-solid);
-  --color-classic-tint-a: var(--classic-tint-a);
-  --color-classic-tint-b: var(--classic-tint-b);
 
   --color-ai-chip: var(--ai-chip);
   --color-on-ai-chip: var(--on-ai-chip);
@@ -96,6 +104,39 @@
   --leading-jp-body: 1.9;
   --tracking-jp-heading: 0.01em;
   --tracking-jp-body: 0.03em;
+
+  /* plan 21 §6-1: フィードカードの役割別タイポグラフィスケール。
+     text-[Npx] の任意値を廃し、役割名で参照する。 */
+  --text-title: 17px;
+  --text-title--line-height: var(--leading-jp-heading);
+  --text-title--letter-spacing: var(--tracking-jp-heading);
+
+  --text-anchor: 14px;
+  --text-anchor--line-height: 1.6;
+  --text-anchor--letter-spacing: var(--tracking-jp-body);
+
+  --text-meta: 13px;
+  --text-meta--line-height: 1.5;
+  --text-meta--letter-spacing: 0em;
+
+  --text-badge: 12px;
+  --text-badge--line-height: 1;
+  --text-badge--letter-spacing: 0.02em;
+
+  /* plan 21 §7 Stage 3: レーン見出し用トークン。カード内トークンとは
+     独立させ、レスポンシブな2段階（基準/拡大）で使う。 */
+  --text-lane-heading: 22px;
+  --text-lane-heading--line-height: var(--leading-jp-heading);
+  --text-lane-heading--letter-spacing: var(--tracking-jp-heading);
+
+  --text-lane-heading-lg: 26px;
+  --text-lane-heading-lg--line-height: var(--leading-jp-heading);
+  --text-lane-heading-lg--letter-spacing: var(--tracking-jp-heading);
+
+  /* 本文（originalExcerpt）は現状常に null のため未使用。将来の予約枠。 */
+  --text-body: 16px;
+  --text-body--line-height: var(--leading-jp-body);
+  --text-body--letter-spacing: var(--tracking-jp-body);
 }
 
 body {

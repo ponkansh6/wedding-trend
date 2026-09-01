@@ -8,6 +8,8 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
+        accent:
+          "border-2 border-[var(--color-accent)] text-[var(--color-accent)] hover:bg-[var(--color-accent)] hover:text-[var(--color-on-accent)]",
         classic:
           "border-2 border-[var(--color-classic)] text-[var(--color-classic)] hover:bg-[var(--color-classic)] hover:text-[var(--color-on-classic-solid)]",
         ghost: "text-[var(--color-foreground)] hover:bg-[var(--color-surface-hover)]",

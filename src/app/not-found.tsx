@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 export default function NotFound() {
   return (
     <div className="mx-auto flex max-w-md flex-col items-center gap-4 px-4 py-24 text-center sm:px-6">
-      <div className="flex size-12 items-center justify-center rounded-full bg-[linear-gradient(155deg,var(--color-trend-tint-a),var(--color-classic-tint-b))]">
+      <div className="flex size-12 items-center justify-center rounded-full bg-[var(--color-surface-hover)]">
         <SearchX className="size-6 text-[var(--color-foreground)]/60" aria-hidden />
       </div>
       <h1 className="font-display text-[19px] font-semibold leading-jp-heading text-[var(--color-foreground)]">
