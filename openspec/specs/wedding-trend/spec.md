@@ -790,9 +790,12 @@ bump しなければならない。bump がないと `getStaleCurationCandidates
    - **バックフィル修復時も非永続**: プロンプト/gate を改善した後、discovery 経路で公開済みの投稿は `originalExcerpt` が空のため通常のバックフィル（`scripts/backfill-usefulness.mjs`、プレフライト `shouldRegenerateAnchor()` が本文なし候補を一律スキップ）では再キュレーションされず、旧基準のトピックアンカーのまま固定される。この救済は `scripts/backfill-mwed-anchors.mjs` が行う——対象は `status = "published"` かつ署名不一致の投稿に限定し、`disciplinedFetch()` で本文を再取得し `extractArticleContainer()` → 判定スライスをメモリ上で復元し、1 回の Gemini バッチリクエストで再キュレーションする。**判定スライスはこの経路でも DB へ書き戻さない**: `markCurated()` へ渡す update は `scripts/lib/mwed-anchor-backfill.mjs` の `assertNoSliceLeak()` がキー許可リスト（`url` / `aiSummary` / `category` / `tag` / `contentHash` / `curationSignature` / `usefulness` / `rationale`）で検証し、違反時は throw して中断する。プレビュー出力もトピックアンカーの新旧のみで本文は表示しない。`originalTitle`・`post_publications`（bodyHash / M4）・`discovery_seen`・公開ゲート（撤回判定）は変更しないため公開状態は変わらない。
 6. **アクセス規律（discovery 経路の本文取得のみに適用。実装 `src/lib/sources/access-discipline.ts`）**:
    - **robots.txt の遵守**: 取得前に必ず確認し、`isAllowed()` が false を返す URL は取得しない（`blocked_robots` として `discovery_seen` を `skipped` にする）。取得結果は 24 時間以内でキャッシュする（RFC 9309 の推奨）。
-   - **`Crawl-delay` を下限として尊重**: robots.txt に `Crawl-delay` の指定があれば、ホストあたり最小間隔（既定 `MIN_HOST_INTERVAL_MS` = 5秒）とその値（秒）×1000msの大きい方を実際の間隔とする。
+   - **`Crawl-delay` を下限として尊重**: robots.txt 内の**いずれかの User-agent グループ**に現れる `Crawl-delay` の最大値と、ホストあたり最小間隔（`MIN_HOST_INTERVAL_MS` = 5秒）の大きい方を実際の間隔とする。自 UA 向けの指定に限定しないのは、サイトが特定のクローラにのみ間隔を表明している場合でも、それはそのサイトが許容するペースの表明とみなせるため。
    - **ホスト内は逐次・ホスト間は並列**: 同一ホストへの直前リクエストからの経過時間を記録し、間隔未満なら待機する。
-   - **日次ハードキャップ**: ホストあたり `DAILY_REQUEST_CAP_PER_HOST`（既定50件）。間隔の遵守だけでは総量が青天井になりうるため、独立した上限として持つ。
+   - **日次ハードキャップ**: ホストあたり `DAILY_REQUEST_CAP_PER_HOST`（80件）。間隔の遵守だけでは総量が青天井になりうるため、独立した上限として持つ。
+     - **値の導出**: キャップは「1日にそのホストを占有してよい接触時間」から導く。参照間隔を「robots.txt 内のいずれかの User-agent グループに現れる `Crawl-delay` の最大値と `MIN_HOST_INTERVAL_MS` の大きい方」とし、接触時間予算 `DAILY_HOST_CONTACT_BUDGET_MS`（15分）をこれで割った値を上限の目安とする。`www.mwed.jp` は `User-agent: bingbot` に対し `Crawl-Delay: 10` を表明しており、15分 / 10秒 = 90。安全側に丸めて 80 を採る。
+     - **変更根拠の限定**: キャップの変更根拠として認められるのは、対象ホストの表明（robots.txt・サイトからの連絡）および接触時間予算の再定義のみである。**未処理キューの残量、バックフィルの都合、UI や公開スケジュールの都合は、いかなる場合もキャップ変更の根拠にならない。** B1 が毎日発火することは正常な定常状態であり（直後の B1 の項を参照）、発火の継続はキャップが小さすぎることの証拠ではない。
+     - **変更履歴**: 2026-09-01: 50 → 80。依拠したホスト側の事実は `www.mwed.jp/robots.txt` の `User-agent: bingbot / Crawl-Delay: 10`（実測）。同日、`Crawl-delay` の解釈を「いずれかの UA グループの最大値」に拡張したため、`www.mwed.jp` の実際の取得間隔は 5秒 → 10秒 になる。総接触時間は概ね据え置きで、件数上限と1件あたりの間隔を同じ根拠から導き直した変更である。
    - **条件付き GET**: `If-Modified-Since` / `If-None-Match` を送り、304 を `not_modified` として扱う。
    - **連絡先入り User-Agent**: `CRAWLER_USER_AGENT`（`src/lib/constants.ts`。既定 `WeddingTrendBot/1.0 (+https://github.com/menonaki2/wedding-trend)`）を常に送信する。**UA 偽装は行わない**（実装上、他の UA 文字列に差し替える経路が存在しない）。
    - **取得サイズ上限**: `MAX_BODY_BYTES`（既定 512KB）。`Content-Length` またはボディの実バイト長で判定し、超過時は取得を打ち切る（`too_large`。kill gate ではなく、そのホストではなく個別 URL の事情として扱う）。
@@ -830,7 +833,7 @@ bump しなければならない。bump がないと `getStaleCurationCandidates
    kill gate 族から分離し独立の項目として扱う。
 
    - **観測事象**: ホストあたり日次リクエスト数が `DAILY_REQUEST_CAP_PER_HOST`
-     （既定50件）を超過。
+     （既定80件）を超過。
    - **性質**: レート制御であり、恒久停止でも人間の判断待ちでもない。
      `host_gate_state.stateKind` は変更しない。その日の残り時間は当該ホストへの
      リクエストを拒否し続けるが、**UTC 日次で自動的にリセットされ、人手の

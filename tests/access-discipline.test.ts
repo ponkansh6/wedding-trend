@@ -17,6 +17,7 @@ import {
   checkTermsOfServiceChange,
   classifyTosChange,
   disciplinedFetch,
+  maxCrawlDelayFromRobotsText,
   normalizeTosText,
 } from "@/lib/sources/access-discipline";
 
@@ -55,6 +56,41 @@ function resp({ status, body = "", headers = {} }: MockResponseInit) {
 
 const DISALLOW_ALL_ROBOTS = "User-agent: *\nDisallow: /\n";
 const CRAWL_DELAY_ROBOTS = "User-agent: *\nCrawl-delay: 10\nDisallow:\n";
+/** 実在の www.mwed.jp/robots.txt の構造そのもの: * グループに Crawl-delay は無く、
+ * bingbot グループにのみ Crawl-Delay: 10 が表明されている。*/
+const OTHER_UA_ONLY_CRAWL_DELAY_ROBOTS =
+  "User-agent: *\nDisallow:\n\nUser-agent: bingbot\nCrawl-Delay: 10\n";
+
+describe("maxCrawlDelayFromRobotsText (pure)", () => {
+  it("finds Crawl-delay declared only on a non-* UA group (regression: real www.mwed.jp structure)", () => {
+    expect(maxCrawlDelayFromRobotsText(OTHER_UA_ONLY_CRAWL_DELAY_ROBOTS)).toBe(10);
+  });
+
+  it("takes the max across multiple UA groups with different Crawl-delay values", () => {
+    const robots = "User-agent: bingbot\nCrawl-Delay: 10\n\nUser-agent: Slurp\nCrawl-delay: 20\n";
+    expect(maxCrawlDelayFromRobotsText(robots)).toBe(20);
+  });
+
+  it("returns null when no Crawl-delay is present anywhere", () => {
+    expect(maxCrawlDelayFromRobotsText("User-agent: *\nDisallow:\n")).toBeNull();
+  });
+
+  it("ignores invalid values (non-numeric, zero, negative) and only counts valid ones", () => {
+    const robots =
+      "User-agent: A\nCrawl-delay: abc\n\nUser-agent: B\nCrawl-delay: 0\n\nUser-agent: C\nCrawl-delay: -5\n\nUser-agent: D\nCrawl-delay: 7\n";
+    expect(maxCrawlDelayFromRobotsText(robots)).toBe(7);
+  });
+
+  it("returns null when every declared value is invalid", () => {
+    const robots = "User-agent: A\nCrawl-delay: abc\n\nUser-agent: B\nCrawl-delay: 0\n";
+    expect(maxCrawlDelayFromRobotsText(robots)).toBeNull();
+  });
+
+  it("takes the max when both own (WeddingTrendBot/*) and another UA group declare a value", () => {
+    const robots = "User-agent: *\nCrawl-delay: 3\n\nUser-agent: bingbot\nCrawl-delay: 10\n";
+    expect(maxCrawlDelayFromRobotsText(robots)).toBe(10);
+  });
+});
 
 describe("Access Discipline", () => {
   beforeEach(async () => {

@@ -18,7 +18,8 @@ import type { HostGateState } from "@/lib/db/repository";
 /**
  * アクセス規律レイヤー（plan 06 §5.4 / §9）。
  *
- * - 間隔: ホストあたり最低 5 秒。robots.txt の Crawl-delay があればその値を下限として尊重する
+ * - 間隔: ホストあたり最低 5 秒。robots.txt 内のいずれかの User-agent グループに
+ *   Crawl-delay があれば、その最大値を下限として尊重する
  * - 並列: ホスト内は逐次（最終リクエスト時刻で強制）。ホスト間のみ並列
  * - 総量: ホストあたり日次リクエスト予算（B1）。間隔だけでなく総量を見る。
  *   B1 は kill gate（K1〜K6・異常検知・人手解除要）とは性質が異なり、
@@ -88,7 +89,11 @@ const TOS_PROHIBIT_TERMS_RE = /禁止|禁じ|許可なく|許諾なく|同意な
 type RobotsParser = ReturnType<typeof robotsParser>;
 
 // プロセス内キャッシュ（ホスト内逐次・robots 24h）。テストは __resetStateForTests で初期化する。
-const robotsCache = new Map<string, { fetchedAtMs: number; parser: RobotsParser }>();
+// robotsText は Crawl-delay の全 UA グループ横断抽出（maxCrawlDelayFromRobotsText）に使う生テキスト。
+const robotsCache = new Map<
+  string,
+  { fetchedAtMs: number; parser: RobotsParser; robotsText: string }
+>();
 const lastRequestAt = new Map<string, number>();
 
 let sleepImpl: (ms: number) => Promise<void> = (ms) =>
@@ -232,6 +237,12 @@ async function getHostBlock(host: string): Promise<HardHostBlock | null> {
  * ためのハードキャップだが、性質は K1〜K6 の異常検知とは異なる soft stop
  * （`stateKind` を書かず UTC 日次で自動リセット）。積み残しがある限り毎日
  * 発火するのが正常な定常状態であるため、B1 は決して kill gate 側に混ぜない。
+ *
+ * キャップ値の変更根拠として認められるのは、対象ホストの表明（robots.txt・
+ * サイトからの連絡）および接触時間予算の再定義のみである。未処理キューの
+ * 残量・バックフィルの都合・UI や公開スケジュールの都合は、いかなる場合も
+ * 根拠にならない。B1 が毎日発火するのは正常な定常状態であり、発火の継続は
+ * キャップが小さすぎることの証拠ではない。
  */
 async function checkDailyCap(host: string): Promise<SoftHostBlock | null> {
   const st = await loadGateState(host);
@@ -394,7 +405,30 @@ async function performFetch(
   return { kind: "http_error", status: response.status };
 }
 
-type RobotsResult = { ok: true; parser: RobotsParser } | { ok: false; verdict: FetchVerdict };
+type RobotsResult =
+  | { ok: true; parser: RobotsParser; robotsText: string }
+  | { ok: false; verdict: FetchVerdict };
+
+/**
+ * robots.txt の生テキストから、いずれかの User-agent グループに現れる
+ * `Crawl-delay` の最大値（秒）を抽出する。大文字小文字を区別せず、
+ * 数値としてパースできない行・0以下の値は無視する。該当が無ければ null。
+ *
+ * テスト容易性のため export している（公開 API がひとつ増える）。全 UA
+ * グループ横断の Crawl-delay 抽出という本関数固有のロジックを、
+ * `disciplinedFetch` 経由の間接テスト（sleep 観測）だけでなく直接のユニット
+ * テストでもカバーするための意図的な選択。
+ */
+export function maxCrawlDelayFromRobotsText(robotsText: string): number | null {
+  const re = /crawl-delay\s*:\s*([0-9]+(?:\.[0-9]+)?)/gi;
+  let max: number | null = null;
+  for (const match of robotsText.matchAll(re)) {
+    const value = Number(match[1]);
+    if (!Number.isFinite(value) || value <= 0) continue;
+    if (max === null || value > max) max = value;
+  }
+  return max;
+}
 
 /**
  * robots.txt を取得・パースし、24 時間キャッシュする。
@@ -404,7 +438,7 @@ async function ensureRobotsParser(host: string): Promise<RobotsResult> {
   const cached = robotsCache.get(host);
   const now = Date.now();
   if (cached && now - cached.fetchedAtMs <= robotsCacheTtlMs) {
-    return { ok: true, parser: cached.parser };
+    return { ok: true, parser: cached.parser, robotsText: cached.robotsText };
   }
 
   const robotsUrl = `https://${host}/robots.txt`;
@@ -413,8 +447,8 @@ async function ensureRobotsParser(host: string): Promise<RobotsResult> {
     if (verdict.kind === "http_error" && verdict.status === 404) {
       // RFC 9309: 404 は全 URL 許可として扱う（空ルールのパーサ）。
       const parser = robotsParser(robotsUrl, "");
-      robotsCache.set(host, { fetchedAtMs: now, parser });
-      return { ok: true, parser };
+      robotsCache.set(host, { fetchedAtMs: now, parser, robotsText: "" });
+      return { ok: true, parser, robotsText: "" };
     }
     return { ok: false, verdict };
   }
@@ -479,8 +513,8 @@ async function ensureRobotsParser(host: string): Promise<RobotsResult> {
   }
 
   const parser = robotsParser(robotsUrl, body);
-  robotsCache.set(host, { fetchedAtMs: now, parser });
-  return { ok: true, parser };
+  robotsCache.set(host, { fetchedAtMs: now, parser, robotsText: body });
+  return { ok: true, parser, robotsText: body };
 }
 
 /**
@@ -517,9 +551,11 @@ export async function disciplinedFetch(
     if (allowed === false) {
       return { kind: "blocked_robots" };
     }
-    const delay = robots.parser.getCrawlDelay(CRAWLER_TOKEN) ?? robots.parser.getCrawlDelay("*");
-    if (delay !== undefined && delay > 0) {
-      crawlDelaySec = delay;
+    const ownDelay = robots.parser.getCrawlDelay(CRAWLER_TOKEN) ?? robots.parser.getCrawlDelay("*");
+    const declaredMaxDelaySec = maxCrawlDelayFromRobotsText(robots.robotsText);
+    const effectiveDelaySec = Math.max(ownDelay ?? 0, declaredMaxDelaySec ?? 0);
+    if (effectiveDelaySec > 0) {
+      crawlDelaySec = effectiveDelaySec;
     }
     // robots 取得でも日次カウントを消費しているため、本取得の前に境界を再確認する。
     const capRecheck = await checkDailyCap(host);
@@ -528,7 +564,8 @@ export async function disciplinedFetch(
     }
   }
 
-  // 4) ホスト内逐次の間隔制御（最低 5 秒、Crawl-delay が大きければそちらを下限）。
+  // 4) ホスト内逐次の間隔制御（最低 5 秒、robots.txt 内のいずれかの UA グループが
+  //    表明する Crawl-delay の最大値が大きければそちらを下限とする）。
   const intervalMs = Math.max(MIN_HOST_INTERVAL_MS, (crawlDelaySec ?? 0) * 1000);
   await respectSpacing(host, intervalMs);
 
