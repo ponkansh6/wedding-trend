@@ -9,8 +9,12 @@
 # getStaleCurationCandidates() returns 0 rows — silently resuming
 # with old classifications.
 #
-# Non-blocking (exit 0) — advisory only, same as check-spec-update.sh.
-# See shared_plan/11-reader-phase-rubric-and-rescore-gap.md §8 Stage 0.
+# BLOCKING (non-zero exit) — a missed bump has caused a real incident
+# (87 rows left un-rescored). See shared_plan/20-relax-dev-gate-constraints.md P1
+# and shared_plan/11-reader-phase-rubric-and-rescore-gap.md §8 Stage 0.
+#
+# Escape hatch (use only when the prompt change genuinely needs no rescore):
+#   ALLOW_PROMPT_WITHOUT_BUMP=1 git commit ...
 
 set -euo pipefail
 
@@ -30,6 +34,11 @@ if echo "$STAGED_FILES" | grep -qx "$PROMPTS_FILE"; then
 fi
 
 if [ "$PROMPTS_STAGED" = false ]; then
+  exit 0
+fi
+
+if [ "${ALLOW_PROMPT_WITHOUT_BUMP:-0}" = "1" ]; then
+  echo "[prompt-version-bump] ⚠ ALLOW_PROMPT_WITHOUT_BUMP=1 によりスキップしました。"
   exit 0
 fi
 
@@ -69,6 +78,7 @@ echo "│  コメントを参照。                                           �
 echo "└─────────────────────────────────────────────────────────────┘"
 echo ""
 echo "  詳細: shared_plan/11-reader-phase-rubric-and-rescore-gap.md §4, §8"
+echo "  再スコア不要な変更の場合のみ: ALLOW_PROMPT_WITHOUT_BUMP=1 git commit ..."
 echo ""
 
-exit 0
+exit 1

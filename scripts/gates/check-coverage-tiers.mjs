@@ -14,23 +14,42 @@
  *   0 - All tiers pass
  *   1 - Some tiers below target
  *   2 - Coverage report not found
+ *
+ * このスクリプトが spec.md §7.1 に対する単一の真実（P2）。7段→3段への統合と
+ * 未一致パターン検出の fail→warn 化は shared_plan/20 P3。未一致パターンの件数と
+ * 一覧は coverage/stale-tier-patterns.json に書き出し、verify.mjs が実行終了時に
+ * サマリ表示する（warn 化の必須付帯条件）。
  */
 
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "../..");
 
-// ── Tier configuration (mirrors spec.md §7.1) ──────────────────────────
+const STALE_PATTERNS_OUT = resolve(ROOT, "coverage/stale-tier-patterns.json");
+
+// ── Tier configuration (this file is the source of truth for spec.md §7.1) ──
+// 7段→3段に統合（shared_plan/20 P3）。実質:
+//   Tier 1（純粋ロジック 95%）: これ以上下げない。
+//   Tier 2（パイプライン・スコア・LLM 制御・パース・公開ゲート 85%）
+//   Tier 3（その他: 収集アダプタ・API ルート・データアクセス 70%）
+//   除外（RSC / UI, smoke test で担保）
 // 対象ファイルは実際の src/ ツリーに合わせて調整済み。
+//
+// 【暫定配置 / 要別計画（shared_plan/20 P3 判断 2026-09-01）】
+//   src/lib/publish/gate.ts / invariants.ts / src/lib/sources/access-discipline.ts は
+//   従来どの Tier にも属さず未計測だった。plan 20 では新規に Tier 2（85%）へ入れる
+//   にとどめ、法務・公開ゲート系を Tier 1（95%）へ引き上げるのは新規テスト追加を
+//   要するため別計画とする。llm/batch.ts も現状 77% のため Tier 3（70%）へ暫定配置。
 const TIERS = [
   {
     name: "Tier 1: 純粋ロジック",
     target: 95,
     metric: "statements",
     patterns: [
+      // 純粋ロジック。
       /\/lib\/url\.ts$/,
       /\/lib\/llm\/signature\.ts$/,
       /\/lib\/llm\/schemas\.ts$/,
@@ -42,34 +61,35 @@ const TIERS = [
     ],
   },
   {
-    name: "Tier 2: パース・判定",
+    name: "Tier 2: パース・判定・公開ゲート・LLM 制御",
     target: 85,
     metric: "statements",
-    patterns: [/\/lib\/sources\/base\/feed-parser\.ts$/, /\/lib\/embed\/providers\.ts$/],
+    patterns: [
+      // 旧 Tier 2（パース・判定）。
+      /\/lib\/sources\/base\/feed-parser\.ts$/,
+      /\/lib\/embed\/providers\.ts$/,
+      // 公開ゲート／法務不変条件の強制点（従来未計測。plan 20 P3 で新規計測）。
+      /\/lib\/publish\/gate\.ts$/,
+      /\/lib\/publish\/invariants\.ts$/,
+      /\/lib\/sources\/access-discipline\.ts$/,
+      // 旧 Tier 4（LLM 制御）のうち client.ts。batch.ts は現状 77% のため Tier 3 へ。
+      /\/lib\/llm\/client\.ts$/,
+    ],
   },
   {
-    name: "Tier 3: 収集アダプタ",
-    target: 80,
+    name: "Tier 3: 収集アダプタ・API ルート・データアクセス",
+    target: 70,
     metric: "statements",
     patterns: [
+      // 旧 Tier 4（LLM 制御）batch.ts。現状 77%。Tier 2 引き上げは別計画。
+      /\/lib\/llm\/batch\.ts$/,
+      // 旧 Tier 3（収集アダプタ）。
       /\/lib\/sources\/(hatena-bookmark|google-news|note|ameblo)\.ts$/,
       /\/lib\/sources\/base\/rss-fetcher\.ts$/,
       /\/lib\/embed\/oembed\.ts$/,
       // S2（shared_plan/17）でレーン別の候補供給を切り出したアダプタ群。
       /\/lib\/pipeline\/adapters\/.+\.ts$/,
-    ],
-  },
-  {
-    name: "Tier 4: LLM 制御",
-    target: 80,
-    metric: "statements",
-    patterns: [/\/lib\/llm\/batch\.ts$/, /\/lib\/llm\/client\.ts$/],
-  },
-  {
-    name: "Tier 5: API ルート",
-    target: 70,
-    metric: "statements",
-    patterns: [
+      // 旧 Tier 5（API ルート）。
       /\/app\/api\/ingest\/route\.ts$/,
       /\/app\/api\/submit-url\/route\.ts$/,
       // ルートハンドラから切り出した本体。以前はルート側で計測されていた。
@@ -81,13 +101,7 @@ const TIERS = [
       /\/lib\/pipeline\/retry-runner\.ts$/,
       /\/lib\/pipeline\/submit-via-pipeline\.ts$/,
       /\/lib\/pipeline\/evergreen-via-pipeline\.ts$/,
-    ],
-  },
-  {
-    name: "Tier 6: データアクセス",
-    target: 65,
-    metric: "statements",
-    patterns: [
+      // 旧 Tier 6（データアクセス）。
       /\/lib\/db\/repository\.ts$/,
       /\/lib\/db\/query\.ts$/,
       /\/lib\/db\/feed\.ts$/,
@@ -98,7 +112,7 @@ const TIERS = [
     ],
   },
   {
-    name: "Tier 7: RSC / UI",
+    name: "除外: RSC / UI",
     target: null, // Excluded from unit test coverage (verified via smoke test)
     metric: "statements",
     patterns: [/\/app\/page\.tsx$/, /\/app\/layout\.tsx$/, /\/components\/.+\.tsx$/],
@@ -168,15 +182,27 @@ function main() {
       }
     }
   }
+  // shared_plan/20 P3: 未一致パターンは fail させず warn に留める。ただし件数と
+  // 一覧を coverage/stale-tier-patterns.json に書き出し、verify.mjs が実行終了時に
+  // サマリ表示する（サマリ出力とセットでなければ warn 化してはならない、が計画の必須条件）。
+  try {
+    writeFileSync(
+      STALE_PATTERNS_OUT,
+      JSON.stringify({ count: stalePatterns.length, patterns: stalePatterns }, null, 2),
+    );
+  } catch {
+    // coverage/ ディレクトリが無い等。verify.mjs 側は存在しなければ 0 件扱い。
+  }
   if (stalePatterns.length > 0) {
-    console.error(
-      `\n❌ どのファイルにも一致しない tier パターンがあります（${stalePatterns.length} 件）。\n`,
+    console.warn(
+      `\n⚠️  どのファイルにも一致しない tier パターンがあります（${stalePatterns.length} 件）。\n`,
     );
     for (const { tier, pattern } of stalePatterns) {
-      console.error(`   ${tier}\n   パターン: ${pattern}\n`);
+      console.warn(`   ${tier}\n   パターン: ${pattern}\n`);
     }
-    console.error("   → ファイルを削除・改名した場合は tier 定義も追随させてください。\n");
-    process.exit(1);
+    console.warn(
+      "   → ファイルを削除・改名した場合は tier 定義も追随させてください（warn: CI はブロックしません）。\n",
+    );
   }
 
   for (const tier of TIERS) {

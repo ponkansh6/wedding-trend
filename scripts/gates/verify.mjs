@@ -1,7 +1,9 @@
 // scripts/gates/verify.mjs
 // Unified verification suite called by pre-push and CI, encompassing all mandatory quality gates.
 import { execSync } from "node:child_process";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, rmSync } from "node:fs";
+
+const STALE_TIER_PATTERNS_FILE = "coverage/stale-tier-patterns.json";
 
 function run(cmd, options = {}) {
   console.log(`\n▶ ${cmd}`);
@@ -52,7 +54,7 @@ console.log(`[verify] needTest: ${needTest}, needSmoke: ${needSmoke}`);
 run("bash scripts/gates/check-lockfile-sync.sh");
 run("pnpm exec oxlint --nextjs-plugin --react-plugin --react-perf-plugin src/");
 run("bash scripts/gates/check-spec-refs.sh");
-run("oxfmt --check .");
+run("oxfmt --check . '!shared_plan/**'");
 run("bash scripts/gates/check-security.sh");
 run("node scripts/gates/check-script-imports.mjs");
 run("node scripts/gates/check-migrations-additive.mjs");
@@ -65,9 +67,16 @@ if (needSmoke) {
   console.log("[verify] Skipping smoke-test (no relevant files changed)");
 }
 
+let coverageTiersRan = false;
 if (needTest) {
+  try {
+    rmSync(STALE_TIER_PATTERNS_FILE, { force: true });
+  } catch {
+    // ignore
+  }
   run("pnpm exec vitest run --coverage");
   run("node scripts/gates/check-coverage-tiers.mjs");
+  coverageTiersRan = true;
 } else {
   console.log("[verify] Skipping vitest & coverage-tiers (no relevant files changed)");
 }
@@ -91,6 +100,28 @@ if (existsSync(".env.local")) {
     }
   } catch (e) {
     console.log("[verify] Advisory prod schema check skipped/failed gracefully:", e.message);
+  }
+}
+
+// shared_plan/20 P3: 未一致 tier パターンのサマリ（warn 化の必須付帯条件）。
+// coverage-tiers が走った場合は必ず件数を表示する（0 件でも明示）。
+if (coverageTiersRan) {
+  let stale = { count: 0, patterns: [] };
+  try {
+    if (existsSync(STALE_TIER_PATTERNS_FILE)) {
+      stale = JSON.parse(readFileSync(STALE_TIER_PATTERNS_FILE, "utf8"));
+    }
+  } catch {
+    // ignore parse errors — treat as unknown
+  }
+  console.log(`\n未一致 tier パターン ${stale.count}件`);
+  for (const { tier, pattern } of stale.patterns ?? []) {
+    console.log(`  - ${tier}: ${pattern}`);
+  }
+  if (stale.count > 0) {
+    console.log(
+      "  （warn: CI はブロックしません。ファイルの削除・改名時は scripts/gates/check-coverage-tiers.mjs の tier 定義を追随させること）",
+    );
   }
 }
 
