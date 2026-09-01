@@ -1,9 +1,7 @@
 import type * as React from "react";
 import { ExternalLink } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { cn } from "@/lib/cn";
 import type { FeedCard as FeedCardData } from "@/lib/types";
 import { PublishedTime } from "@/components/feed/relative-time";
 
@@ -26,7 +24,7 @@ export function FeedCard({ card, index = 0 }: FeedCardProps) {
         </Badge>
       </div>
 
-      <Title originalTitle={card.originalTitle} url={card.url} />
+      <Title originalTitle={card.originalTitle} url={card.url} cardId={card.id} />
 
       {card.topicAnchor && (
         <p className="line-clamp-1 text-anchor text-pretty text-[var(--color-muted-foreground)]">
@@ -68,49 +66,65 @@ export function FeedCard({ card, index = 0 }: FeedCardProps) {
 function Title({
   originalTitle,
   url,
+  cardId,
 }: {
   originalTitle: FeedCardData["originalTitle"];
   url: string;
+  cardId: FeedCardData["id"];
 }) {
+  const noteId = `${cardId}-external-note`;
   return (
-    <h3 className="text-title font-display font-semibold text-pretty text-[var(--color-foreground)]">
-      <a
-        href={url}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="line-clamp-2 text-pretty rounded-sm underline decoration-transparent underline-offset-2 transition-colors duration-150 hover:decoration-current focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface)] after:absolute after:inset-0 after:z-0 after:content-['']"
-      >
-        {originalTitle}
-      </a>
-    </h3>
+    <>
+      <h3 className="text-title font-display font-semibold text-pretty text-[var(--color-foreground)]">
+        <a
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-describedby={noteId}
+          className="line-clamp-2 text-pretty rounded-sm underline decoration-[var(--color-muted-foreground-subtle)] underline-offset-2 transition-colors duration-150 hover:decoration-current focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface)] after:absolute after:inset-0 after:z-0 after:content-['']"
+        >
+          {originalTitle}
+        </a>
+      </h3>
+      {/*
+       * h3.textContent は元記事タイトルと厳密一致でなければならない
+       * （spec.md §10-3・tests/ui/feed-card.test.tsx が検証する法務ゲート）ため、
+       * 「外部サイトへ新しいタブで遷移する」という補足は見出し要素の外側に置き、
+       * aria-describedby でリンクの説明として結び付ける。aria-hidden な要素は
+       * aria-describedby の参照先として読み上げられない実装があるため、
+       * aria-hidden は付けない独立した sr-only 要素にする。
+       */}
+      <span id={noteId} className="sr-only">
+        外部サイトの元記事を新しいタブで開きます
+      </span>
+    </>
   );
 }
 
+/**
+ * カード全面がタイトル <a> の ::after でリンク化されているため（Title 参照）、
+ * ここには実インタラクティブ要素を置かない（ネストしたリンクを作らないため）。
+ * 「原文を読む」の見た目だけを常時表示し、押下できることの視覚的裏付けとする。
+ * アクセシブルな説明（外部サイト・新しいタブである旨）は Title 側の
+ * aria-describedby が担うため、ここは aria-hidden で読み上げから隠す
+ * （見た目だけのラベルとして二重announceを防ぐ）。
+ */
 function Footer({ card }: { card: FeedCardData }) {
   return (
-    <footer
-      className={cn(
-        "relative z-10 mt-auto flex flex-col gap-2.5 border-t border-[var(--color-border)] pt-3",
-        "@sm:flex-row @sm:items-center @sm:justify-between",
-      )}
-    >
+    <footer className="mt-auto flex flex-row items-center justify-between gap-2.5 border-t border-[var(--color-border)] pt-3">
       <p className="min-w-0 truncate text-meta text-[var(--color-muted-foreground)]">
         {card.sourceName}
         {card.author && <> ・ {card.author}</>}
         {" ・ "}
         <PublishedTime iso={card.publishedAt} />
       </p>
-      <Button
-        asChild
-        variant="accent"
-        size="sm"
-        className="relative z-10 w-full shrink-0 @sm:w-auto"
+      <span
+        aria-hidden="true"
+        className="inline-flex shrink-0 items-center gap-1 text-badge font-semibold text-[var(--color-accent)]"
       >
-        <a href={card.url} target="_blank" rel="noopener noreferrer">
-          原文を読む
-          <ExternalLink className="size-3.5" aria-hidden />
-        </a>
-      </Button>
+        原文を読む
+        <ExternalLink className="size-3.5" />
+      </span>
     </footer>
   );
 }
