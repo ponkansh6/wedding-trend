@@ -56,6 +56,8 @@ vi.mock("@/lib/db/repository", () => ({
   completeRetry: completeRetryMock,
   hashUrl: (url: string) => `hash:${url}`,
   saveEmbed: vi.fn(),
+  withDropReasonDetail: (base: string, detail?: string | null) =>
+    detail ? `${base}:${detail}` : base,
 }));
 
 vi.mock("@/lib/llm/client", async (importOriginal) => {

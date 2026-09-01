@@ -245,7 +245,8 @@ describe("runIngest (src/lib/pipeline/ingest.ts)", () => {
     const removal = (
       await db.select().from(postRemovals).where(eq(postRemovals.postId, row.id))
     )[0];
-    expect(removal.reason).toBe("extraction_insufficient");
+    // 抜粋が無かったという判定事実自体が理由に残る（discovery レーンの詳細内訳とは区別される）。
+    expect(removal.reason).toBe("extraction_insufficient:no_excerpt");
   });
 
   // M1-1: 逐語タイトルの無検閲公開フィルタ。恒久棄却（LLM は呼ばれる）。
@@ -654,7 +655,8 @@ describe("runIngest (src/lib/pipeline/ingest.ts)", () => {
       const removal = (
         await db.select().from(postRemovals).where(eq(postRemovals.postId, postId))
       )[0];
-      expect(removal?.reason).toBe("retry_exhausted");
+      // キューが保持していた元の失敗理由（llm_transient）が終端理由に残る。
+      expect(removal?.reason).toBe("retry_exhausted:llm_transient");
     });
 
     it("terminally drops a TTL-expired entry as retry_exhausted without waiting for it to become due", async () => {
@@ -685,7 +687,8 @@ describe("runIngest (src/lib/pipeline/ingest.ts)", () => {
       const removal = (
         await db.select().from(postRemovals).where(eq(postRemovals.postId, postId))
       )[0];
-      expect(removal?.reason).toBe("retry_exhausted");
+      // TTL 超過側（terminateRetry 経由）でもキューの理由が残る。
+      expect(removal?.reason).toBe("retry_exhausted:llm_transient");
     });
 
     it("does not touch a discovery-lane queue entry (lane scoping)", async () => {

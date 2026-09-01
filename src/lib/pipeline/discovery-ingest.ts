@@ -52,6 +52,7 @@ import {
   markCurated,
   markDropped,
   markRetracted,
+  withDropReasonDetail,
   reapStaleNonTerminal,
   recordHostMetrics,
   recordPublication,
@@ -76,7 +77,13 @@ import {
   type EvidenceFailedCondition,
 } from "@/lib/sources/article-text";
 import { filterTitle } from "@/lib/publish/gate";
-import type { DropReason, RetryQueueEntry, RetryReason, TrendTag } from "@/lib/types";
+import type {
+  DropReason,
+  DropReasonBase,
+  RetryQueueEntry,
+  RetryReason,
+  TrendTag,
+} from "@/lib/types";
 
 /** `ingestDiscoveredUrls()` の実行統計。run-discovery.mjs のログ出力と Actions 監視に使う。 */
 export interface DiscoveryIngestStats {
@@ -359,9 +366,10 @@ async function dropPost(
   host: string,
   url: string,
   title: string | null,
-  reason: DropReason,
+  reason: DropReasonBase,
   now: string,
   failedConditions?: EvidenceFailedCondition[],
+  detail?: string | null,
 ) {
   if (!(await upsertPostRow(host, url, title ?? url, "rejected"))) return;
   const states = await getPostsByUrls([url]);
@@ -370,15 +378,17 @@ async function dropPost(
     console.warn(`[discovery-ingest] post id lookup failed while dropping ${url}`);
     return;
   }
-  let finalReason: string = reason;
+  let finalReason: DropReason = reason;
   if (reason === "extraction_insufficient") {
     if (failedConditions && failedConditions.length > 0) {
-      finalReason = `extraction_insufficient:${failedConditions.join(",")}`;
+      finalReason = withDropReasonDetail(reason, failedConditions.join(","));
     } else {
-      finalReason = "extraction_insufficient:unknown";
+      finalReason = withDropReasonDetail(reason, "unknown");
     }
+  } else if (detail) {
+    finalReason = withDropReasonDetail(reason, detail);
   }
-  await markDropped(postId, finalReason as DropReason, now);
+  await markDropped(postId, finalReason, now);
 }
 
 /** published として保存し、判定根拠（rationale）・公開記録も行う。 */
@@ -849,7 +859,15 @@ export async function ingestDiscoveredUrls(
     stats.retryExpiredRaw = expired.length;
     for (const entry of expired) {
       stats.processed++;
-      await dropPost(entry.host, entry.url, null, "retry_exhausted", now);
+      await dropPost(
+        entry.host,
+        entry.url,
+        null,
+        "retry_exhausted",
+        now,
+        undefined,
+        `${entry.reason}:attempts=${entry.attempts}`,
+      );
       await setDiscoverySeenStatus(entry.host, entry.url, "skipped");
       stats.retryExhausted++;
     }
@@ -869,7 +887,15 @@ export async function ingestDiscoveredUrls(
         if (entry.expiresAt <= now || entry.attempts >= RETRY_MAX_ATTEMPTS) {
           // TTL 超過または最大試行超過 → 終端棄却（§7・contract: DropReason "retry_exhausted"）。
           stats.processed++;
-          await dropPost(host, entry.url, null, "retry_exhausted", now);
+          await dropPost(
+            host,
+            entry.url,
+            null,
+            "retry_exhausted",
+            now,
+            undefined,
+            `${entry.reason}:attempts=${entry.attempts}`,
+          );
           await setDiscoverySeenStatus(host, entry.url, "skipped");
           await completeRetry(entry.urlHash);
           stats.retryExhausted++;

@@ -16,12 +16,25 @@ import {
 import type {
   BodyHashKind,
   DropReason,
+  DropReasonBase,
   HostMetricsBaseline,
   PostStatus,
   RetractionReason,
   RetryLane,
   RetryQueueEntry,
 } from "@/lib/types";
+
+/**
+ * `DropReasonBase` に診断用の詳細を付与した `DropReason` を組み立てる唯一の橋渡し。
+ * `markDropped` に渡す前にここを通すことで、呼び出し側で `as DropReason` の
+ * ようなキャストを個別に書かずに済ませる。`detail` が空文字列/未指定の場合は
+ * 裸の base をそのまま返す（呼び出し側で理由が本当に取れなかった場合の
+ * フォールバック用）。
+ */
+export function withDropReasonDetail(base: DropReasonBase, detail?: string | null): DropReason {
+  if (!detail) return base;
+  return `${base}:${detail}`;
+}
 export async function enqueueRetry(entry: RetryQueueEntry): Promise<void> {
   await db
     .insert(postRetryQueue)

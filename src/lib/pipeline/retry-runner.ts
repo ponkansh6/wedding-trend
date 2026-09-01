@@ -71,7 +71,7 @@ export async function processDueAndExpiredRetries(now: string): Promise<{ errors
     if (!isRssAdjacentLane(entry.lane)) continue; // expireRetries(lanes) により実質発生しない防御。
     try {
       const adapter = ADAPTERS[entry.lane]();
-      await terminateRetry(adapter, entry.url, now);
+      await terminateRetry(adapter, entry.url, now, entry.reason);
     } catch (err) {
       errors.push(
         `retry-expire[${entry.lane}] ${entry.url}: ${err instanceof Error ? err.message : String(err)}`,

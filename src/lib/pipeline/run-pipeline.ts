@@ -16,6 +16,7 @@ import {
   recordPublication,
   saveEmbed,
   upsertPosts,
+  withDropReasonDetail,
   type CurationUpdate,
   type PostUpsertInput,
 } from "@/lib/db/repository";
@@ -391,7 +392,11 @@ export async function runPipelineOnCandidates(
           addDrop("extraction_insufficient");
           const state = states.get(c.url);
           if (state?.id != null) {
-            await markDropped(state.id, "extraction_insufficient", now);
+            await markDropped(
+              state.id,
+              withDropReasonDetail("extraction_insufficient", "no_excerpt"),
+              now,
+            );
           }
           await saveEmbedIfFetched(c, now);
           await adapter.onTerminalDrop(c, "extraction_insufficient", now);
@@ -438,7 +443,11 @@ export async function runPipelineOnCandidates(
             );
             retriedCount++;
             if (gaveUp && postId !== null) {
-              await markDropped(postId, "retry_exhausted", now);
+              await markDropped(
+                postId,
+                withDropReasonDetail("retry_exhausted", "llm_transient"),
+                now,
+              );
               await saveEmbedIfFetched(post, now);
               await adapter.onTerminalDrop(post, "retry_exhausted", now);
               addDrop("retry_exhausted");
@@ -486,7 +495,11 @@ export async function runPipelineOnCandidates(
             );
             retriedCount++;
             if (gaveUp && postId !== null) {
-              await markDropped(postId, "retry_exhausted", now);
+              await markDropped(
+                postId,
+                withDropReasonDetail("retry_exhausted", "rate_capped"),
+                now,
+              );
               await saveEmbedIfFetched(post, now);
               await adapter.onTerminalDrop(post, "retry_exhausted", now);
               addDrop("retry_exhausted");
@@ -638,7 +651,10 @@ export async function terminateRetry(
   adapter: PipelineAdapter,
   url: string,
   now: string,
+  queueReason?: RetryReason,
 ): Promise<void> {
   const id = await adapter.ensureTombstonePost(url);
-  if (id != null) await markDropped(id, "retry_exhausted", now);
+  if (id != null) {
+    await markDropped(id, withDropReasonDetail("retry_exhausted", queueReason ?? null), now);
+  }
 }

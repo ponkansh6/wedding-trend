@@ -62,6 +62,8 @@ vi.mock("@/lib/db/repository", () => ({
   countPublishedSince: countPublishedSinceMock,
   hashUrl: (url: string) => `hash:${url}`,
   saveEmbed: vi.fn(),
+  withDropReasonDetail: (base: string, detail?: string | null) =>
+    detail ? `${base}:${detail}` : base,
 }));
 
 // 実体の curatePosts/curateBatch/validateTopicAnchor を通し、Gemini 呼び出しだけ
@@ -499,7 +501,7 @@ describeInvariant("INV-5", "抜粋なしは LLM を呼ばず extraction_insuffic
     expect(summary.stageCounts.dropped["extraction_insufficient"]).toBe(1);
     expect(markDroppedMock).toHaveBeenCalledWith(
       502,
-      "extraction_insufficient",
+      "extraction_insufficient:no_excerpt",
       expect.any(String),
     );
     expect(callGeminiMock).not.toHaveBeenCalled();

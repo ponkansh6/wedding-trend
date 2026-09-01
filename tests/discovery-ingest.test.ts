@@ -31,7 +31,7 @@ import {
 import { curateSingle } from "@/lib/llm/batch";
 import type { CurationResult } from "@/lib/llm/batch";
 import { __resetStateForTests, __setSleepForTests } from "@/lib/sources/access-discipline";
-import { DAILY_PUBLISH_CAP, DAILY_REQUEST_CAP_PER_HOST } from "@/lib/constants";
+import { DAILY_PUBLISH_CAP, DAILY_REQUEST_CAP_PER_HOST, RETRY_MAX_ATTEMPTS } from "@/lib/constants";
 
 vi.mock("@/lib/llm/batch", () => ({
   curateSingle: vi.fn(),
@@ -639,7 +639,40 @@ describe("ingestDiscoveredUrls", () => {
     expect(post?.status).toBe("rejected");
     if (post?.id == null) throw new Error("post id should exist");
     const removal = await db.select().from(postRemovals).where(eq(postRemovals.postId, post.id));
-    expect(removal[0]?.reason).toBe("retry_exhausted");
+    // 終端理由には再試行キューが保持していた元の失敗理由（fetch_transient）が残る。
+    expect(removal[0]?.reason).toBe("retry_exhausted:fetch_transient:attempts=1");
+  });
+
+  it("§7: 最大試行回数超過（TTL 内）で終端棄却した場合もキューの理由が残る", async () => {
+    const url = `https://${HOST}/story/cases/max-attempts`;
+    const now = new Date().toISOString();
+    // discovery レーンの due エントリを、最大試行数に達した状態で直接シードする
+    // （TTL はまだ切れていないため、TTL 超過ループではなく最大試行超過の判定に入る）。
+    await db.insert(postRetryQueue).values({
+      urlHash: "max-attempts-hash",
+      url,
+      host: HOST,
+      lane: "discovery",
+      reason: "llm_transient",
+      attempts: RETRY_MAX_ATTEMPTS,
+      firstQueuedAt: now,
+      nextAttemptAt: now,
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+    });
+
+    const stats = await ingestDiscoveredUrls(HOST);
+    expect(stats.retryExhausted).toBe(1);
+
+    const remaining = await db.select().from(postRetryQueue).where(eq(postRetryQueue.url, url));
+    expect(remaining).toHaveLength(0);
+
+    const post = (await getPostsByUrls([url])).get(url);
+    if (post?.id == null) throw new Error("post id should exist");
+    expect(post.status).toBe("rejected");
+    const removal = await db.select().from(postRemovals).where(eq(postRemovals.postId, post.id));
+    // 最大試行超過の経路（due ループ内）でも、キューが保持していた元の失敗理由
+    // （llm_transient）と試行回数が終端理由に残る。
+    expect(removal[0]?.reason).toBe(`retry_exhausted:llm_transient:attempts=${RETRY_MAX_ATTEMPTS}`);
   });
 
   it("M1: 既に自動撤回（retracted）済みの post は sticky で再公開しない", async () => {

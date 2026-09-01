@@ -42,6 +42,8 @@ vi.mock("@/lib/db/repository", () => ({
   recordPublication: recordPublicationMock,
   countPublishedSince: countPublishedSinceMock,
   hashUrl: (url: string) => `hash:${url}`,
+  withDropReasonDetail: (base: string, detail?: string | null) =>
+    detail ? `${base}:${detail}` : base,
 }));
 
 vi.mock("@/lib/llm/batch", () => ({
@@ -220,7 +222,7 @@ describe("runPipeline (src/lib/pipeline/run-pipeline.ts)", () => {
     expect(summary.stageCounts.dropped["extraction_insufficient"]).toBe(1);
     expect(markDroppedMock).toHaveBeenCalledWith(
       101,
-      "extraction_insufficient",
+      "extraction_insufficient:no_excerpt",
       expect.any(String),
     );
     expect(adapter.onTerminalDrop).toHaveBeenCalled();

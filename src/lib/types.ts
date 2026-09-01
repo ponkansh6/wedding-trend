@@ -40,7 +40,7 @@ export type EmbedProvider = "instagram" | "tiktok" | "youtube" | "none";
 export type PostStatus = "published" | "rejected" | "retracted";
 
 /** `posts.status = "rejected"` の理由コード（plan 07 §7）。 */
-export type DropReason =
+export type DropReasonBase =
   | "extraction_insufficient" // Q1 決定的ゲート不合格（`EvidenceFailedCondition` の詳細内訳は `src/lib/sources/article-text.ts` 参照）
   | "title_filter" // M1 タイトルフィルタ
   | "anchor_ungrounded" // M1 topicAnchor の語彙的接地に失敗
@@ -51,6 +51,17 @@ export type DropReason =
   | "host_not_allowed" // Q3 allowlist 外
   | "retry_exhausted" // 再試行キューの TTL/回数超過
   | "stale_pending"; // reapStaleNonTerminal による定常収束（旧 pending 含む）
+
+/**
+ * `post_removals.reason`（kind="dropped"）に実際に書き込まれる値。
+ *
+ * `DropReasonBase` の裸の値に加え、`"<base>:<detail>"` 形式（コロン区切り）で
+ * 診断用の詳細を付与した値も許容する（例: `extraction_insufficient:link_density`、
+ * `retry_exhausted:llm_transient`）。detail 部分の組み立ては
+ * `withDropReasonDetail`（`src/lib/db/publication.ts`）に集約し、
+ * 呼び出し側で `as DropReason` のような型キャストを増やさないこと。
+ */
+export type DropReason = DropReasonBase | `${DropReasonBase}:${string}`;
 
 /**
  * `posts.status = "retracted"` の理由コード（plan 07 §5-M4）。
