@@ -21,9 +21,6 @@ export default async function Home() {
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-10 px-4 py-6 sm:px-6 sm:py-10">
       <h1 className="sr-only">ウエディング・トレンド＆リアルフィード</h1>
-      <p className="max-w-2xl text-[13px] leading-jp-body tracking-jp-body text-[var(--color-muted-foreground)]">
-        「リアル」な体験談を1分で俯瞰できる、結婚式準備のキュレーションフィードです。すべてのカードは元投稿のAI要約で、原文には各カードのボタンから移動できます。
-      </p>
 
       <FeedLaneClassic cards={classicCards} />
     </div>

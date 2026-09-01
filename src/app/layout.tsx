@@ -22,7 +22,7 @@ const fraunces = Fraunces({
 
 const SITE_NAME = "ウエディング・トレンド＆リアルフィード";
 const SITE_DESCRIPTION =
-  "結婚式準備の「今」のトレンドと「リアル」な体験談を、AI要約と元投稿へのリンクで1分で俯瞰できるキュレーションフィードです。";
+  "実際に結婚式を挙げた方の体験ブログを集めたキュレーションフィードです。見出しは元記事のまま、記事本文は元のサイトでお読みいただけます。";
 
 export const metadata: Metadata = {
   title: {

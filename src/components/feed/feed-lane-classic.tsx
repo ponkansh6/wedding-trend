@@ -25,10 +25,10 @@ export function FeedLaneClassic({ cards }: FeedLaneClassicProps) {
           結婚式の体験ブログ
         </h2>
         <p className="text-meta leading-jp-body tracking-jp-body text-[var(--color-muted-foreground)]">
-          実際に結婚式を挙げた方が書いた記事を集めています。要約とタグはこのサイトが付けたもので、記事本文は元のサイトでお読みください。
+          実際に結婚式を挙げた方の体験ブログを集めています。記事本文は元のサイトでお読みください。
         </p>
         <p className="text-meta text-[var(--color-muted-foreground)]">
-          カテゴリ・トピックはAIが自動判定しています。誤りを含む場合があります
+          見出しは元記事のまま。カテゴリ・トピックはAIが自動判定しており、誤りを含む場合があります。
         </p>
       </header>
 
