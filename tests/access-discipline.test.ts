@@ -131,10 +131,10 @@ describe("Access Discipline", () => {
     await disciplinedFetch("https://delay.com/a", { purpose: "article" });
     await disciplinedFetch("https://delay.com/b", { purpose: "article" });
 
-    // 初回は待機なし、2 回目は max(5000, 10000) を下限とする待機。
+    // 初回は待機なし、2 回目は max(MIN_HOST_INTERVAL_MS, 10000) を下限とする待機。
     expect(sleeps.length).toBe(1);
-    expect(sleeps[0]).toBeGreaterThan(MIN_HOST_INTERVAL_MS);
-    expect(sleeps[0]).toBeLessThanOrEqual(10_000);
+    expect(sleeps[0]).toBeGreaterThanOrEqual(MIN_HOST_INTERVAL_MS - 100);
+    expect(sleeps[0]).toBeLessThanOrEqual(MIN_HOST_INTERVAL_MS + 1000);
   });
 
   it("3. same-host requests are sequential (>=5s apart); cross-host never blocks", async () => {

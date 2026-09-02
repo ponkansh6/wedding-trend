@@ -812,7 +812,8 @@ describe("ingestDiscoveredUrls", () => {
     expect(mockedCurate).not.toHaveBeenCalled();
   });
 
-  it("時間予算 0 なら何も処理せず budgetExhausted を返す", async () => {
+  // 2026-09-02: time budget撤廃によりテスト削除またはスキップ。
+  it.skip("時間予算 0 なら何も処理せず budgetExhausted を返す", async () => {
     const url = `https://${HOST}/story/cases/unreached`;
     await seedPending(HOST, url);
     const fetchMock = vi.fn(async (input: string | URL) => {

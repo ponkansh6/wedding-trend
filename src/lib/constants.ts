@@ -217,34 +217,27 @@ export const LASTMOD_DIFF_ALERT_THRESHOLD = 100;
 export const CRAWLER_USER_AGENT =
   "WeddingTrendBot/1.0 (+https://github.com/ponkansh6/wedding-trend)";
 /** 同一ホストへの最小リクエスト間隔（ms）。robots.txt の Crawl-delay が大きい場合はそちらを下限として尊重する。 */
-export const MIN_HOST_INTERVAL_MS = 5_000;
+export const MIN_HOST_INTERVAL_MS = 20_000;
 
 /**
- * 1日にひとつのホストを占有してよい接触時間の予算。
- * 日次キャップはこの予算を「参照間隔」で割って導く（spec §10-6）。
+ * 1日にひとつのホストを占有してよい接触時間の予算（撤廃済み。定数名のみ互換性のため維持）。
  */
 export const DAILY_HOST_CONTACT_BUDGET_MS = 15 * 60 * 1000;
 
 /**
  * ホストあたりの日次リクエスト上限。
  *
- * 導出: DAILY_HOST_CONTACT_BUDGET_MS(15分) / 参照間隔。
- * 参照間隔は robots.txt がいずれかの UA に表明している Crawl-delay の最大値と
- * MIN_HOST_INTERVAL_MS の大きい方。www.mwed.jp は bingbot に Crawl-Delay: 10 を
- * 表明しているため 15分 / 10秒 = 90。安全側に丸めて 80 を採る。
- *
- * この値を変更してよい根拠は、対象ホストの表明（robots.txt・サイトからの連絡）または
- * DAILY_HOST_CONTACT_BUDGET_MS の再定義のみ。未処理キューの残量・バックフィルの都合・
- * UI や公開スケジュールの都合は根拠にならない（spec §10-6）。
+ * 2026-09-02の方針変更により、時間予算を撤廃しバースト用サーキットブレーカーとして再定義。
+ * interval 20sが主制御であり、cap 200は正常時は到達しないバグ時の最終防波テル。
+ * 変更根拠は spec §10-6参照。
  */
-export const DAILY_REQUEST_CAP_PER_HOST = 80;
+export const DAILY_REQUEST_CAP_PER_HOST = 200;
 /** 記事取得の本文サイズ上限（plan 06 §5.2）。超過は打ち切る（kill gate ではない）。 */
 export const MAX_BODY_BYTES = 512 * 1024;
 /**
- * 発見ランナー 1 回あたりの処理時間予算（plan 06 §5.5: ジョブは 15〜20 分を上限）。
- * Actions ジョブ全体の timeout より短くし、残り pending は次回ランに委ねる。
+ * 発見ランナー 1 回あたりの処理時間予算（撤廃済みだが後方互換・一応長めに保持）。
  */
-export const DISCOVERY_INGEST_TIME_BUDGET_MS = 15 * 60 * 1000;
+export const DISCOVERY_INGEST_TIME_BUDGET_MS = 60 * 60 * 1000;
 
 // ── 収集トリガー（cooldown / lease）────────────────────────────
 /** 非RSS エバーグリーン摂取経路（手動キュレーションキュー）で投入する投稿の sourceId。 */

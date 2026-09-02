@@ -25,7 +25,6 @@
 import { createHash } from "node:crypto";
 import {
   BODY_DRIFT_SIMILARITY_MIN,
-  DISCOVERY_INGEST_TIME_BUDGET_MS,
   EVERGREEN_SOURCE_ID,
   LLM_MODEL,
   RATIONALE_PROMPT_VERSION,
@@ -819,7 +818,7 @@ const RETRY_PROCESS_LIMIT = 50;
  */
 export async function ingestDiscoveredUrls(
   host: string,
-  opts?: { budgetMs?: number },
+  _opts?: { budgetMs?: number },
 ): Promise<DiscoveryIngestStats> {
   const stats = emptyStats();
 
@@ -830,8 +829,6 @@ export async function ingestDiscoveredUrls(
     return stats;
   }
 
-  const budgetMs = opts?.budgetMs ?? DISCOVERY_INGEST_TIME_BUDGET_MS;
-  const startedAtMs = Date.now();
   const now = new Date().toISOString();
 
   // plan 07 §6-Q2: kill gate 中断・予期しない例外を含むどの経路でも
@@ -872,63 +869,52 @@ export async function ingestDiscoveredUrls(
       stats.retryExhausted++;
     }
 
-    if (Date.now() - startedAtMs < budgetMs) {
-      const due = await dueRetries(now, RETRY_PROCESS_LIMIT);
-      for (const entry of due) {
-        if (entry.lane !== "discovery" || entry.host !== host) continue;
-        if (Date.now() - startedAtMs >= budgetMs) {
-          stats.budgetExhausted = true;
-          break;
-        }
+    const due = await dueRetries(now, RETRY_PROCESS_LIMIT);
+    for (const entry of due) {
+      if (entry.lane !== "discovery" || entry.host !== host) continue;
 
-        // TTL 超過分は上の `expireRetries` ループで既に終端化・削除済みのため、
-        // ここに来る時点で `entry.expiresAt <= now` は基本的に起こらない
-        // （安全側の防御として条件には残す）。ここでの主目的は最大試行数超過の判定。
-        if (entry.expiresAt <= now || entry.attempts >= RETRY_MAX_ATTEMPTS) {
-          // TTL 超過または最大試行超過 → 終端棄却（§7・contract: DropReason "retry_exhausted"）。
-          stats.processed++;
-          await dropPost(
-            host,
-            entry.url,
-            null,
-            "retry_exhausted",
-            now,
-            undefined,
-            `${entry.reason}:attempts=${entry.attempts}`,
-          );
-          await setDiscoverySeenStatus(host, entry.url, "skipped");
-          await completeRetry(entry.urlHash);
-          stats.retryExhausted++;
-          continue;
-        }
+      // TTL 超過分は上の `expireRetries` ループで既に終端化・削除済みのため、
+      // ここに来る時点で `entry.expiresAt <= now` は基本的に起こらない
+      // （安全側の防御として条件には残す）。ここでの主目的は最大試行数超過の判定。
+      if (entry.expiresAt <= now || entry.attempts >= RETRY_MAX_ATTEMPTS) {
+        // TTL 超過または最大試行超過 → 終端棄却（§7・contract: DropReason "retry_exhausted"）。
+        stats.processed++;
+        await dropPost(
+          host,
+          entry.url,
+          null,
+          "retry_exhausted",
+          now,
+          undefined,
+          `${entry.reason}:attempts=${entry.attempts}`,
+        );
+        await setDiscoverySeenStatus(host, entry.url, "skipped");
+        await completeRetry(entry.urlHash);
+        stats.retryExhausted++;
+        continue;
+      }
 
-        const outcome = await processUrl(host, entry.url, stats, now, {
-          urlHash: entry.urlHash,
-          attempts: entry.attempts,
-          firstQueuedAt: entry.firstQueuedAt,
-        });
-        if (outcome.abortedByKillGate) {
-          stats.abortedByKillGate = true;
-          return stats;
-        }
-        if (outcome.abortedByBudget) {
-          stats.abortedByBudget = true;
-          return stats;
-        }
-        if (outcome.abortedByRetryAfter) {
-          stats.abortedByRetryAfter = true;
-          return stats;
-        }
+      const outcome = await processUrl(host, entry.url, stats, now, {
+        urlHash: entry.urlHash,
+        attempts: entry.attempts,
+        firstQueuedAt: entry.firstQueuedAt,
+      });
+      if (outcome.abortedByKillGate) {
+        stats.abortedByKillGate = true;
+        return stats;
+      }
+      if (outcome.abortedByBudget) {
+        stats.abortedByBudget = true;
+        return stats;
+      }
+      if (outcome.abortedByRetryAfter) {
+        stats.abortedByRetryAfter = true;
+        return stats;
       }
     }
 
     const pendingUrls = await getDiscoveryUrlsByStatus(host, "pending");
     for (const url of pendingUrls) {
-      if (Date.now() - startedAtMs >= budgetMs) {
-        stats.budgetExhausted = true;
-        break;
-      }
-
       const outcome = await processUrl(host, url, stats, now, null);
       if (outcome.abortedByKillGate) {
         stats.abortedByKillGate = true;
