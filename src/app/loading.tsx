@@ -8,9 +8,9 @@ import { Card } from "@/components/ui/card";
  */
 function FeedCardSkeleton() {
   return (
-    <Card className="flex flex-col gap-2.5 p-4">
+    <Card className="flex flex-col gap-2 p-4">
       <Skeleton className="h-5 w-20 rounded-full" />
-      <div className="flex flex-col gap-1.5">
+      <div className="mt-1 flex flex-col gap-1.5">
         <Skeleton className="h-4 w-full" />
         <Skeleton className="h-4 w-2/3" />
       </div>

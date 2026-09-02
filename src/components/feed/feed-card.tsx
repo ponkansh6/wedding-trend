@@ -15,13 +15,50 @@ export function FeedCard({ card, index = 0 }: FeedCardProps) {
   return (
     <Card
       as="article"
-      className="card-enter flex h-full flex-col gap-2.5 p-4"
+      className="card-enter flex h-full flex-col gap-2 p-4"
       style={{ "--enter-delay": `${Math.min(index, 8) * 70}ms` } as React.CSSProperties}
     >
-      <div className="flex flex-wrap items-center gap-1.5">
+      {/*
+       * plan B 追試: カテゴリバッジとトピックチップを同一行に集約する。
+       * 実データ検証（本番134件）ではトピックは最大3件・大半が2〜4字で、
+       * 典型ケースはこの1行に収まる。カテゴリ文字数が長い少数ケース
+       * （約13%）では ul ブロックごと折り返って2段になるが、
+       * これは意図した挙動であり崩れではない（後述）。
+       *
+       * 法務開示（spec.md:745）維持のため、<ul> は独立した要素として保ち、
+       * role="list" / aria-label / title を保持する。カテゴリバッジは
+       * その <ul> の外側の兄弟要素として置き、「トピック」ラベルの配下に
+       * 含めない。<ul> を display:contents 化して chip 単位で折り返す案は、
+       * 一部の AT で aria-label ごと読み上げから消える既知の不具合があり
+       * 法務開示要件に反するリスクがあるため採用しない。その代わり
+       * 「ul がまるごと次行へ落ちる」という block 単位の折り返しを
+       * そのまま許容する — これが実測の最悪ケース（カテゴリ1行目・
+       * チップ2行目）と一致する。
+       */}
+      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
         <Badge variant="category" className="text-badge">
           {card.category}
         </Badge>
+
+        {card.topics && card.topics.length > 0 && (
+          <ul
+            role="list"
+            className="flex flex-wrap items-center gap-1.5"
+            aria-label="AIが自動選定したトピック"
+            title="AI による自動判定。誤りを含む場合があります"
+          >
+            {card.topics.map((topic) => (
+              <li key={topic} className="cursor-default">
+                <Badge
+                  variant="topic"
+                  className="text-badge max-w-[13rem] overflow-hidden before:mr-0.5 before:shrink-0 before:content-['#']"
+                >
+                  <span className="min-w-0 truncate">{topic}</span>
+                </Badge>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
       <Title originalTitle={card.originalTitle} url={card.url} cardId={card.id} />
@@ -30,26 +67,6 @@ export function FeedCard({ card, index = 0 }: FeedCardProps) {
         <p className="line-clamp-1 text-anchor text-pretty text-[var(--color-muted-foreground)]">
           {card.topicAnchor}
         </p>
-      )}
-
-      {card.topics && card.topics.length > 0 && (
-        <ul
-          role="list"
-          className="flex flex-wrap items-center gap-1.5"
-          aria-label="AIが自動選定したトピック"
-          title="AI による自動判定。誤りを含む場合があります"
-        >
-          {card.topics.map((topic) => (
-            <li key={topic} className="cursor-default">
-              <Badge
-                variant="topic"
-                className="text-badge max-w-[13rem] overflow-hidden before:mr-0.5 before:shrink-0 before:content-['#']"
-              >
-                <span className="min-w-0 truncate">{topic}</span>
-              </Badge>
-            </li>
-          ))}
-        </ul>
       )}
 
       <Footer card={card} />
@@ -75,7 +92,7 @@ function Title({
   const noteId = `${cardId}-external-note`;
   return (
     <>
-      <h3 className="text-title font-display font-semibold text-pretty text-[var(--color-foreground)]">
+      <h3 className="mt-1 text-title font-display font-semibold text-pretty text-[var(--color-foreground)]">
         <a
           href={url}
           target="_blank"
