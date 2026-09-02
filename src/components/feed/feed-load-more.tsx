@@ -1,5 +1,4 @@
-import Link from "next/link";
-import { Button } from "@/components/ui/button";
+import { FeedLoadMoreButton } from "@/components/feed/feed-load-more-button";
 
 type FeedLoadMoreProps = {
   /** 現在表示しているカード数（控えめな目安表示に使う）。 */
@@ -27,16 +26,18 @@ type FeedLoadMoreProps = {
  * 01-app/03-api-reference/02-components/link.md の `### scroll` 節を参照）。
  * `scroll={false}` を明示することでこの巻き戻りを止め、押した位置のまま
  * 下に新しいカードが continue して見える挙動にする。
+ *
+ * 押下から遷移完了までの待機フィードバック（スピナー・連打対策・
+ * スクリーンリーダー通知）は `useLinkStatus`（Link の子孫でのみ呼べる
+ * フック）を使うため、その部分だけを独立した小さなクライアント
+ * コンポーネント `FeedLoadMoreButton` に切り出している。このコンポーネント
+ * 自体・`FeedLaneClassic`・`page.tsx` は Server Component のまま。
  */
 export function FeedLoadMore({ visibleCount, nextCount }: FeedLoadMoreProps) {
   return (
     <div className="flex flex-col items-center gap-3 border-t border-[var(--color-border)] pt-8">
       <p className="text-meta text-[var(--color-muted-foreground)]">{visibleCount}件を表示中</p>
-      <Button asChild variant="accent" className="h-12 px-8 text-base">
-        <Link href={`/?count=${nextCount}`} scroll={false}>
-          もっと見る
-        </Link>
-      </Button>
+      <FeedLoadMoreButton href={`/?count=${nextCount}`} />
     </div>
   );
 }
