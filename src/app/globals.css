@@ -71,12 +71,12 @@
  * prefers-color-scheme の別ブロックは持たず .dark の上書きのみで完結させる。
  */
 .dark {
-  --background: #16120e;
-  --surface: #221d18;
-  --surface-hover: #2b241d;
+  --background: #1a1512;
+  --surface: #29231e;
+  --surface-hover: #322b24;
   --foreground: #f3ece3;
   --muted-foreground: #b7aa9c;
-  --border: #3a322a;
+  --border: #453b32;
   --ring: #e2603d;
 
   /* vs --surface #221d18（背景2色のうち明るい方 = 最も厳しいケース）: 6.09:1
