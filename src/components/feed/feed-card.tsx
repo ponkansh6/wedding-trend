@@ -98,7 +98,7 @@ function Title({
           target="_blank"
           rel="noopener noreferrer"
           aria-describedby={noteId}
-          className="line-clamp-2 text-pretty rounded-sm underline decoration-[var(--color-muted-foreground-subtle)] underline-offset-2 transition-colors duration-150 hover:decoration-current focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface)] after:absolute after:inset-0 after:z-0 after:content-['']"
+          className="line-clamp-2 text-pretty rounded-sm decoration-transparent underline underline-offset-2 transition-colors duration-150 hover:decoration-current focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface)] after:absolute after:inset-0 after:z-0 after:content-['']"
         >
           {originalTitle}
         </a>
