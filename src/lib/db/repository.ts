@@ -20,6 +20,8 @@ export {
   readLastRunSummary,
   savePostRationale,
   getRationaleByPostId,
+  updatePostTopics,
+  getTopicBackfillSignature,
   writeConfigValue,
   type PostUpsertInput,
   type PostCurationState,
@@ -27,6 +29,7 @@ export {
   type CurationCandidate,
   type EmbedResult,
   type PostRationaleInput,
+  type TopicSignatureMeta,
   type SourcePolicyRow,
 } from "./ingest";
 export * from "./publication";

@@ -231,6 +231,9 @@ export const DAILY_HOST_CONTACT_BUDGET_MS = 15 * 60 * 1000;
  * interval 20sが主制御であり、cap 200は正常時は到達しないバグ時の最終防波テル。
  * 変更根拠は spec §10-6参照。
  */
+export const TOPIC_PROMPT_VERSION = "topic-v1";
+export const TOPIC_SCHEMA_VERSION = "topic-v1";
+export const EXTRACTION_VERSION = "1.0.0";
 export const DAILY_REQUEST_CAP_PER_HOST = 200;
 /** 記事取得の本文サイズ上限（plan 06 §5.2）。超過は打ち切る（kill gate ではない）。 */
 export const MAX_BODY_BYTES = 512 * 1024;

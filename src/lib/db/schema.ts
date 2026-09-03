@@ -412,3 +412,22 @@ export const postTopics = sqliteTable(
     topicIdx: index("idx_post_topics_topic").on(table.topic),
   }),
 );
+
+export const topicBackfillSignatures = sqliteTable(
+  "topic_backfill_signatures",
+  {
+    postId: integer("post_id")
+      .primaryKey()
+      .references(() => posts.id, { onDelete: "cascade" }),
+    signature: text("signature").notNull(),
+    sourceDigest: text("source_digest"),
+    extractionVersion: text("extraction_version"),
+    topicPromptVersion: text("topic_prompt_version"),
+    schemaVersion: text("schema_version"),
+    modelId: text("model_id"),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => ({
+    updatedAtIdx: index("idx_topic_backfill_signatures_updated").on(table.updatedAt),
+  }),
+);

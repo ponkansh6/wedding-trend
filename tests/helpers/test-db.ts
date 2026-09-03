@@ -35,6 +35,7 @@ const KNOWN_TABLES = [
   "post_retry_queue",
   "discovery_host_metrics",
   "evidence_signal_observations",
+  "topic_backfill_signatures",
 ];
 
 /**

@@ -69,6 +69,16 @@ Next.js 16 (App Router), React 19, TypeScript strict, Tailwind CSS v4, Drizzle O
 
 データベースは Turso (libSQL) および Drizzle ORM (`src/lib/db/schema.ts`, `src/lib/db/index.ts`, `src/lib/db/query.ts`, `src/lib/db/repository.ts`, `src/lib/db/migrations/0000_stormy_harrier.sql`, `src/lib/db/migrations/0001_supreme_dark_phoenix.sql`, `src/lib/db/migrations/0002_dry_forge.sql`) によって管理されます。
 
+### 状態遷移表（Plan 23 契約対応）
+
+| 状態                                                                                       | topics / LLM の扱い                                                                                                                        |
+| ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| evidence不足、containerなし、titleなし、robots/ToS/allowlist拒否、hard stop、oversize、304 | topics不変。LLM禁止。content-free reason のみを監査許可フィールドに記録する。304を unconditional fetch へフォールバックしてはならない。    |
+| 404 / 410                                                                                  | topics不変、LLM禁止。retraction workflow へ委譲する。                                                                                      |
+| 429、fetch失敗、LLM/schema/DB失敗                                                          | topics、full signature、成功 signature を不変にする。retry は規律とresume状態に従う。                                                      |
+| redirect                                                                                   | final URLを独立して allowlist、robots、ToS、rate で再検証する。cross-host も同様。canonical が別記事または同一性に疑義があれば no update。 |
+| 成功                                                                                       | topics だけを原的に replace し、成功後に限り dedicated signature を記録する。                                                              |
+
 ### `posts` テーブル
 
 主なカラムと定義:
@@ -203,8 +213,8 @@ DB を共有しており、`scripts/gates/migrations-additive.mjs` の `classify
 - `topic`: 正規化されたトピック文字列。
 - `prompt_version`: タグバージョン（バッチバックフィル用）。
 - PRIMARY KEY (`post_id`, `position`), UNIQUE (`post_id`, `topic`), INDEX `idx_post_topics_topic` (`topic`)
-- **Note**: CREATE TABLE + indexes のみ、additive migration 0013。トピック数（2〜4個）、文字数（2〜10文字）、数字禁止等のバリデーションは LLM スキーマおよびゲート側で行われ、DB 制約としては持たせない。
-- トピックは AI自由生成による短尺ラベルであり、個人識別情報 (PII) denylist およびタイトル由来の固有名詞を原則とし、逐語的接地は要件としない。UI上では `topicAnchor` の下に非対話型のチップリストとしてレンダリングされ、未設定時はプレースホルダー等を非表示とし、ヘッダーに AI 判定に関する免責事項を表示する。法務制約 §10 の「AI自由生成による短尺ラベルは許容される（非創作的な短尺ラベル）」に従う。
+- **Note**: CREATE TABLE + indexes のみ、additive migration 0013。トピック数（0〜4個）、文字数（2〜10文字）、数字禁止等のバリデーションは LLM スキーマおよびゲート側で行われ、DB 制約としては持たせない。
+- トピックは確認済みの原サイト本文から切り出した judgment slice が直接支持する 0〜4 件の短い名詞句とする。薄い入力、クリックベイト、一般助言に対する `[]` または 1 件の abstain は正しい。タイトル・既存 excerpt・既存 topics だけから topics を更新する経路は持たない。すべてのオンライン入口（RSS、evergreen、sitemap discovery）で topics の生成・更新時は disciplinedFetch `purpose: "article"` → コンテナ抽出 → evidence gate → selectJudgmentSlice の正規経路で確認する。本文・slice はメモリのみで DB・ログ・stdout・checkpoint・telemetry・例外・raw LLM に保存・出力しない。`originalExcerpt` は常に `null` 固定。トピック更新は topics の原子的な replace（他のフィールドは一切変更しない）であり、正規化されたアクセス規律に従う。dedicated signature `topicBackfillSignature = H/HMAC(recordId + normalized URL + sourceContentDigest + extractionVersion + topicPromptVersion + schemaVersion + modelId)` を用い、`curationSignature` は不変とする。UI上では `topicAnchor` の下に非対話型のチップリストとしてレンダリングされ、未設定時はプレースホルダー等を非表示とし、ヘッダーに AI 判定に関する免責事項を表示する。法務制約 §10 の「AI自由生成による短尺ラベルは許容される（非創作的な短尺ラベル）」に従う。
 
 #### `discovery_seen` テーブル（既知 URL 集合の正本。§6.3）
 
@@ -749,7 +759,7 @@ bump しなければならない。bump がないと `getStaleCurationCandidates
 - **phase2**: `post_rationales.post_id IS NOT NULL` のみ。バックフィル完了後に
   切り替える、判定根拠のみを表示条件とする最終形。
 - 判定根拠（`post_rationales` 行）の存在は掲載可否の条件として用いる。
-- 公開面には `topicAnchor`（1件）と **AI 選定トピックタグ**（`post_topics`、2〜4件・各2〜10字。`src/lib/publish/gate.ts` の `validateTopics()` を通過したもの）を描画する（`src/components/feed/feed-card.tsx`）。トピックタグは分類・走査性のための短ラベルであり、`topicAnchor` とは役割が異なる（重複許容・結論非開示。詳細は §10-3 と `shared_plan/18`）。トピックが存在しない投稿（discovery 由来で再取得に失敗した等の恒久欠損）はタグ群ごと非表示にする。
+- 公開面には `topicAnchor`（1件）と **AI 選定トピックタグ**（`post_topics`、0〜4件の短い名詞句。abstain = `[]` または 1 件は有効、validated by gate、category や trend へのフォールバックは行わない。`src/lib/publish/gate.ts` の `validateTopics()` を通過したもの）を描画する（`src/components/feed/feed-card.tsx`）。トピックタグは分類・走査性のための短ラベルであり、`topicAnchor` とは役割が異なる（重複許容・結論非開示。詳細は §10-3 と `shared_plan/18`・`shared_plan/23`）。トピックが存在しない投稿（discovery 由来で再取得に失敗した等の恒久欠損）はタグ群ごと非表示にする。
 - 有用度判定 4 種（`firsthand`/`ceremonyDecision`/`specific`/`weddingDayContent`）は **並び順（`USEFULNESS_SCORE_SQL`）にのみ用い、公開面には描画しない**（旧「判定基準タグ」テキスト行は `shared_plan/18` Stage 4 で撤去）。`rationaleText`・`aiSummary`・`promotional` も公開面には描画しない。根拠文（`renderRationaleText`）のラベルは値 `>= 2` の 4 項目のみ（`promotional` は §10-3 により対象外）。
 - AI 由来である旨の開示（`shared_plan/18` §5-1）: カード単位の「AI判定」バッジ（旧 `Badge` の `ai` バリアント）は撤去し、開示は (1) トピックタグのコンテナ（`<ul role="list">`）の `aria-label` と `title` 属性に免責文、(2) 各レーンヘッダ直下の恒常注記1行（`src/components/feed/feed-lane-classic.tsx`）、(3) `src/app/layout.tsx` のサイト全体注記、の3点で担保する。フッターは無限スクロールで到達不能になるため使わない。
 - 参照行 `src/components/feed/feed-card.tsx` を維持する。
@@ -870,17 +880,21 @@ bump しなければならない。bump がないと `getStaleCurationCandidates
    - 決定的ゲートを通過した場合は、`curateSingle` によるキュレーション結果を `published` として保存する。
    - **出典クレジット（第 2 項）の解決規則（エバーグリーン経路）**: 出典名は「運営の明示指定（CLI の `--source-name`、前後空白は trim）→ `og:site_name` → URL ホスト名（`www.` を除去した実在ドメイン）」の順で解決する。いずれも解決できない場合、架空のソース名を捏造せずに保存を拒否する（安定コード `"no_source_name"`）。サイト名を示さない固定文字列へのフォールバック生成は禁止。discovery 経路の `sourceName` は `registrableDomain(url)`（解決できなければ対象ホスト名）で決定する（`src/lib/pipeline/discovery-ingest.ts`）。
 5. **抽出本文の永続化禁止**: discovery 経路で取得した本文（記事本文コンテナ抽出（`extractArticleContainer()`）を経た判定スライスの出力）は LLM 判定の入力としてのみ使用し、**`posts` を含むいかなるカラムにも永続化しない**。`src/lib/pipeline/discovery-ingest.ts` の `upsertPostRow()` は `originalExcerpt: null` を常に渡し、discovery 経路由来の投稿の `originalExcerpt` は常に `null` になる。理由は3つ: (a) §10-3/§10-4 の「取得・判定は情報解析、公開は (a) 他人の表現（記事本文の逐語断片）を含まず (b) 自らの出力は非創作的な短ラベル（トピックタグ等）に限り (c) 根拠文は決定的テンプレートのみ、という自己記述」という二層構造を維持できる、(b) 「他人の著作物のデータベース」を新たに作らない、(c) 本文が DB に存在すると将来誰かがそれを要約の材料に使う drift を構造的に防ぐ（無ければ使えない）。エバーグリーン経路・SNS 経路の `originalExcerpt`（`og:description` やキャプション等、配信者自身が公開用に提供したメタデータ）とは性質が異なるため区別すること——discovery 経路の抽出本文は配信者が要約用に提供したものではなく、記事本文からの機械的な抽出（複製）である。
+   - **topics専用生成時の判定スライス非永続化**: topics専用生成時の判定スライスも同様にメモリ上のみで取り出し、LLM投入後に破棄する。DB、ログ、stdout、checkpoint、telemetry、例外、raw LLM request/response に保存・出力しない。originalExcerptは常にnull。ホスト別共有上限HOST_DAILY_SHARE_MAXは廃止済みだが sequential per-host, 20s/Crawl-delay, 200 cap, robots/ToS/allowlist再検証は維持する。redirectはfinal URLを独立してallowlist/robots/ToS/rateで再検証し、cross-hostも同様、canonicalが別記事または同一性に疑義があればno update。
    - **バックフィル修復時も非永続**: プロンプト/gate を改善した後、discovery 経路で公開済みの投稿は `originalExcerpt` が空のため通常のバックフィル（`scripts/backfill-usefulness.mjs`、プレフライト `shouldRegenerateAnchor()` が本文なし候補を一律スキップ）では再キュレーションされず、旧基準のトピックアンカーのまま固定される。この救済は `scripts/backfill-mwed-anchors.mjs` が行う——対象は `status = "published"` かつ署名不一致の投稿に限定し、`disciplinedFetch()` で本文を再取得し `extractArticleContainer()` → 判定スライスをメモリ上で復元し、1 回の Gemini バッチリクエストで再キュレーションする。**判定スライスはこの経路でも DB へ書き戻さない**: `markCurated()` へ渡す update は `scripts/lib/mwed-anchor-backfill.mjs` の `assertNoSliceLeak()` がキー許可リスト（`url` / `aiSummary` / `category` / `tag` / `contentHash` / `curationSignature` / `usefulness` / `rationale`）で検証し、違反時は throw して中断する。プレビュー出力もトピックアンカーの新旧のみで本文は表示しない。`originalTitle`・`post_publications`（bodyHash / M4）・`discovery_seen`・公開ゲート（撤回判定）は変更しないため公開状態は変わらない。
 6. **アクセス規律（discovery 経路の本文取得のみに適用。実装 `src/lib/sources/access-discipline.ts`）**:
    - **robots.txt の遵守**: 取得前に必ず確認し、`isAllowed()` が false を返す URL は取得しない（`blocked_robots` として `discovery_seen` を `skipped` にする）。取得結果は 24 時間以内でキャッシュする（RFC 9309 の推奨）。
    - **`Crawl-delay` を下限として尊重**: robots.txt 内の**いずれかの User-agent グループ**に現れる `Crawl-delay` の最大値と、ホストあたり最小間隔（`MIN_HOST_INTERVAL_MS` = 20秒）の大きい方を実際の間隔とする。自 UA 向けの指定に限定しないのは、サイトが特定のクローラにのみ間隔を表明している場合でも、それはそのサイトが許容するペースの表明とみなせるため。
    - **ホスト内は逐次・ホスト間は並列**: 同一ホストへの直前リクエストからの経過時間を記録し、間隔未満なら待機する。
    - **日次ハードキャップ**: ホストあたり `DAILY_REQUEST_CAP_PER_HOST`（200件）。時間予算（バジェット）は撤廃され、インターバル制御（`MIN_HOST_INTERVAL_MS` = 20s）を主軸とする。この上限は正常時は到達しないバグ時のサーキットブレーカーとして機能する。
-     - **変更根拠の限定**: キャップの変更根拠として認められるのは、対象ホストの表明（robots.txt・サイトからの連絡）のみである。**未処理キューの残量、バックフィルの都合、UI や公開スケジュールの都合は、いかなる場合もキャップ変更の根拠にならない。**
+     - **変更根拠の限定**: キャップの変更根拠として認められるのは、対象ホストの表明（robots.txt・サイトからの連絡）のみである。**未処理数や公開予定を理由に間隔・上限・gate を緩めない。**
      - **変更履歴**: 2026-09-02: 時間予算（15分バジェット）を全面撤廃し、`MIN_HOST_INTERVAL_MS` を 20,000ms、`DAILY_REQUEST_CAP_PER_HOST` を 200 へ変更。バックフィル時の分断を解消し、インターバル制御を主軸とする設計へ簡素化。
-   - **条件付き GET**: `If-Modified-Since` / `If-None-Match` を送り、304 を `not_modified` として扱う。
+   - **条件付き GET**: `If-Modified-Since` / `If-None-Match` を送り、304 を `not_modified` として扱う。**304はunconditional fetchへフォールバックしない。**
    - **連絡先入り User-Agent**: `CRAWLER_USER_AGENT`（`src/lib/constants.ts`。既定 `WeddingTrendBot/1.0 (+https://github.com/menonaki2/wedding-trend)`）を常に送信する。**UA 偽装は行わない**（実装上、他の UA 文字列に差し替える経路が存在しない）。
    - **取得サイズ上限**: `MAX_BODY_BYTES`（既定 512KB）。`Content-Length` またはボディの実バイト長で判定し、超過時は取得を打ち切る（`too_large`。kill gate ではなく、そのホストではなく個別 URL の事情として扱う）。
+   - **同一ホスト concurrency=1**: `same-host concurrency=1` を維持する。
+   - **Daily cap算入単位**: daily cap算入単位はrobots/ToS/article/redirect destination再検証ごととする。
+   - **same-host concurrency、Crawl-delay、上限、gate**: 同一ホスト concurrency=1、Crawl-delayとMIN_HOST_INTERVAL_MS=20秒の大きい方を待つ、DAILY_REQUEST_CAP_PER_HOST=200、K1-K6 hard stop、B1 soft stop/UTC日次リセット、429 Retry-After、ToS hash/change、allowlist source of truth、host round-robin公平予定を維持する。
    - **kill gate**: 1つでも観測されたら該当ホストの discovery を即座に停止する。回復には人間の再判断（`host_gate_state` 行の手動解除）を要する。実装済みのゲートのみを示す:
 
      | #   | 観測事象                                                           | 実装上の扱い                                                                                                                           |
@@ -915,7 +929,7 @@ bump しなければならない。bump がないと `getStaleCurationCandidates
    kill gate 族から分離し独立の項目として扱う。
 
    - **観測事象**: ホストあたり日次リクエスト数が `DAILY_REQUEST_CAP_PER_HOST`
-     （既定80件）を超過。
+     （既定200件）を超過。
    - **性質**: レート制御であり、恒久停止でも人間の判断待ちでもない。
      `host_gate_state.stateKind` は変更しない。その日の残り時間は当該ホストへの
      リクエストを拒否し続けるが、**UTC 日次で自動的にリセットされ、人手の
@@ -1036,3 +1050,14 @@ bump しなければならない。bump がないと `getStaleCurationCandidates
    - **回帰防止（plan 07 §14）**: この上限を無効値（10^9 等）に戻すと境界テストが素通りした過去の回帰を踏まえ、`tests/pipeline-ingest.test.ts` / `tests/discovery-ingest.test.ts` の境界テストは「上限直下の1件は公開 / 上限到達で `rate_capped`」の2ケースを固定する（境界値は `src/lib/constants.ts` の `DAILY_PUBLISH_CAP` を基準とする）。
 5. **目標フィード供給量**: 明示的な数値目標は置かない（2026-08-29 に旧供給目標を撤廃）。供給量は抽出品質ゲート（§11 項1）とキュレーションの通過率に委ね、上限は項4 のサーキットブレーカー（`DAILY_PUBLISH_CAP` / 日）のみとする。
 6. **`RetractionReason` と撤回 CLI**: `RetractionReason`（`src/lib/types.ts`）に `takedown_request` を追加した。4つの客観的トリガ（`source_gone` / `robots_disallowed` / `tos_changed` / `body_changed`）と異なり、**`takedown_request` のみが人間の判断による撤回**であり、自動検知パイプラインからは設定されない。撤回は `pnpm retract`（`scripts/retract.mjs`）で行う——既定は dry-run（対象一覧の表示のみ、DB 変更なし）、接続先を明示し、`--reason` は必須（既定値なし）で人間に毎回明示させる。実際に撤回するには `--yes`（または `--execute`）を要する。
+
+---
+
+## 13. Decision Log (Plan 23 Stage 0)
+
+- **Selector AND条件**: `published`, `blog`, `allowlist`, 許可 article path, generic 判定または legacy signature, 同一 dedicated signature 成功履歴なし, retracted/deleted/blocked でない。
+- **Generic/Legacy 定義**: 実装 Stage 0 でコード側常量として固定。
+- **Digest / HMAC**: HMAC を監査 metadata として採用（hash oracle リスク回避）。
+- **Metadata 保存先**: `src/lib/db/schema.ts` + 移行または既存 metadata 案を比較し投稿単位復元・監査要件を満たす方を選択。
+- **評価時 fetch**: regulated fetch または短命 ephemeral fixture。
+- **Journal / Rollback**: run id 単位で本文非保存の前提で DB backup または transaction history のいずれかを採用。

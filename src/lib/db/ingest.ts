@@ -23,6 +23,7 @@ import {
   postUsefulnessCriteria,
   postRationales,
   postTopics,
+  topicBackfillSignatures,
   config,
   postRemovals,
   sourcePolicy,
@@ -879,6 +880,82 @@ export async function getRationaleByPostId(postId: number) {
     return rows[0] ?? null;
   } catch (err) {
     console.warn("[db] getRationaleByPostId error:", err);
+    return null;
+  }
+}
+
+export interface TopicSignatureMeta {
+  signature: string;
+  sourceDigest?: string | null;
+  extractionVersion?: string | null;
+  topicPromptVersion?: string | null;
+  schemaVersion?: string | null;
+  modelId?: string | null;
+}
+
+/**
+ * atomic replace function updatePostTopics that does batch delete+insert inside transaction
+ * and leaves other fields untouched. Ensure on insert failure old topics are preserved.
+ */
+export async function updatePostTopics(
+  postId: number,
+  topics: string[],
+  signatureMeta: TopicSignatureMeta,
+): Promise<void> {
+  const now = new Date().toISOString();
+  await db.transaction(async (tx) => {
+    // Delete existing topics for this post
+    await tx.delete(postTopics).where(eq(postTopics.postId, postId));
+
+    // Insert new topics if any
+    if (topics.length > 0) {
+      const values = topics.map((topic, idx) => ({
+        postId,
+        position: idx,
+        topic,
+        promptVersion: signatureMeta.topicPromptVersion ?? "topic-v1",
+      }));
+      await tx.insert(postTopics).values(values);
+    }
+
+    // Upsert signature metadata
+    await tx
+      .insert(topicBackfillSignatures)
+      .values({
+        postId,
+        signature: signatureMeta.signature,
+        sourceDigest: signatureMeta.sourceDigest ?? null,
+        extractionVersion: signatureMeta.extractionVersion ?? null,
+        topicPromptVersion: signatureMeta.topicPromptVersion ?? null,
+        schemaVersion: signatureMeta.schemaVersion ?? null,
+        modelId: signatureMeta.modelId ?? null,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: topicBackfillSignatures.postId,
+        set: {
+          signature: signatureMeta.signature,
+          sourceDigest: signatureMeta.sourceDigest ?? null,
+          extractionVersion: signatureMeta.extractionVersion ?? null,
+          topicPromptVersion: signatureMeta.topicPromptVersion ?? null,
+          schemaVersion: signatureMeta.schemaVersion ?? null,
+          modelId: signatureMeta.modelId ?? null,
+          updatedAt: now,
+        },
+      });
+  });
+}
+
+export async function getTopicBackfillSignature(postId: number): Promise<string | null> {
+  try {
+    const rows = await db
+      .select({ signature: topicBackfillSignatures.signature })
+      .from(topicBackfillSignatures)
+      .where(eq(topicBackfillSignatures.postId, postId))
+      .limit(1);
+    return rows[0]?.signature ?? null;
+  } catch (err) {
+    console.warn("[db] getTopicBackfillSignature error:", err);
     return null;
   }
 }
