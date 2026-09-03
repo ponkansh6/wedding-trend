@@ -214,13 +214,14 @@ export async function regulatedFetchAndSlice(url) {
   }
 
   const visible = extractVisibleText(container);
-  const signals = computeEvidenceSignals(visible);
+  const signals = computeEvidenceSignals(container);
   const sufficiency = computeEvidenceSufficiency(signals);
-  if (!sufficiency.sufficient) {
+  if (!sufficiency.ok) {
     return {
       success: false,
       verdict: "evidence_insufficient",
       reason: sufficiency.reason,
+      failedConditions: sufficiency.failedConditions,
       bytes,
       timingMs,
     };
