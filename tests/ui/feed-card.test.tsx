@@ -3,8 +3,8 @@
 // アクセス規律）を DOM 出力レベルで直接検証する。
 // 従来 smoke-test.sh は DB 空の状態しか curl していなかったため、
 // 「カードが実際に描画された状態」を検証するテストが存在しなかった穴を埋める。
-import { describe, expect, it } from "vitest";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import { FeedCard } from "@/components/feed/feed-card";
@@ -128,5 +128,129 @@ describe("FeedCard", () => {
   it("カテゴリバッジが描画される", () => {
     render(<FeedCard card={makeCard({ category: "会場・装花" })} />);
     expect(screen.getByText("会場・装花")).toBeInTheDocument();
+  });
+
+  it("既読カードは主タッチの水平左スワイプだけで一度だけ未読へ戻し、capture と click 抑止を行う", () => {
+    const onMarkRead = vi.fn();
+    const { container } = render(<FeedCard card={makeCard()} isRead onMarkRead={onMarkRead} />);
+    const article = container.querySelector("article");
+    if (!article) throw new Error("card must be rendered as an article");
+    const setPointerCapture = vi.fn();
+    const releasePointerCapture = vi.fn();
+    Object.assign(article, {
+      setPointerCapture,
+      releasePointerCapture,
+      hasPointerCapture: () => true,
+    });
+
+    fireEvent.pointerDown(article, {
+      pointerType: "touch",
+      isPrimary: true,
+      pointerId: 7,
+      clientX: 148,
+      clientY: 20,
+    });
+    fireEvent.pointerUp(article, {
+      pointerType: "touch",
+      isPrimary: true,
+      pointerId: 7,
+      clientX: 100,
+      clientY: 20,
+    });
+    expect(onMarkRead).toHaveBeenCalledTimes(1);
+    expect(onMarkRead).toHaveBeenCalledWith(1, "unread");
+    expect(setPointerCapture).toHaveBeenCalledWith(7);
+    expect(releasePointerCapture).toHaveBeenCalledWith(7);
+
+    const link = screen.getByRole("link", { name: "元記事のタイトルそのまま" });
+    expect(fireEvent.click(link)).toBe(false);
+    expect(onMarkRead).toHaveBeenCalledTimes(1);
+    expect(fireEvent.click(link)).toBe(true);
+    expect(onMarkRead).toHaveBeenCalledWith(1);
+  });
+
+  it("スワイプの閾値・方向・ポインタ種別とキャンセルを厳格に扱い、次の操作は継続できる", () => {
+    const onMarkRead = vi.fn();
+    const { container } = render(<FeedCard card={makeCard()} isRead onMarkRead={onMarkRead} />);
+    const article = container.querySelector("article");
+    if (!article) throw new Error("card must be rendered as an article");
+    const gesture = (down: Record<string, unknown>, up: Record<string, unknown>) => {
+      fireEvent.pointerDown(article, down);
+      fireEvent.pointerUp(article, up);
+    };
+    gesture(
+      { pointerType: "touch", isPrimary: true, pointerId: 1, clientX: 148, clientY: 10 },
+      { pointerType: "touch", isPrimary: true, pointerId: 1, clientX: 101, clientY: 10 },
+    );
+    gesture(
+      { pointerType: "touch", isPrimary: true, pointerId: 2, clientX: 100, clientY: 10 },
+      { pointerType: "touch", isPrimary: true, pointerId: 2, clientX: 160, clientY: 10 },
+    );
+    gesture(
+      { pointerType: "touch", isPrimary: true, pointerId: 3, clientX: 160, clientY: 10 },
+      { pointerType: "touch", isPrimary: true, pointerId: 3, clientX: 100, clientY: 50 },
+    );
+    gesture(
+      { pointerType: "mouse", isPrimary: true, pointerId: 4, clientX: 160, clientY: 10 },
+      { pointerType: "mouse", isPrimary: true, pointerId: 4, clientX: 100, clientY: 10 },
+    );
+    gesture(
+      { pointerType: "pen", isPrimary: true, pointerId: 5, clientX: 160, clientY: 10 },
+      { pointerType: "pen", isPrimary: true, pointerId: 5, clientX: 100, clientY: 10 },
+    );
+    gesture(
+      { pointerType: "touch", isPrimary: false, pointerId: 6, clientX: 160, clientY: 10 },
+      { pointerType: "touch", isPrimary: false, pointerId: 6, clientX: 100, clientY: 10 },
+    );
+    expect(onMarkRead).not.toHaveBeenCalled();
+
+    fireEvent.pointerDown(article, {
+      pointerType: "touch",
+      isPrimary: true,
+      pointerId: 8,
+      clientX: 160,
+      clientY: 10,
+    });
+    fireEvent.pointerUp(article, {
+      pointerType: "touch",
+      isPrimary: true,
+      pointerId: 9,
+      clientX: 100,
+      clientY: 10,
+    });
+    fireEvent.pointerCancel(article, { pointerId: 8 });
+    fireEvent.lostPointerCapture(article, { pointerId: 8 });
+    expect(onMarkRead).not.toHaveBeenCalled();
+
+    gesture(
+      { pointerType: "touch", isPrimary: true, pointerId: 10, clientX: 148, clientY: 10 },
+      { pointerType: "touch", isPrimary: true, pointerId: 10, clientX: 100, clientY: 10 },
+    );
+    expect(onMarkRead).toHaveBeenCalledTimes(1);
+    expect(article).toHaveStyle({ touchAction: "pan-y pinch-zoom" });
+  });
+
+  it("ボタン起点のタッチは親スワイプにせず、未読化は一度だけ行う", () => {
+    const onMarkRead = vi.fn();
+    render(<FeedCard card={makeCard()} isRead onMarkRead={onMarkRead} />);
+    const button = screen.getByRole("button", { name: "未読に戻す" });
+    fireEvent.pointerDown(button, {
+      pointerType: "touch",
+      isPrimary: true,
+      pointerId: 3,
+      clientX: 150,
+      clientY: 10,
+    });
+    fireEvent.pointerUp(button, {
+      pointerType: "touch",
+      isPrimary: true,
+      pointerId: 3,
+      clientX: 10,
+      clientY: 10,
+    });
+    expect(onMarkRead).not.toHaveBeenCalled();
+    fireEvent.click(button);
+    expect(onMarkRead).toHaveBeenCalledTimes(1);
+    expect(onMarkRead).toHaveBeenCalledWith(1, "unread");
   });
 });

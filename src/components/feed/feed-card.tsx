@@ -1,3 +1,6 @@
+"use client";
+
+import { useRef } from "react";
 import type * as React from "react";
 import { ExternalLink } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -16,34 +19,58 @@ type FeedCardProps = {
 };
 
 const SWIPE_THRESHOLD_PX = 48;
+const SWIPE_MAX_VERTICAL_PX = 32;
+const SWIPE_HORIZONTAL_RATIO = 1.5;
+const INTERACTIVE_TARGET_SELECTOR =
+  "a, button, input, select, textarea, [role=button], [role=link]";
 
 export function FeedCard({ card, index = 0, onMarkRead, isRead = false }: FeedCardProps) {
+  const swipeRef = useRef<{ pointerId: number; startX: number; startY: number } | null>(null);
+  const suppressNextClickRef = useRef(false);
+
+  const clearSwipe = (target: HTMLElement, releaseCapture: boolean) => {
+    const swipe = swipeRef.current;
+    swipeRef.current = null;
+    if (releaseCapture && swipe && target.hasPointerCapture?.(swipe.pointerId)) {
+      target.releasePointerCapture?.(swipe.pointerId);
+    }
+  };
+
   const handlePointerDown = (event: React.PointerEvent<HTMLElement>) => {
-    if (!isRead || !onMarkRead) return;
-    event.currentTarget.dataset.swipeStartX = String(event.clientX);
-    event.currentTarget.dataset.swipeStartY = String(event.clientY);
+    if (
+      !isRead ||
+      !onMarkRead ||
+      event.pointerType !== "touch" ||
+      !event.isPrimary ||
+      (event.target instanceof Element && event.target.closest(INTERACTIVE_TARGET_SELECTOR))
+    ) {
+      return;
+    }
+    swipeRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
   };
 
   const handlePointerUp = (event: React.PointerEvent<HTMLElement>) => {
+    const swipe = swipeRef.current;
+    if (!swipe || swipe.pointerId !== event.pointerId) return;
+    clearSwipe(event.currentTarget, true);
     if (!isRead || !onMarkRead) return;
-    const startX = Number(event.currentTarget.dataset.swipeStartX);
-    const startY = Number(event.currentTarget.dataset.swipeStartY);
-    delete event.currentTarget.dataset.swipeStartX;
-    delete event.currentTarget.dataset.swipeStartY;
+    const dx = swipe.startX - event.clientX;
+    const dy = swipe.startY - event.clientY;
     if (
-      Number.isFinite(startX) &&
-      Number.isFinite(startY) &&
-      startX - event.clientX >= SWIPE_THRESHOLD_PX &&
-      Math.abs(startY - event.clientY) < SWIPE_THRESHOLD_PX
+      dx >= SWIPE_THRESHOLD_PX &&
+      Math.abs(dy) <= SWIPE_MAX_VERTICAL_PX &&
+      dx >= SWIPE_HORIZONTAL_RATIO * Math.abs(dy)
     ) {
-      event.currentTarget.dataset.didSwipe = "true";
+      suppressNextClickRef.current = true;
+      event.preventDefault();
       onMarkRead(card.id, "unread");
     }
   };
 
   const suppressSwipeClick = (event: React.MouseEvent<HTMLElement>) => {
-    if (event.currentTarget.dataset.didSwipe !== "true") return;
-    delete event.currentTarget.dataset.didSwipe;
+    if (!suppressNextClickRef.current) return;
+    suppressNextClickRef.current = false;
     event.preventDefault();
     event.stopPropagation();
   };
@@ -52,9 +79,16 @@ export function FeedCard({ card, index = 0, onMarkRead, isRead = false }: FeedCa
     <Card
       as="article"
       className="card-enter flex h-full flex-col gap-2 p-4"
-      style={{ "--enter-delay": `${Math.min(index, 8) * 70}ms` } as React.CSSProperties}
+      style={
+        {
+          "--enter-delay": `${Math.min(index, 8) * 70}ms`,
+          touchAction: "pan-y pinch-zoom",
+        } as React.CSSProperties
+      }
       onPointerDown={handlePointerDown}
       onPointerUp={handlePointerUp}
+      onPointerCancel={(event) => clearSwipe(event.currentTarget, true)}
+      onLostPointerCapture={(event) => clearSwipe(event.currentTarget, false)}
       onClickCapture={suppressSwipeClick}
     >
       {/*

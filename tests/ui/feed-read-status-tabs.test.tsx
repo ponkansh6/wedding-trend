@@ -139,8 +139,20 @@ describe("FeedReadStatusTabs", () => {
     const firstCard = within(readPanel).getByText("記事 1").closest("article");
     if (!firstCard) throw new Error("card must be rendered as an article");
 
-    fireEvent.pointerDown(firstCard, { clientX: 160, clientY: 20 });
-    fireEvent.pointerUp(firstCard, { clientX: 100, clientY: 20 });
+    fireEvent.pointerDown(firstCard, {
+      pointerType: "touch",
+      isPrimary: true,
+      pointerId: 1,
+      clientX: 160,
+      clientY: 20,
+    });
+    fireEvent.pointerUp(firstCard, {
+      pointerType: "touch",
+      isPrimary: true,
+      pointerId: 1,
+      clientX: 100,
+      clientY: 20,
+    });
     expect(JSON.parse(localStorage.getItem(READ_STATUS_STORAGE_KEY) ?? "{}")).toEqual({
       version: 1,
       readCardIds: ["2"],
