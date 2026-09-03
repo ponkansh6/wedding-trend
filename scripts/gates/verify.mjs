@@ -44,7 +44,7 @@ const needTest = hasChanged(
   /^(src\/|tests\/|scripts\/gates\/check-coverage-tiers\.mjs$|vitest\.config\.ts$|tsconfig\.json$|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|\.npmrc$|drizzle\.config\.ts$)/,
 );
 const needSmoke = hasChanged(
-  /^(src\/|public\/|next\.config\.ts$|postcss\.config\.|tsconfig\.json$|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|scripts\/gates\/smoke-test\.sh$)/,
+  /^(src\/|public\/|next\.config\.ts$|postcss\.config\.|tsconfig\.json$|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|scripts\/gates\/smoke-test(?:-http)?\.sh$|tests\/ui\/smoke-contract\.test\.tsx$)/,
 );
 
 console.log(`[verify] Changed files count: ${changed.length}`);

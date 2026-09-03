@@ -24,6 +24,8 @@
     "check:sources": "node scripts/gates/check-sources.mjs",
     "check:oembed": "node scripts/gates/check-oembed-contract.mjs",
     "verify": "node scripts/gates/verify.mjs",
+    "smoke:contract": "bash scripts/gates/smoke-test.sh",
+    "smoke:http": "bash scripts/gates/smoke-test-http.sh",
     "eval:llm": "node scripts/archive/eval-llm-compliance.mjs",
     "backfill:usefulness": "tsx scripts/ops/backfill-usefulness.mjs",
     "retract": "tsx scripts/ops/retract.mjs",

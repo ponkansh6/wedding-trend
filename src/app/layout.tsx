@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Fraunces } from "next/font/google";
 import { ThemeProvider } from "next-themes";
-import { SiteHeader } from "@/components/layout/site-header";
+import { SiteShell } from "@/components/layout/site-shell";
 import { Toaster } from "@/components/layout/toaster";
 import "./globals.css";
 
@@ -53,25 +53,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           enableSystem
           disableTransitionOnChange
         >
-          <SiteHeader />
-          <main className="flex-1">{children}</main>
-          <footer className="flex flex-col items-center gap-1.5 border-t border-[var(--color-border)] px-4 py-6 text-center text-[12px] leading-jp-body text-[var(--color-muted-foreground)] sm:px-6">
-            <p>
-              本サイトは各SNS・ブログ投稿の紹介のみを行う、独立したキュレーションサービスです。掲載する記事の選定・要約はすべてAIによる自動処理で行っており、誤りを含むことがあります。詳しい内容は元投稿でご確認ください。
-            </p>
-            <p>
-              掲載内容についてのお問い合わせ・削除のご依頼は{" "}
-              <a
-                href="https://github.com/ponkansh6/wedding-trend/issues"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="font-medium text-[var(--color-foreground)] underline underline-offset-2 hover:no-underline"
-              >
-                GitHub Issues
-              </a>{" "}
-              までご連絡ください。
-            </p>
-          </footer>
+          <SiteShell>{children}</SiteShell>
           <Toaster />
         </ThemeProvider>
       </body>

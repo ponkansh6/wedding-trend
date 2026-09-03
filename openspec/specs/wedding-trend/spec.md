@@ -422,7 +422,7 @@ Server Action 自身（Node ランタイム）は `node:crypto` の `timingSafeE
 
 #### 読み取り＝フェイルソフト／書き込み＝fail-closed（`config` テーブル未作成時の非対称な挙動）
 
-`config` テーブルが存在しない環境（マイグレーション未適用の本番、`scripts/smoke-test.sh` が意図的に空にする DB 等）では、`src/lib/db/repository.ts` の読み取り関数と書き込み関数を**意図的に非対称**に扱う。
+`config` テーブルが存在しない環境（マイグレーション未適用の本番、`scripts/gates/smoke-test-http.sh` が意図的に空にする DB 等）では、`src/lib/db/repository.ts` の読み取り関数と書き込み関数を**意図的に非対称**に扱う。
 
 - **読み取り（`getIngestCooldownValue()` / `readLastRunSummary()`）はフェイルソフト**: クエリが失敗したら（`src/lib/db/query.ts` の `getFeedCards` と同じ `try/catch` + `console.warn` + 安全側デフォルトのパターンで）例外を投げずに `null` を返す。`null` は「一度も実行していない／未保存」を意味し、テーブルが無い状態は意味的にもこれと一致する。これにより `getCooldownUntil()` → `getIngestCooldown()` と伝播して `{ cooldownUntil: null }` になり、`src/app/admin/page.tsx` の初期描画がテーブル未作成でもクラッシュしない。
 - **書き込み（`claimIngestCooldown()` / `extendIngestCooldown()` / `claimIngestLease()` / それらが経由する `writeConfigValue()`）は fail-closed のまま**: 例外を握りつぶさず、そのまま呼び出し元に伝播させる。ここを読み取りと同様にフェイルソフトにしてしまうと、テーブルが無い環境で「クールダウン/lease の取得（＝書き込み）に成功した」と誤認し、濫用防止（レートリミット・排他ロック）そのものが丸ごと無効化されてしまうため。
@@ -472,11 +472,20 @@ Tier の区分・対象モジュール・ターゲット網羅率は `scripts/ga
 網羅率対象から除外」であり、正確な閾値と割り当てはスクリプトを参照。
 
 除外された RSC・UI の担保手段は、`tests/ui/`（`feed-card.test.tsx` /
-`feed-lane.test.tsx`）のコンポーネントテストと `scripts/gates/smoke-test.sh` の
-smoke test の 2 段構えである。両者は担保範囲が異なり、片方だけでは足りない。
-smoke test は in-memory DB（空）で `/` を叩くため、検証できるのはサイトタイトル・
-空状態テキスト・AI 開示テキスト・RSC エラー digest の不在に限られ、フィードカードが
-1 枚でも描画された状態は検証しない。逐語タイトル表示・外部画像非描画・元記事への
+`feed-lane.test.tsx` / `smoke-contract.test.tsx`）のコンポーネントテストと、二層の
+smoke test である。ローカル pre-push（Codex sandbox を含む）の
+`scripts/gates/smoke-test.sh` は、実際の `SiteShell` と空の `FeedLaneClassic` を
+happy-dom でレンダリングする contract smoke であり、公開ヘッダー、main の空状態、
+footer の AI 開示、GitHub Issues の削除要請リンクを DOM として検証する。これは
+spawn・listen・build・HTTPを行わないため sandbox でも実行可能だが、production build、
+RSC、runtime、cookie の検証を代替しない。
+
+CI の quality job は `pnpm verify` の後に必ず
+`scripts/gates/smoke-test-http.sh` を実行する。この HTTP smoke は in-memory DB（空）で
+production build と `next start` を行い `/` を叩き、サイトタイトル・空状態テキスト・
+AI 開示テキスト・RSC エラー digest の不在・cookie 書き込みエラーの不在を検証する。
+HTTP smoke は必須であり、contract smoke 成功を production build 成功として扱っては
+ならない。逐語タイトル表示・外部画像非描画・元記事への
 `target="_blank"` + `rel="noopener noreferrer"` 導線・`sourceName` 常時表示と
 `author` の非 null 時のみ表示・`rationaleText` / `aiSummary` 非表示・AI 免責の
 恒常注記描画といった §10 の法務不変条件は、カードが実際に描画されて初めて検証可能

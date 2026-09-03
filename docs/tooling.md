@@ -35,11 +35,9 @@ We use blazing fast, Rust-based tools (`oxlint` and `oxfmt`).
 
 ## Smoke Test
 
-- Run `bash scripts/gates/smoke-test.sh`.
-- This script builds the application, starts `next start` on an in-memory database at port `3100`, curls `/`, and asserts that:
-  1. The page renders successfully **without** an RSC error digest.
-  2. The expected empty-state text appears.
-- It is designed to catch regressions where the app builds successfully but renders broken at runtime.
+- Run `bash scripts/gates/smoke-test.sh` (or `pnpm smoke:contract`) for the sandbox-safe DOM contract. It renders the actual public site shell with the empty feed without building, starting a server, binding a port, or issuing HTTP requests.
+- Run `bash scripts/gates/smoke-test-http.sh` (or `pnpm smoke:http`) where process spawning and loopback networking are available. It builds the application, starts `next start` on an in-memory database at port `3100`, curls `/`, and checks for runtime/RSC/cookie-write failures.
+- The contract smoke is used by pre-push; the HTTP smoke is a required CI step. The former does not replace production build and runtime verification.
 
 ## Migrations (Shared Production DB)
 
@@ -84,9 +82,10 @@ current schema as deletable, which would delete the other project's tables.
 Runs automatically on pushes to `main` and on all Pull Requests:
 
 1. `pnpm install --frozen-lockfile`
-2. `pnpm verify` (which executes `node scripts/gates/verify.mjs` running type-check, lint, formatting check, unit/coverage tests, spec references check, security checks, and smoke tests)
+2. `pnpm verify` (which executes `node scripts/gates/verify.mjs` running type-check, lint, formatting check, unit/coverage tests, spec references check, security checks, and the sandbox-safe contract smoke)
+3. `bash scripts/gates/smoke-test-http.sh` (required production build and HTTP smoke)
 
-_Note: Pre-push hook and CI execute the exact same `pnpm verify` command._
+_Note: Pre-push runs `pnpm verify`; CI additionally runs the required HTTP smoke._
 
 ## Weekly Monitoring (`.github/workflows/weekly-monitor.yml`)
 

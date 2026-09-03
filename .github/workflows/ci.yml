@@ -19,3 +19,6 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm verify
+      # HTTP/build/RSC coverage is intentionally separate from the sandbox-safe
+      # contract smoke run by verify and must remain required in CI.
+      - run: bash scripts/gates/smoke-test-http.sh

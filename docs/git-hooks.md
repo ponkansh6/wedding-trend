@@ -16,7 +16,7 @@ Runs `lint-staged` on staged files, followed by full repository checks:
 - **Lint Errors**: Run `pnpm run lint:fast` or fix issues reported by `oxlint`.
 - **Type Errors**: Run `pnpm run type-check` and resolve TypeScript errors.
 - **Secretlint Hits**: Remove accidental secrets (API keys, tokens) or use placeholder configuration / `.secretlintignore`.
-- **Emergency Bypass**: `--no-verify` (`git commit --no-verify`) may be used in extreme emergencies, but **must** be immediately followed by a clean, compliant fix commit. Do not make bypassing a habit.
+- **Hook bypass is prohibited**: Do not use `--no-verify`, `-n`, or `HUSKY=0`. Fix the reported failure before committing.
 
 ---
 
@@ -36,8 +36,14 @@ Guards pushes to remote repositories:
 
 1. **Uncommitted/Untracked Guard**: Fails if there are uncommitted or untracked changes in `src/` or `tests/`. Commit your changes first.
 2. **Lockfile Sync**: Ensures `pnpm-lock.yaml` is in sync.
-3. **Quality Gates**: Runs `pnpm run lint`, `pnpm run spec-refs`, `pnpm run format:check`, `pnpm run security-check`, and `node scripts/check-migrations-additive.mjs`.
-4. **Targeted Tests & Smoke**: If `src/` or `tests/` files have changed relative to the target branch, runs vitest coverage tiers and `bash scripts/smoke-test.sh`.
+3. **Quality Gates**: Runs the checks in `scripts/gates/verify.mjs`, including lint, spec references, format, security, migration safety, and type-checking.
+4. **Targeted Tests & Contract Smoke**: If relevant files changed, runs Vitest coverage tiers and `bash scripts/gates/smoke-test.sh`. This is a rendered DOM contract test and is safe in the Codex sandbox: it does not build, spawn a process, bind a port, or make HTTP requests.
+
+### Two-layer smoke testing
+
+`bash scripts/gates/smoke-test.sh` (`pnpm smoke:contract`) is the pre-push/Codex-safe layer. It renders the real public shell with the empty feed and checks the header, empty state, AI disclosure, and GitHub Issues removal-contact link.
+
+`bash scripts/gates/smoke-test-http.sh` (`pnpm smoke:http`) is the production layer. It performs a production build, starts `next start` with an in-memory DB, and makes an HTTP request. It catches build, RSC, runtime, and cookie-write failures that the contract layer cannot catch. Codex sandbox restrictions may prevent this command from running locally, but CI runs it as a required quality step; do not skip it or add an automatic fallback.
 
 ### Migrations ownership gate (`scripts/check-migrations-additive.mjs`)
 
