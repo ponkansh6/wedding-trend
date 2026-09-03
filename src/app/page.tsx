@@ -1,7 +1,6 @@
 import { z } from "zod";
 import { getFeedCards } from "@/lib/db/query";
 import { FeedReadStatusTabs } from "@/components/feed/feed-read-status-tabs";
-import { FeedLoadMore } from "@/components/feed/feed-load-more";
 import { FEED_PAGE_SIZE, FEED_PAGE_SIZE_MAX } from "@/lib/constants";
 
 /**
@@ -58,9 +57,7 @@ export default async function Home({ searchParams }: PageProps) {
     <div className="mx-auto flex max-w-5xl flex-col gap-10 px-4 py-6 sm:px-6 sm:py-10">
       <h1 className="sr-only">ウエディング・トレンド＆リアルフィード</h1>
 
-      <FeedReadStatusTabs cards={visibleCards} />
-
-      {canLoadMore && <FeedLoadMore visibleCount={visibleCards.length} nextCount={nextCount} />}
+      <FeedReadStatusTabs cards={visibleCards} nextCount={canLoadMore ? nextCount : null} />
     </div>
   );
 }

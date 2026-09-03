@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { FeedLaneClassic } from "@/components/feed/feed-lane-classic";
+import { FeedLoadMore } from "@/components/feed/feed-load-more";
 import { readReadStatus, writeReadStatus } from "@/components/feed/read-status-storage";
 import type { FeedCard } from "@/lib/types";
 
@@ -9,6 +10,8 @@ type TabName = "unread" | "read";
 
 type FeedReadStatusTabsProps = {
   cards: FeedCard[];
+  /** 次の総表示件数。追加できる記事がない場合は null。 */
+  nextCount?: number | null;
 };
 
 const TABS: TabName[] = ["unread", "read"];
@@ -23,7 +26,7 @@ function getBrowserStorage(): Storage | null {
   }
 }
 
-export function FeedReadStatusTabs({ cards }: FeedReadStatusTabsProps) {
+export function FeedReadStatusTabs({ cards, nextCount = null }: FeedReadStatusTabsProps) {
   const instanceId = useId();
   const [hydrated, setHydrated] = useState(false);
   const [activeTab, setActiveTab] = useState<TabName>("unread");
@@ -58,7 +61,18 @@ export function FeedReadStatusTabs({ cards }: FeedReadStatusTabsProps) {
   // Keep SSR and the first client render identical. This is also the usable
   // no-JavaScript fallback: all loaded cards remain in one ordinary list.
   if (!hydrated) {
-    return <FeedLaneClassic cards={cards} onMarkRead={markRead} />;
+    return (
+      <>
+        <FeedLaneClassic cards={cards} onMarkRead={markRead} />
+        {nextCount !== null && (
+          <FeedLoadMore
+            visibleCount={cards.length}
+            nextCount={nextCount}
+            countLabel="読み込み済み"
+          />
+        )}
+      </>
+    );
   }
 
   const unreadCards = cards.filter((card) => !readCardIds.has(String(card.id)));
@@ -157,6 +171,9 @@ export function FeedReadStatusTabs({ cards }: FeedReadStatusTabsProps) {
           onMarkRead={markRead}
         />
       </div>
+      {activeTab === "unread" && nextCount !== null && (
+        <FeedLoadMore visibleCount={unreadCards.length} nextCount={nextCount} countLabel="未読" />
+      )}
     </div>
   );
 }

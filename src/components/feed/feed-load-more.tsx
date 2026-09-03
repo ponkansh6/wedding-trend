@@ -5,15 +5,16 @@ type FeedLoadMoreProps = {
   visibleCount: number;
   /** 「もっと見る」を押した先で表示する件数（`?count=` に渡す値）。 */
   nextCount: number;
+  /** 表示中件数の対象。タブがないフォールバックでは省略できる。 */
+  countLabel?: string;
 };
 
 /**
  * フィード末尾の「もっと見る」導線。
  *
- * Server Component のまま状態を持たせるため、クライアント状態ではなく
  * 次の表示件数を指す通常のリンク（`?count=${nextCount}`）として実装する。
- * JS 無効でも機能し、`FeedLaneClassic` の props 契約（`tests/ui/feed-lane.test.tsx`）
- * には触れないよう、フィードの外側（`page.tsx`）に独立したセクションとして置く。
+ * JS 無効でも機能し、タブの状態とは独立して総ロード範囲を広げる。親の
+ * `FeedReadStatusTabs` は Client Component だが、この表示自体は Server-only API を使わない。
  *
  * カード群と区別できるよう上に罫線を挟み、押せることが一目でわかるよう
  * `Button` の `accent`（朱色の輪郭線→塗り）を採用。タップ領域を広げるため
@@ -31,13 +32,19 @@ type FeedLoadMoreProps = {
  * スクリーンリーダー通知）は `useLinkStatus`（Link の子孫でのみ呼べる
  * フック）を使うため、その部分だけを独立した小さなクライアント
  * コンポーネント `FeedLoadMoreButton` に切り出している。このコンポーネント
- * 自体・`FeedLaneClassic`・`page.tsx` は Server Component のまま。
+ * は親の Client Component からも安全に利用でき、`FeedLaneClassic` と
+ * `page.tsx` は Server Component のまま。
  */
-export function FeedLoadMore({ visibleCount, nextCount }: FeedLoadMoreProps) {
+export function FeedLoadMore({ visibleCount, nextCount, countLabel }: FeedLoadMoreProps) {
   return (
     <div className="flex flex-col items-center gap-3 border-t border-[var(--color-border)] pt-8">
-      <p className="text-meta text-[var(--color-muted-foreground)]">{visibleCount}件を表示中</p>
+      <p className="text-meta text-[var(--color-muted-foreground)]">
+        {countLabel ? `${countLabel} ${visibleCount}件を表示中` : `${visibleCount}件を表示中`}
+      </p>
       <FeedLoadMoreButton href={`/?count=${nextCount}`} />
+      <p className="text-meta text-[var(--color-muted-foreground)]">
+        追加した記事は未読に表示されます。
+      </p>
     </div>
   );
 }

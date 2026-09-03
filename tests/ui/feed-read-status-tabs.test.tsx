@@ -43,6 +43,59 @@ function panelFor(tab: HTMLElement): HTMLElement {
 }
 
 describe("FeedReadStatusTabs", () => {
+  it("未読タブだけに未読件数ベースのもっと見る導線を表示する", () => {
+    localStorage.setItem(READ_STATUS_STORAGE_KEY, '{"version":1,"readCardIds":["2"]}');
+    render(<FeedReadStatusTabs cards={[card(1), card(2), card(3)]} nextCount={6} />);
+
+    const unreadTab = screen.getByRole("tab", { name: "未読 2件" });
+    const readTab = screen.getByRole("tab", { name: "既読 1件" });
+    const unreadPanel = panelFor(unreadTab);
+    const readPanel = panelFor(readTab);
+    expect(within(unreadPanel).getByText("記事 1")).toBeInTheDocument();
+    expect(within(unreadPanel).getByText("記事 3")).toBeInTheDocument();
+    expect(screen.getByText("未読 2件を表示中")).toBeInTheDocument();
+    expect(screen.getByText("追加した記事は未読に表示されます。")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "もっと見る" })).toHaveAttribute("href", "/?count=6");
+
+    fireEvent.click(readTab);
+    expect(readPanel).not.toHaveAttribute("hidden");
+    expect(within(readPanel).getByText("記事 2")).toBeInTheDocument();
+    expect(screen.queryByText("未読 2件を表示中")).not.toBeInTheDocument();
+    expect(screen.queryByText("追加した記事は未読に表示されます。")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "もっと見る" })).not.toBeInTheDocument();
+
+    fireEvent.click(unreadTab);
+    expect(screen.getByText("未読 2件を表示中")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "もっと見る" })).toHaveAttribute("href", "/?count=6");
+  });
+
+  it("既読化直後と追加ロード相当の新規 ID を未読件数に反映する", () => {
+    localStorage.setItem(READ_STATUS_STORAGE_KEY, '{"version":1,"readCardIds":["2"]}');
+    const { rerender } = render(<FeedReadStatusTabs cards={[card(1), card(2)]} nextCount={4} />);
+    const unreadTab = screen.getByRole("tab", { name: "未読 1件" });
+    const unreadPanel = panelFor(unreadTab);
+
+    fireEvent.click(within(unreadPanel).getByRole("link", { name: "記事 1" }));
+    expect(screen.getByRole("tab", { name: "未読 0件" })).toBeInTheDocument();
+    expect(screen.getByText("未読 0件を表示中")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "もっと見る" })).toBeInTheDocument();
+
+    // `?count=` の追加ロード後に届く ID は保存済み既読 ID に含まれないため未読になる。
+    rerender(<FeedReadStatusTabs cards={[card(1), card(2), card(3)]} nextCount={6} />);
+    expect(screen.getByRole("tab", { name: "未読 1件" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "既読 2件" })).toBeInTheDocument();
+    expect(screen.getByText("未読 1件を表示中")).toBeInTheDocument();
+    expect(screen.getByText("記事 3")).toBeInTheDocument();
+  });
+
+  it("追加先がない場合は未読タブでももっと見る導線を出さない", () => {
+    render(<FeedReadStatusTabs cards={[card(1)]} nextCount={null} />);
+
+    expect(screen.queryByText(/件を表示中/)).not.toBeInTheDocument();
+    expect(screen.queryByText("追加した記事は未読に表示されます。")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "もっと見る" })).not.toBeInTheDocument();
+  });
+
   it("保存済み ID でロード済みカードだけを分類し、クリック時に直ちに保存する", () => {
     localStorage.setItem(READ_STATUS_STORAGE_KEY, '{"version":1,"readCardIds":["2","999"]}');
     const { unmount } = render(<FeedReadStatusTabs cards={[card(1), card(2)]} />);
