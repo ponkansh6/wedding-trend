@@ -7,7 +7,8 @@ type FeedLaneClassicProps = {
   /** 複数レーンを同時表示する親が渡す一意な見出し ID。 */
   headingId?: string;
   emptyState?: { title: string; description: string };
-  onMarkRead?: (cardId: FeedCardData["id"]) => void;
+  onMarkRead?: (cardId: FeedCardData["id"], action?: "read" | "unread") => void;
+  isRead?: boolean;
 };
 
 /**
@@ -23,6 +24,7 @@ export function FeedLaneClassic({
   headingId = "lane-classic-heading",
   emptyState,
   onMarkRead,
+  isRead = false,
 }: FeedLaneClassicProps) {
   return (
     <section aria-labelledby={headingId} className="flex flex-col gap-4">
@@ -52,7 +54,7 @@ export function FeedLaneClassic({
       ) : (
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 md:gap-4">
           {cards.map((card, i) => (
-            <FeedCard key={card.id} card={card} index={i} onMarkRead={onMarkRead} />
+            <FeedCard key={card.id} card={card} index={i} onMarkRead={onMarkRead} isRead={isRead} />
           ))}
         </div>
       )}

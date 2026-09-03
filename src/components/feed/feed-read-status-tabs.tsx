@@ -45,12 +45,17 @@ export function FeedReadStatusTabs({ cards, nextCount = null }: FeedReadStatusTa
     setHydrated(true);
   }, []);
 
-  const markRead = (cardId: FeedCard["id"]) => {
+  const markRead = (cardId: FeedCard["id"], action: "read" | "unread" = "read") => {
     const id = String(cardId);
     const current = readCardIdsRef.current;
-    if (current.has(id)) return;
+    if (action === "read" && current.has(id)) return;
+    if (action === "unread" && !current.has(id)) return;
     const next = new Set(current);
-    next.add(id);
+    if (action === "read") {
+      next.add(id);
+    } else {
+      next.delete(id);
+    }
     readCardIdsRef.current = next;
     // Do not await or prevent the external link's normal navigation.
     const storage = getBrowserStorage();
@@ -169,6 +174,7 @@ export function FeedReadStatusTabs({ cards, nextCount = null }: FeedReadStatusTa
             description: "元記事を開くと、ここに既読として表示されます。",
           }}
           onMarkRead={markRead}
+          isRead
         />
       </div>
       {activeTab === "unread" && nextCount !== null && (

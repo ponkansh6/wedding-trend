@@ -9,16 +9,53 @@ type FeedCardProps = {
   card: FeedCardData;
   /** 出現アニメーションの遅延に使う表示順（任意）。 */
   index?: number;
-  /** Client 境界内でのみ渡す既読化ハンドラ。 */
-  onMarkRead?: (cardId: FeedCardData["id"]) => void;
+  /** Client 境界内でのみ渡す既読状態の更新ハンドラ。 */
+  onMarkRead?: (cardId: FeedCardData["id"], action?: "read" | "unread") => void;
+  /** 既読タブ内で表示しているカードか。 */
+  isRead?: boolean;
 };
 
-export function FeedCard({ card, index = 0, onMarkRead }: FeedCardProps) {
+const SWIPE_THRESHOLD_PX = 48;
+
+export function FeedCard({ card, index = 0, onMarkRead, isRead = false }: FeedCardProps) {
+  const handlePointerDown = (event: React.PointerEvent<HTMLElement>) => {
+    if (!isRead || !onMarkRead) return;
+    event.currentTarget.dataset.swipeStartX = String(event.clientX);
+    event.currentTarget.dataset.swipeStartY = String(event.clientY);
+  };
+
+  const handlePointerUp = (event: React.PointerEvent<HTMLElement>) => {
+    if (!isRead || !onMarkRead) return;
+    const startX = Number(event.currentTarget.dataset.swipeStartX);
+    const startY = Number(event.currentTarget.dataset.swipeStartY);
+    delete event.currentTarget.dataset.swipeStartX;
+    delete event.currentTarget.dataset.swipeStartY;
+    if (
+      Number.isFinite(startX) &&
+      Number.isFinite(startY) &&
+      startX - event.clientX >= SWIPE_THRESHOLD_PX &&
+      Math.abs(startY - event.clientY) < SWIPE_THRESHOLD_PX
+    ) {
+      event.currentTarget.dataset.didSwipe = "true";
+      onMarkRead(card.id, "unread");
+    }
+  };
+
+  const suppressSwipeClick = (event: React.MouseEvent<HTMLElement>) => {
+    if (event.currentTarget.dataset.didSwipe !== "true") return;
+    delete event.currentTarget.dataset.didSwipe;
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
   return (
     <Card
       as="article"
       className="card-enter flex h-full flex-col gap-2 p-4"
       style={{ "--enter-delay": `${Math.min(index, 8) * 70}ms` } as React.CSSProperties}
+      onPointerDown={handlePointerDown}
+      onPointerUp={handlePointerUp}
+      onClickCapture={suppressSwipeClick}
     >
       {/*
        * plan B 追試: カテゴリバッジとトピックチップを同一行に集約する。
@@ -76,7 +113,7 @@ export function FeedCard({ card, index = 0, onMarkRead }: FeedCardProps) {
         </p>
       )}
 
-      <Footer card={card} />
+      <Footer card={card} isRead={isRead} onMarkRead={onMarkRead} />
     </Card>
   );
 }
@@ -136,7 +173,15 @@ function Title({
  * aria-describedby が担うため、ここは aria-hidden で読み上げから隠す
  * （見た目だけのラベルとして二重announceを防ぐ）。
  */
-function Footer({ card }: { card: FeedCardData }) {
+function Footer({
+  card,
+  isRead,
+  onMarkRead,
+}: {
+  card: FeedCardData;
+  isRead: boolean;
+  onMarkRead?: (cardId: FeedCardData["id"], action?: "read" | "unread") => void;
+}) {
   return (
     <footer className="mt-auto flex flex-row items-center justify-between gap-2.5 border-t border-[var(--color-border)] pt-3">
       <p className="min-w-0 truncate text-meta text-[var(--color-muted-foreground)]">
@@ -152,6 +197,19 @@ function Footer({ card }: { card: FeedCardData }) {
         原文を読む
         <ExternalLink className="size-3.5" />
       </span>
+      {isRead && onMarkRead && (
+        <button
+          type="button"
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onMarkRead(card.id, "unread");
+          }}
+          className="relative z-10 shrink-0 rounded-sm text-meta font-semibold text-[var(--color-muted-foreground)] underline underline-offset-2 transition-colors hover:text-[var(--color-foreground)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface)]"
+        >
+          未読に戻す
+        </button>
+      )}
     </footer>
   );
 }

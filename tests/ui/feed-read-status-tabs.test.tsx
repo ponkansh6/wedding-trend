@@ -129,6 +129,33 @@ describe("FeedReadStatusTabs", () => {
     expect(screen.getByRole("tab", { name: "既読 2件" })).toBeInTheDocument();
   });
 
+  it("既読タブでだけ未読に戻すボタンと左スワイプを提供し、ID のみを保存する", () => {
+    localStorage.setItem(READ_STATUS_STORAGE_KEY, '{"version":1,"readCardIds":["1","2"]}');
+    render(<FeedReadStatusTabs cards={[card(1), card(2)]} />);
+
+    expect(screen.queryByRole("button", { name: "未読に戻す" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "既読 2件" }));
+    const readPanel = panelFor(screen.getByRole("tab", { name: "既読 2件" }));
+    const firstCard = within(readPanel).getByText("記事 1").closest("article");
+    if (!firstCard) throw new Error("card must be rendered as an article");
+
+    fireEvent.pointerDown(firstCard, { clientX: 160, clientY: 20 });
+    fireEvent.pointerUp(firstCard, { clientX: 100, clientY: 20 });
+    expect(JSON.parse(localStorage.getItem(READ_STATUS_STORAGE_KEY) ?? "{}")).toEqual({
+      version: 1,
+      readCardIds: ["2"],
+    });
+    expect(screen.getByRole("tab", { name: "未読 1件" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "未読に戻す" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "未読に戻す" }));
+    expect(JSON.parse(localStorage.getItem(READ_STATUS_STORAGE_KEY) ?? "{}")).toEqual({
+      version: 1,
+      readCardIds: [],
+    });
+    expect(within(readPanel).getByText("既読の記事はまだありません")).toBeInTheDocument();
+  });
+
   it("manual activation のキー操作と ARIA 対応を提供する", () => {
     render(<FeedReadStatusTabs cards={[]} />);
     const unread = screen.getByRole("tab", { name: "未読 0件" });
