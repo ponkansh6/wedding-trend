@@ -296,9 +296,6 @@ export async function curateBatch(
       let firstAttemptAnchor: string | null = null;
       let firstAttemptMissingTerms: string[] | undefined;
       let firstAttemptMatchedTerms: string[] | undefined;
-      let retryAttemptAnchor: string | null | undefined;
-      let retryAttemptMissingTerms: string[] | undefined;
-      let retryAttemptMatchedTerms: string[] | undefined;
 
       if (!gateRes.ok) {
         const reason = "reason" in gateRes ? gateRes.reason : "unknown";
@@ -333,9 +330,6 @@ export async function curateBatch(
         firstAttemptAnchor,
         firstAttemptMissingTerms,
         firstAttemptMatchedTerms,
-        retryAttemptAnchor,
-        retryAttemptMissingTerms,
-        retryAttemptMatchedTerms,
       });
     }),
   );

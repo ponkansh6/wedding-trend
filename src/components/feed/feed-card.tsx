@@ -9,9 +9,11 @@ type FeedCardProps = {
   card: FeedCardData;
   /** 出現アニメーションの遅延に使う表示順（任意）。 */
   index?: number;
+  /** Client 境界内でのみ渡す既読化ハンドラ。 */
+  onMarkRead?: (cardId: FeedCardData["id"]) => void;
 };
 
-export function FeedCard({ card, index = 0 }: FeedCardProps) {
+export function FeedCard({ card, index = 0, onMarkRead }: FeedCardProps) {
   return (
     <Card
       as="article"
@@ -61,7 +63,12 @@ export function FeedCard({ card, index = 0 }: FeedCardProps) {
         )}
       </div>
 
-      <Title originalTitle={card.originalTitle} url={card.url} cardId={card.id} />
+      <Title
+        originalTitle={card.originalTitle}
+        url={card.url}
+        cardId={card.id}
+        onMarkRead={onMarkRead}
+      />
 
       {card.topicAnchor && (
         <p className="line-clamp-1 text-anchor text-pretty text-[var(--color-muted-foreground)]">
@@ -84,10 +91,12 @@ function Title({
   originalTitle,
   url,
   cardId,
+  onMarkRead,
 }: {
   originalTitle: FeedCardData["originalTitle"];
   url: string;
   cardId: FeedCardData["id"];
+  onMarkRead?: (cardId: FeedCardData["id"]) => void;
 }) {
   const noteId = `${cardId}-external-note`;
   return (
@@ -98,6 +107,7 @@ function Title({
           target="_blank"
           rel="noopener noreferrer"
           aria-describedby={noteId}
+          onClick={() => onMarkRead?.(cardId)}
           className="line-clamp-2 text-pretty rounded-sm decoration-transparent underline underline-offset-2 transition-colors duration-150 hover:decoration-current focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface)] after:absolute after:inset-0 after:z-0 after:content-['']"
         >
           {originalTitle}

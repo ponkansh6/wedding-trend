@@ -135,7 +135,7 @@ function resolveRss2Thumbnail(item: Record<string, unknown>, bodyHtml: string): 
   const enclosureUrl = enclosure?.["@_url"];
   if (
     typeof enclosureUrl === "string" &&
-    (!enclosureType || /^image\//.test(String(enclosureType)))
+    (!enclosureType || String(enclosureType).startsWith("image/"))
   ) {
     return enclosureUrl;
   }

@@ -241,8 +241,8 @@ export function computeBodyHash(text: string): string {
   const tokens = shingles(text);
   if (tokens.length === 0) return "0".repeat(16);
 
-  const weights0 = new Array<number>(WORD_BITS).fill(0);
-  const weights1 = new Array<number>(WORD_BITS).fill(0);
+  const weights0 = Array.from({ length: WORD_BITS }, () => 0);
+  const weights1 = Array.from({ length: WORD_BITS }, () => 0);
   for (const token of tokens) {
     const [w0, w1] = tokenFingerprintWords(token);
     for (let bit = 0; bit < WORD_BITS; bit++) {

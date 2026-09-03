@@ -202,8 +202,6 @@ interface SoftHostBlock {
   detail: string;
 }
 
-type HostBlock = HardHostBlock | SoftHostBlock;
-
 /**
  * ホストの停止状態を確認する（ネットワーク I/O ゼロで拒否できる段階）。
  * K1〜K6 由来の hard stop のみを扱う。

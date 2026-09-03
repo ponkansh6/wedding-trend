@@ -4,6 +4,10 @@ import type { FeedCard as FeedCardData } from "@/lib/types";
 
 type FeedLaneClassicProps = {
   cards: FeedCardData[];
+  /** 複数レーンを同時表示する親が渡す一意な見出し ID。 */
+  headingId?: string;
+  emptyState?: { title: string; description: string };
+  onMarkRead?: (cardId: FeedCardData["id"]) => void;
 };
 
 /**
@@ -14,12 +18,17 @@ type FeedLaneClassicProps = {
  * spec.md §6.1）と、オーナーが `/admin` から行う手動トリガーの 2 経路のみで、
  * 訪問者が操作できる導線は存在しない。
  */
-export function FeedLaneClassic({ cards }: FeedLaneClassicProps) {
+export function FeedLaneClassic({
+  cards,
+  headingId = "lane-classic-heading",
+  emptyState,
+  onMarkRead,
+}: FeedLaneClassicProps) {
   return (
-    <section aria-labelledby="lane-classic-heading" className="flex flex-col gap-4">
+    <section aria-labelledby={headingId} className="flex flex-col gap-4">
       <header className="flex flex-col gap-1.5">
         <h2
-          id="lane-classic-heading"
+          id={headingId}
           className="font-display text-lane-heading font-semibold text-[var(--color-foreground)] sm:text-lane-heading-lg"
         >
           結婚式の体験ブログ
@@ -34,13 +43,16 @@ export function FeedLaneClassic({ cards }: FeedLaneClassicProps) {
 
       {cards.length === 0 ? (
         <EmptyState
-          title="定番の体験談はまだありません"
-          description="登録している卒花ブログの新着記事は、まだ取り込まれていません。新着は自動で定期的に確認されます。"
+          title={emptyState?.title ?? "定番の体験談はまだありません"}
+          description={
+            emptyState?.description ??
+            "登録している卒花ブログの新着記事は、まだ取り込まれていません。新着は自動で定期的に確認されます。"
+          }
         />
       ) : (
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 md:gap-4">
           {cards.map((card, i) => (
-            <FeedCard key={card.id} card={card} index={i} />
+            <FeedCard key={card.id} card={card} index={i} onMarkRead={onMarkRead} />
           ))}
         </div>
       )}
