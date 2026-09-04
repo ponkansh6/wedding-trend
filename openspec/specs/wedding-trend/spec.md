@@ -482,7 +482,7 @@ Tier の区分・対象モジュール・ターゲット網羅率は `scripts/ga
 網羅率対象から除外」であり、正確な閾値と割り当てはスクリプトを参照。
 
 除外された RSC・UI の担保手段は、`tests/ui/`（`feed-card.test.tsx` /
-`feed-lane.test.tsx` / `smoke-contract.test.tsx`）のコンポーネントテストと、二層の
+`feed-lane.test.tsx` / `loading.test.tsx` / `smoke-contract.test.tsx`）のコンポーネントテストと、二層の
 smoke test である。ローカル pre-push（Codex sandbox を含む）の
 `scripts/gates/smoke-test.sh` は、実際の `SiteShell` と空の `FeedLaneClassic` を
 happy-dom でレンダリングする contract smoke であり、公開ヘッダー、main の空状態、
@@ -501,6 +501,11 @@ HTTP smoke は必須であり、contract smoke 成功を production build 成功
 恒常注記描画といった §10 の法務不変条件は、カードが実際に描画されて初めて検証可能
 であり、これらは `tests/ui/` のコンポーネントテスト（`vitest.config.ts` の
 `test.projects` における `ui` プロジェクト、`environment: "happy-dom"`）が担う。
+`src/app/loading.tsx` の route-level loading UI も `loading.test.tsx` で、status の
+読み上げと、`FeedReadStatusTabs` の hydration 前と同じ単一記事レーンの視覚 Skeleton
+（`aria-hidden`）、4 件の記事カード一覧を検証する。ローディング中は未読・既読 tab、
+件数・もっと見る等の推測情報、記事本文・要約・外部画像・元記事リンクを描画しないことも
+同テストの契約とする。
 2026-09-01（shared_plan/20 P3）に旧 7 段を 3 段（法務・公開ゲート系 / パイプライン・
 スコア系 / その他）へ統合した。あわせて「どの実ファイルにも一致しない tier パターン」の
 検出を fail から warn に変更し、未一致件数と一覧は `pnpm verify`（`scripts/gates/verify.mjs`）の

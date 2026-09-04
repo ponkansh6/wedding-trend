@@ -69,6 +69,17 @@ export const HOST_ALLOWLIST: readonly AllowlistedHost[] = [
     // テンプレート変更で消えた場合に一段広い範囲を試す）。
     articleContainerSelectors: ["div.story-detail", "div.produce-story-detail"],
   },
+  {
+    host: "note.com",
+    tosUrl: "https://note.com/terms",
+    articlePathPatterns: [/^\/[^/]+\/n\/[^/]+\/?$/],
+    articleContainerSelectors: [
+      "article",
+      "div.note-common-styles__textnote-body",
+      "div.o-noteContent",
+      "main",
+    ],
+  },
 ];
 /** allowlist のホスト名のみを取り出した配列（ホスト判定用）。 */
 export const HOST_ALLOWLIST_HOSTS: readonly string[] = HOST_ALLOWLIST.map((h) => h.host);
