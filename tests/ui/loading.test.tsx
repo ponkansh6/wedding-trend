@@ -27,6 +27,9 @@ export function getLoadingContractIssues(root: ParentNode): string[] {
   if (/\d+件|もっと見る/.test(root.textContent ?? "")) {
     issues.push("speculative count or load-more information must not render while loading");
   }
+  if (root.querySelector("button")) {
+    issues.push("interactive buttons must not render while loading");
+  }
   if (root.querySelector("a")) issues.push("article links must not render while loading");
   if (root.querySelector("img")) issues.push("external images must not render while loading");
   return issues;
@@ -41,11 +44,20 @@ describe("route-level loading UI", () => {
     expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
     expect(screen.queryByRole("tab")).not.toBeInTheDocument();
 
+    const readStatusTabsSkeleton = container.querySelectorAll(
+      '[data-testid="read-status-tabs-skeleton"]',
+    );
+    expect(readStatusTabsSkeleton).toHaveLength(1);
+    expect(
+      readStatusTabsSkeleton[0]?.querySelectorAll('[data-testid="read-status-tab-skeleton"]'),
+    ).toHaveLength(2);
+
     const lane = container.querySelector('section[aria-hidden="true"]');
     expect(lane).toBeInTheDocument();
     expect(lane?.querySelectorAll("article")).toHaveLength(4);
 
     expect(container).not.toHaveTextContent(/\d+件|もっと見る/);
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
     expect(getLoadingContractIssues(container)).toEqual([]);

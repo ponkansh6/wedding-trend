@@ -503,8 +503,9 @@ HTTP smoke は必須であり、contract smoke 成功を production build 成功
 `test.projects` における `ui` プロジェクト、`environment: "happy-dom"`）が担う。
 `src/app/loading.tsx` の route-level loading UI も `loading.test.tsx` で、status の
 読み上げと、`FeedReadStatusTabs` の hydration 前と同じ単一記事レーンの視覚 Skeleton
-（`aria-hidden`）、4 件の記事カード一覧を検証する。ローディング中は未読・既読 tab、
-件数・もっと見る等の推測情報、記事本文・要約・外部画像・元記事リンクを描画しないことも
+（`aria-hidden`）、4 件の記事カード一覧を検証する。ローディング中は未読・既読の実タブ、
+文言、件数、操作、もっと見る等の推測情報、記事本文・要約・外部画像・元記事リンクを
+描画しない。レイアウト安定化のため、非操作・非意味的な 2 区画のタブ Skeleton を描画し、
 同テストの契約とする。
 LLM を呼び出す `topics-batch` の単体テストは `callGemini`（必要に応じて backoff）をモックし、
 入力 ID をすべて含むスキーマ適合 JSON を即時に返す。外部通信・実 API キー・タイムアウトには依存しない。

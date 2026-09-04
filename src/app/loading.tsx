@@ -40,6 +40,24 @@ export default function Loading() {
           <Skeleton className="h-4 w-full max-w-xl" />
           <Skeleton className="h-4 w-full max-w-lg" />
         </header>
+        <div
+          aria-hidden="true"
+          data-testid="read-status-tabs-skeleton"
+          className="flex gap-2 border-b border-[var(--color-border)]"
+        >
+          <div
+            data-testid="read-status-tab-skeleton"
+            className="-mb-px border-b-2 border-[var(--color-accent)] px-3 py-2"
+          >
+            <Skeleton className="h-4 w-16" />
+          </div>
+          <div
+            data-testid="read-status-tab-skeleton"
+            className="-mb-px border-b-2 border-transparent px-3 py-2"
+          >
+            <Skeleton className="h-4 w-14" />
+          </div>
+        </div>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 md:gap-4">
           {Array.from({ length: 4 }).map((_, i) => (
             <FeedCardSkeleton key={i} />
