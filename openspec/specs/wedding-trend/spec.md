@@ -506,6 +506,8 @@ HTTP smoke は必須であり、contract smoke 成功を production build 成功
 （`aria-hidden`）、4 件の記事カード一覧を検証する。ローディング中は未読・既読 tab、
 件数・もっと見る等の推測情報、記事本文・要約・外部画像・元記事リンクを描画しないことも
 同テストの契約とする。
+LLM を呼び出す `topics-batch` の単体テストは `callGemini`（必要に応じて backoff）をモックし、
+入力 ID をすべて含むスキーマ適合 JSON を即時に返す。外部通信・実 API キー・タイムアウトには依存しない。
 2026-09-01（shared_plan/20 P3）に旧 7 段を 3 段（法務・公開ゲート系 / パイプライン・
 スコア系 / その他）へ統合した。あわせて「どの実ファイルにも一致しない tier パターン」の
 検出を fail から warn に変更し、未一致件数と一覧は `pnpm verify`（`scripts/gates/verify.mjs`）の

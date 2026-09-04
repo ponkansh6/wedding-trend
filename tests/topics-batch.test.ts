@@ -1,6 +1,22 @@
 import { describe, it, expect, vi } from "vitest";
 import { curateTopicsBatch, shadowEvaluateTopics } from "@/lib/llm/topics-batch";
 
+const { callGeminiMock } = vi.hoisted(() => ({
+  callGeminiMock: vi.fn().mockResolvedValue(
+    JSON.stringify({
+      items: [
+        { id: "1", topics: ["準備", "衣装"] },
+        { id: "2", topics: ["式場"] },
+      ],
+    }),
+  ),
+}));
+
+vi.mock("@/lib/llm/client", () => ({
+  callGemini: callGeminiMock,
+  backoffMs: vi.fn(() => 0),
+}));
+
 describe("topics-batch pipeline", () => {
   it("handles empty input correctly", async () => {
     const res = await curateTopicsBatch([]);
@@ -21,5 +37,11 @@ describe("topics-batch pipeline", () => {
     expect(evaluation).toHaveProperty("matchRate");
     expect(evaluation).toHaveProperty("details");
     expect(evaluation.details.length).toBe(2);
+    expect(evaluation.matchRate).toBe(1);
+    expect(evaluation.details).toEqual([
+      { id: "1", current: ["準備", "衣装"], candidate: ["準備", "衣装"] },
+      { id: "2", current: ["式場"], candidate: ["式場"] },
+    ]);
+    expect(callGeminiMock).toHaveBeenCalledOnce();
   });
 });
