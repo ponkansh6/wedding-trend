@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
+import { renderToStaticMarkup } from "react-dom/server";
 import { FeedReadStatusTabs } from "@/components/feed/feed-read-status-tabs";
 import { READ_STATUS_STORAGE_KEY } from "@/components/feed/read-status-storage";
 import type { FeedCard } from "@/lib/types";
@@ -43,6 +44,38 @@ function panelFor(tab: HTMLElement): HTMLElement {
 }
 
 describe("FeedReadStatusTabs", () => {
+  it("hydration 前は非操作の2区画 Skeleton と単一記事一覧を併存する", () => {
+    const markup = renderToStaticMarkup(
+      <FeedReadStatusTabs cards={[card(1), card(2)]} nextCount={4} />,
+    );
+    const document = new DOMParser().parseFromString(markup, "text/html");
+    const skeleton = document.querySelector(
+      '[data-testid="pre-hydration-read-status-tabs-skeleton"]',
+    );
+
+    expect(skeleton).toHaveAttribute("aria-hidden", "true");
+    expect(
+      skeleton?.querySelectorAll('[data-testid="pre-hydration-read-status-tab-skeleton"]'),
+    ).toHaveLength(2);
+    expect(document.body).toHaveTextContent("記事 1");
+    expect(document.body).toHaveTextContent("記事 2");
+    expect(document.querySelector('[role="tablist"]')).toBeNull();
+    expect(document.querySelector('[role="tab"]')).toBeNull();
+    expect(document.querySelector("button")).toBeNull();
+  });
+
+  it("初期化後は Skeleton を実タブへ置換し、保存済み ID で分類する", () => {
+    localStorage.setItem(READ_STATUS_STORAGE_KEY, '{"version":1,"readCardIds":["2"]}');
+    render(<FeedReadStatusTabs cards={[card(1), card(2)]} />);
+
+    expect(screen.queryByTestId("pre-hydration-read-status-tabs-skeleton")).not.toBeInTheDocument();
+    expect(screen.getByRole("tablist", { name: "記事の既読状態" })).toBeInTheDocument();
+    const unreadPanel = panelFor(screen.getByRole("tab", { name: "未読 1件" }));
+    const readPanel = panelFor(screen.getByRole("tab", { name: "既読 1件" }));
+    expect(within(unreadPanel).getByText("記事 1")).toBeInTheDocument();
+    expect(within(readPanel).getByText("記事 2")).toBeInTheDocument();
+  });
+
   it("未読タブだけに未読件数ベースのもっと見る導線を表示する", () => {
     localStorage.setItem(READ_STATUS_STORAGE_KEY, '{"version":1,"readCardIds":["2"]}');
     render(<FeedReadStatusTabs cards={[card(1), card(2), card(3)]} nextCount={6} />);

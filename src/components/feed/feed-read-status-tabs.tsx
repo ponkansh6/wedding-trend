@@ -4,6 +4,7 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { FeedLaneClassic } from "@/components/feed/feed-lane-classic";
 import { FeedLoadMore } from "@/components/feed/feed-load-more";
 import { readReadStatus, writeReadStatus } from "@/components/feed/read-status-storage";
+import { Skeleton } from "@/components/ui/skeleton";
 import type { FeedCard } from "@/lib/types";
 
 type TabName = "unread" | "read";
@@ -68,7 +69,27 @@ export function FeedReadStatusTabs({ cards, nextCount = null }: FeedReadStatusTa
   if (!hydrated) {
     return (
       <>
-        <FeedLaneClassic cards={cards} onMarkRead={markRead} />
+        <div
+          aria-hidden="true"
+          data-testid="pre-hydration-read-status-tabs-skeleton"
+          className="flex gap-2 border-b border-[var(--color-border)]"
+        >
+          <div
+            data-testid="pre-hydration-read-status-tab-skeleton"
+            className="-mb-px border-b-2 border-[var(--color-accent)] px-3 py-2"
+          >
+            <Skeleton className="h-4 w-16" />
+          </div>
+          <div
+            data-testid="pre-hydration-read-status-tab-skeleton"
+            className="-mb-px border-b-2 border-transparent px-3 py-2"
+          >
+            <Skeleton className="h-4 w-14" />
+          </div>
+        </div>
+        <div className="pt-4">
+          <FeedLaneClassic cards={cards} onMarkRead={markRead} />
+        </div>
         {nextCount !== null && (
           <FeedLoadMore
             visibleCount={cards.length}
