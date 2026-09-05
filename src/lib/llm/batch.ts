@@ -3,7 +3,6 @@ import type { ZodType } from "zod";
 import {
   CURATION_DEADLINE_MS,
   CURATION_MIN_SLICE_MS,
-  DEBUG_LOG_TRUNCATE_LENGTH,
   LLM_BATCH_CONCURRENCY,
   LLM_BATCH_MAX_RETRIES,
   LLM_BATCH_MAX_TOKENS,
@@ -28,6 +27,7 @@ import {
   renderRationaleText,
   type GateResult,
 } from "@/lib/publish/gate";
+import { parseLlmJson } from "./parse-json";
 
 /**
  * キュレーション結果本体（LLM が実際に決めた部分。index はバッチ内の整列にのみ
@@ -159,12 +159,13 @@ async function callAndParse<T>(
 
     let parsed: unknown;
     try {
-      parsed = JSON.parse(text);
+      parsed = parseLlmJson<unknown>(text);
     } catch {
-      console.warn(
-        `[llm] ${contextName} invalid JSON (attempt ${attempt + 1}/${LLM_MAX_PARSE_RETRIES + 1}):`,
-        text.slice(0, DEBUG_LOG_TRUNCATE_LENGTH),
-      );
+      console.warn(`[llm] ${contextName} invalid JSON`, {
+        reason: "invalid_json",
+        attempt: attempt + 1,
+        maxAttempts: LLM_MAX_PARSE_RETRIES + 1,
+      });
       if (attempt < LLM_MAX_PARSE_RETRIES) {
         if (
           maxRequests !== undefined &&

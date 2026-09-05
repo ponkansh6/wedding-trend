@@ -43,6 +43,7 @@ Next.js 16 (App Router), React 19, TypeScript strict, Tailwind CSS v4, Drizzle O
   - `src/app/api/ingest/route.ts` を呼び出すことで、`src/lib/sources/registry.ts` に登録された各アダプタから RSS データを取得し、データベースに保存する。実処理本体は `src/lib/pipeline/ingest.ts` の `runIngest()` に実装されている。
 - **FR-003: AI による要約・見出し生成**
   - Google Gemini API (`src/lib/llm/client.ts`) を用い、取得したコンテンツから短尺の要約、カテゴリ、タグ等を抽出・生成する。
+  - Gemini の JSON 応答は任意の Markdown fence を除去してから JSON parse し、呼び出し元の Zod schema で検証する。parse または検証に失敗した応答は保存・公開せず、既存の retry/degrade に従う。記事本文および Gemini の raw 応答は永続化・ログ出力しない。
 - **FR-004: 単一フィード表示**
   - `src/app/page.tsx` において、定番ブログ記事等を中心とした単一のフィード (`src/components/feed/feed-lane-classic.tsx` と `feed-card.tsx`) を表示する。
 - **FR-005: セキュリティおよび環境検証**

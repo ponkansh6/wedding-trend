@@ -42,7 +42,7 @@ const TOPIC_FIELDS = {
   topics: ["テーマ", "進行"],
 };
 
-function batchJson(items: Array<{ index: number; title: string }>) {
+function batchJson(items: Array<{ index: number; title: string }>, topics = TOPIC_FIELDS.topics) {
   return JSON.stringify({
     items: items.map((it) => ({
       index: it.index,
@@ -52,7 +52,7 @@ function batchJson(items: Array<{ index: number; title: string }>) {
       tag: "trend",
       ...USEFULNESS_FIELDS,
       ...RATIONALE_FIELDS,
-      ...TOPIC_FIELDS,
+      topics,
     })),
   });
 }
@@ -115,11 +115,39 @@ describe("curateBatch", () => {
     expect(results[0]?.rationaleText).not.toMatch(/[0-9０-９]/);
   });
 
-  it("returns null array when the batch response is invalid JSON instead of falling back", async () => {
+  it("accepts a valid batch response wrapped in a json Markdown fence", async () => {
+    const expectedTopics = ["会場選び", "費用"];
+    mockGenerateContent.mockResolvedValueOnce(
+      textResponse(
+        `\`\`\`json\n${batchJson([{ index: 1, title: "fence内の結果" }], expectedTopics)}\n\`\`\``,
+      ),
+    );
+
+    const results = await curateBatch([{ title: "投稿1", excerpt: "本文1" }]);
+
+    // fence 除去後も CurationBatchResponseSchema を通った値だけが返る。
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      title: "fence内の結果",
+      category: "その他",
+      tag: "trend",
+      topics: expectedTopics,
+    });
+    expect(results[0]?.rationaleText).toContain(RATIONALE_FIELDS.topicAnchor);
+  });
+
+  it("returns null array without logging raw invalid JSON, after all parse retries", async () => {
+    const rawResponseSentinel = "RAW_LLM_RESPONSE_MUST_NOT_BE_LOGGED";
+    const rawResponseFragment = `not json ${rawResponseSentinel}`;
+    const consoleSpies = [
+      vi.spyOn(console, "log").mockImplementation(() => undefined),
+      vi.spyOn(console, "warn").mockImplementation(() => undefined),
+      vi.spyOn(console, "error").mockImplementation(() => undefined),
+    ];
     mockGenerateContent
-      .mockResolvedValueOnce(textResponse("not json"))
-      .mockResolvedValueOnce(textResponse("still not json"))
-      .mockResolvedValueOnce(textResponse("nope"));
+      .mockResolvedValueOnce(textResponse(`not json ${rawResponseSentinel}`))
+      .mockResolvedValueOnce(textResponse(`still not json ${rawResponseSentinel}`))
+      .mockResolvedValueOnce(textResponse(`nope ${rawResponseSentinel}`));
 
     const results = await curateBatch([
       { title: "投稿1", excerpt: null },
@@ -129,6 +157,11 @@ describe("curateBatch", () => {
     expect(results).toHaveLength(2);
     expect(results[0]).toBeNull();
     expect(results[1]).toBeNull();
+    expect(mockGenerateContent).toHaveBeenCalledTimes(3);
+    expect(consoleSpies[1]).toHaveBeenCalledTimes(4);
+    const allLogArgs = consoleSpies.flatMap((spy) => spy.mock.calls.flat()).join(" ");
+    expect(allLogArgs).not.toContain(rawResponseSentinel);
+    expect(allLogArgs).not.toContain(rawResponseFragment);
   });
 
   it("aligns results by index even when the LLM returns them out of order", async () => {
