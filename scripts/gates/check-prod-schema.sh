@@ -5,10 +5,29 @@
 
 set -e
 
-if [ -z "$TURSO_DATABASE_URL" ] || [ -z "$TURSO_AUTH_TOKEN" ]; then
-  echo "⏭️  Skipping production schema check: TURSO_DATABASE_URL / TURSO_AUTH_TOKEN not set"
+if [ -z "$TURSO_DATABASE_URL" ]; then
+  echo "⏭️  Skipping production schema check: TURSO_DATABASE_URL not set"
   exit 0
 fi
+
+if [ -z "$TURSO_AUTH_TOKEN" ]; then
+  echo "❌ Production schema check failed: TURSO_AUTH_TOKEN not set while TURSO_DATABASE_URL is provided"
+  exit 1
+fi
+
+case "$TURSO_DATABASE_URL" in
+  file:*)
+    echo "❌ Production schema check failed: file: URL scheme is not allowed for production check"
+    exit 1
+    ;;
+  libsql:*)
+    # allowed
+    ;;
+  *)
+    echo "❌ Production schema check failed: unsupported or missing URL scheme (only libsql: is allowed)"
+    exit 1
+    ;;
+esac
 
 echo "🔍 Checking production schema consistency..."
 
