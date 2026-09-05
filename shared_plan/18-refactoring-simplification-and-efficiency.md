@@ -7,7 +7,7 @@
 
 ## 今回の実装範囲
 
-実装対象rangeは `958ac8b..18492ee`（起点を含む11コミット）である。
+実装対象rangeは `958ac8b^..18492ee`（起点を含む11コミット）である。
 
 1. `958ac8b` `fix(gates): fail closed for production schema checks`
 2. `4244399` `test: standardize Vite config warning policy`
