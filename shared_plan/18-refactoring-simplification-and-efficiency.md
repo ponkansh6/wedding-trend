@@ -74,6 +74,16 @@
 
 `pnpm verify` はuncommitted changed countが0のときtest/smokeをskipするため、この進捗の証拠には使用しない。明示的な全test、coverage、smokeを実行して確認した。直接 `pnpm exec vitest` のVite warningと、`pnpm test` policyでの抑止も区別する。
 
+### db68f14後のコミット済みslice検証
+
+未配線scaffolding 10ファイルを可逆的に除外したコミット済みsliceに対し、`VITE_CONFIG_NATIVE_IGNORE_WARNING=true pnpm exec vitest run --coverage` を実行した。結果は49 files / 588 pass / 1 skip / 18.94sで、coverage summaryはstatements 80.69%、branches 70.35%、functions 84.36%、lines 82.55%、coverage tiersは全てpassした。
+
+この18.94sはcoverageありの計測値であり、coverageなしの単発warmである16.52sとは別指標として扱う。いずれも反復測定ではないため、テスト高速化KPIの判定根拠にはしない。
+
+`bash scripts/gates/smoke-test.sh` は2 passしたが、Vite native loader warningが3回出力された。`pnpm verify` は静的gateには成功した一方、ahead 9にもかかわらずChanged files countが0となりtest/smokeをskipした。また本番schemaはsandbox networkでfetch failed advisoryとなった。従って`pnpm verify`単独を完了根拠にしない。schema guardの`file:` negativeとremote positiveは、先行する独立検証の結果を維持する。
+
+以上から、Vite warningの根本解消、changed detection、KPIおよびDefinition of Doneは未完のままである。
+
 ## 最小の残作業順
 
 1. migration auditをfail化し、fixtureによるnegative testを追加する。
