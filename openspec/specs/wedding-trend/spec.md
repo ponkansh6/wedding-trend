@@ -515,6 +515,11 @@ LLM を呼び出す `topics-batch` の単体テストは `callGemini`（必要�
 実行終了時に「未一致 tier パターン N件」として必ず表示する（ファイル改名・削除で計測
 対象が静かに漏れる事故を検知するための必須の付帯出力）。
 
+production schema check は、`TURSO_DATABASE_URL` が `libsql:` であり、かつ認証トークンが
+設定されている場合にのみ本番スキーマを read-only で検査する。URL 未設定、トークン未設定、
+`file:` を含む非リモート URL はそれぞれ区別して fail-closed とし、期待 schema との差分を報告する。
+migration metadata audit は現時点では報告のみとし、DB の修復や migration の適用を自動実行しない。
+
 ### §7.2 機械強制不変条件レジストリ
 
 `src/lib/publish/invariants.ts` の `INVARIANTS` 配列は、パイプライン境界で
