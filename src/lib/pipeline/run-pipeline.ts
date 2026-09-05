@@ -1,3 +1,4 @@
+import { classifyLlmError } from "@/lib/llm/error-kind";
 import {
   RATIONALE_PROMPT_VERSION,
   RETRY_BACKOFF_HOURS,
@@ -81,6 +82,15 @@ async function handleTransientFailure(
   ctx: RetryContext | null,
   options: PipelineOptions,
 ): Promise<boolean> {
+  const kind = classifyLlmError(reason);
+  const mappedReason: RetryReason =
+    kind === "rate_capped"
+      ? "rate_capped"
+      : kind === "transient"
+        ? "llm_transient"
+        : kind === "terminal"
+          ? "llm_transient"
+          : reason;
   const attempts = ctx?.attempts ?? 0;
   const nextAttempts = attempts + 1;
   const firstQueuedAt = ctx?.firstQueuedAt ?? now;
@@ -90,7 +100,7 @@ async function handleTransientFailure(
     if (ctx) await completeRetry(ctx.urlHash);
     await adapter.onTransientFailure(
       candidate,
-      reason === "rate_capped" ? "rate_capped" : "llm_transient",
+      mappedReason === "rate_capped" ? "rate_capped" : "llm_transient",
       ctx,
     );
     return true;
@@ -108,7 +118,7 @@ async function handleTransientFailure(
     url: candidate.url,
     host,
     lane: options.lane,
-    reason,
+    reason: mappedReason,
     attempts: nextAttempts,
     firstQueuedAt,
     nextAttemptAt: addHoursIso(now, backoffHoursFor(attempts, options.retryBackoffHours)),
@@ -117,7 +127,7 @@ async function handleTransientFailure(
 
   await adapter.onTransientFailure(
     candidate,
-    reason === "rate_capped" ? "rate_capped" : "llm_transient",
+    mappedReason === "rate_capped" ? "rate_capped" : "llm_transient",
     ctx,
   );
   return false;

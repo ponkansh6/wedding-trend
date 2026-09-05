@@ -1,4 +1,5 @@
 import { LLM_BATCH_MAX_RETRIES, LLM_BATCH_MAX_TOKENS, LLM_BATCH_TIMEOUT_MS } from "@/lib/constants";
+import { parseLlmJson } from "./parse-json";
 import { backoffMs, callGemini } from "./client";
 import { buildTopicsBatchPrompt, type TopicCurationInput } from "./topics-prompts";
 import { TopicExtractionBatchResponseSchema, type TopicExtractionItem } from "./topics-schemas";
@@ -42,15 +43,7 @@ export async function curateTopicsBatch(
         );
         if (!rawText) throw new Error("Empty response from Gemini");
 
-        // JSON extraction
-        let jsonStr = rawText.trim();
-        if (jsonStr.startsWith("```json")) {
-          jsonStr = jsonStr.replace(/^```json\s*/, "").replace(/\s*```$/, "");
-        } else if (jsonStr.startsWith("```")) {
-          jsonStr = jsonStr.replace(/^```\s*/, "").replace(/\s*```$/, "");
-        }
-
-        const parsedJson = JSON.parse(jsonStr);
+        const parsedJson = parseLlmJson<unknown>(rawText);
         const validated = TopicExtractionBatchResponseSchema.parse(parsedJson);
         parsedItems = validated.items;
         success = true;
