@@ -35,6 +35,7 @@ import type {
   RetryReason,
 } from "@/lib/types";
 import { canonicalizeUrl } from "@/lib/url";
+import { dedupeUrls } from "./dedupe-urls";
 
 function addHoursIso(baseIso: string, hours: number): string {
   return new Date(Date.parse(baseIso) + hours * 60 * 60 * 1000).toISOString();
@@ -311,14 +312,7 @@ export async function runPipelineOnCandidates(
   }
 
   // 2. Deduplicate by canonical URL
-  const seen = new Set<string>();
-  const deduped: PipelineCandidate[] = [];
-  for (const c of rawCandidates) {
-    const canonical = canonicalizeUrl(c.url);
-    if (!canonical || seen.has(canonical)) continue;
-    seen.add(canonical);
-    deduped.push({ ...c, url: canonical });
-  }
+  const deduped = dedupeUrls(rawCandidates);
 
   // 3. Upsert posts
   const upsertInputs: PostUpsertInput[] = deduped.map((c) => ({

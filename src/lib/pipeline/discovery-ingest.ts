@@ -22,7 +22,7 @@
  * - Q2: ホスト単位 yield 崩壊検知（ベースライン比較・小標本は判定しない）
  * - M4: 客観トリガによる自動撤回（`revalidatePublishedPosts`、run-discovery.mjs の第3段階）
  */
-import { createHash } from "node:crypto";
+import { bodyHashSimilarity, computeContainerBodyHash } from "./body-hash";
 import {
   BODY_DRIFT_SIMILARITY_MIN,
   EVERGREEN_SOURCE_ID,
@@ -184,110 +184,7 @@ function emptyStats(): DiscoveryIngestStats {
   };
 }
 
-// ─────────────────────────────────────────────────────────────
-// 本文フィンガープリント（M4 本文ドリフト検知用）
-// ─────────────────────────────────────────────────────────────
-
-const SIMHASH_BITS = 64;
-/** 64bit を BigInt を使わず 32bit の word 2 つで扱う（tsconfig target=ES2017 対応）。 */
-const WORD_BITS = 32;
-const SHINGLE_SIZE = 4;
-
-function shingles(text: string): string[] {
-  const compact = text.replace(/\s+/g, "");
-  if (compact.length < SHINGLE_SIZE) return compact.length > 0 ? [compact] : [];
-  const out: string[] = [];
-  for (let i = 0; i <= compact.length - SHINGLE_SIZE; i++) {
-    out.push(compact.slice(i, i + SHINGLE_SIZE));
-  }
-  return out;
-}
-
-/** sha256 digest の先頭 8 バイトを 32bit word 2 つ（符号なし）に変換する。 */
-function tokenFingerprintWords(token: string): [number, number] {
-  const digest = createHash("sha256").update(token).digest();
-  const w0 = ((digest[0] << 24) | (digest[1] << 16) | (digest[2] << 8) | digest[3]) >>> 0;
-  const w1 = ((digest[4] << 24) | (digest[5] << 16) | (digest[6] << 8) | digest[7]) >>> 0;
-  return [w0, w1];
-}
-
-/**
- * 正規化済み本文テキストから 64bit simhash を計算する（16桁 hex 文字列、
- * 上位32bit + 下位32bit の word 2 つとして計算する）。原文を復元できない
- * フィンガープリントであり、`post_publications.body_hash` に永続化してよい
- * （§5.3 の「本文の非保存」制約に抵触しない）。ハミング距離ベースで近似
- * 類似度を測れるため、M4 の本文ドリフト検知に使う。
- */
-/**
- * ページ全体 HTML からコンテナ（ナビ・フッター・第三者コンテンツを排した
- * 記事本文サブツリー）を切り出し、そのコンテナ HTML 基準で本文ハッシュを
- * 計算する。`processUrl()`（初回公開）と `revalidatePublishedPosts()`
- * （M4 再検証）の両方がこの関数を経由することで、保存済みハッシュと
- * 再検証時のハッシュの算出基盤を一致させる（コンテナ基準 vs ページ全体
- * 基準の不一致は M4 の誤発火を招く）。
- *
- * `extractArticleContainer()` がホストのセレクタに一致せず `null` を返した
- * 場合、この関数も `null` を返す。呼び出し側はページ全体へフォールバック
- * してはならない（それは本来のコンテナ基準ハッシュと構造的に食い違う値を
- * 生成し、以後の全比較を破壊する）。
- */
-export function computeContainerBodyHash(html: string, host: string): string | null {
-  const containerHtml = extractArticleContainer(html, host);
-  if (containerHtml === null) return null;
-  return computeBodyHash(extractVisibleText(containerHtml));
-}
-
-export function computeBodyHash(text: string): string {
-  const tokens = shingles(text);
-  if (tokens.length === 0) return "0".repeat(16);
-
-  const weights0 = Array.from({ length: WORD_BITS }, () => 0);
-  const weights1 = Array.from({ length: WORD_BITS }, () => 0);
-  for (const token of tokens) {
-    const [w0, w1] = tokenFingerprintWords(token);
-    for (let bit = 0; bit < WORD_BITS; bit++) {
-      weights0[bit] += ((w0 >>> bit) & 1) === 1 ? 1 : -1;
-      weights1[bit] += ((w1 >>> bit) & 1) === 1 ? 1 : -1;
-    }
-  }
-
-  let r0 = 0;
-  let r1 = 0;
-  for (let bit = 0; bit < WORD_BITS; bit++) {
-    if (weights0[bit] > 0) r0 |= 1 << bit;
-    if (weights1[bit] > 0) r1 |= 1 << bit;
-  }
-  return (r0 >>> 0).toString(16).padStart(8, "0") + (r1 >>> 0).toString(16).padStart(8, "0");
-}
-
-function popcount32(value: number): number {
-  let v = value >>> 0;
-  let count = 0;
-  while (v) {
-    count += v & 1;
-    v >>>= 1;
-  }
-  return count;
-}
-
-/** 2つの simhash（16桁 hex）間の近似類似度（0〜1）。ハミング距離が小さいほど 1 に近い。 */
-export function bodyHashSimilarity(a: string, b: string): number {
-  if (
-    a.length !== 16 ||
-    b.length !== 16 ||
-    !/^[0-9a-f]{16}$/i.test(a) ||
-    !/^[0-9a-f]{16}$/i.test(b)
-  ) {
-    // 不正な hex（旧データ等）は最も安全側（=別物扱い）に倒す。
-    return 0;
-  }
-  const a0 = Number.parseInt(a.slice(0, 8), 16);
-  const a1 = Number.parseInt(a.slice(8, 16), 16);
-  const b0 = Number.parseInt(b.slice(0, 8), 16);
-  const b1 = Number.parseInt(b.slice(8, 16), 16);
-  const distance = popcount32(a0 ^ b0) + popcount32(a1 ^ b1);
-  return 1 - distance / SIMHASH_BITS;
-}
+export { bodyHashSimilarity, computeBodyHash, computeContainerBodyHash } from "./body-hash";
 
 // ─────────────────────────────────────────────────────────────
 // JST 日次境界（Q4 レート上限・Q2 テレメトリの集計単位）
