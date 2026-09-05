@@ -2,12 +2,12 @@
 
 - 対象: `wedding-trend` 全体
 - 作成日: 2026-09-05
-- State: **一部進行中 (2026-09-05)** — 本書のチェックは実装済みの狭いsliceだけを表し、Plan 18完了を意味しない。
+- State: **一部進行中 (2026-09-06)** — 本書のチェックは実装済みの狭いsliceだけを表し、Plan 18完了を意味しない。
 - 不変条件: `openspec/specs/wedding-trend/spec.md` §10 / §11。記事本文の非生成・非永続化、逐語タイトル、アクセス規律、fail-closedを変更しない。
 
 ## 今回の実装範囲
 
-実装対象rangeは `958ac8b..e03b4ff`（起点を含む8コミット）である。
+実装対象rangeは `958ac8b..18492ee`（起点を含む11コミット）である。
 
 1. `958ac8b` `fix(gates): fail closed for production schema checks`
 2. `4244399` `test: standardize Vite config warning policy`
@@ -17,6 +17,9 @@
 6. `f1591e5` `refactor(pipeline): extract hashing and URL deduplication helpers`
 7. `01ada4a` `test(legal): guard against topic slice persistence`
 8. `e03b4ff` `docs(spec): define production schema verification contract`
+9. `db68f14` `docs(plan): record partial Plan 18 refactoring progress`
+10. `6dfab54` `docs(plan): record committed-slice verification`
+11. `18492ee` `refactor(llm): centralize batch JSON parsing`
 
 ### 完了した狭い成果物
 
@@ -24,7 +27,7 @@
 - [x] Vite config-loader warningの抑止方針: `pnpm test` のpolicy経路で抑止する。直接の `pnpm exec vitest` ではwarningが残るため、根本解消ではない。
 - [x] CIの `fetch-depth: 0`。
 - [x] migration metadataのread-only report tool。検出を報告するだけでfail gateではなく、修復・squash・書込みはしない。
-- [x] LLMのJSON parse/error分類の共通化を、`topics-batch` とpipelineの実利用箇所へ適用。
+- [x] batch実経路のfence除去→JSON parse→Zod検証、raw応答をログへ出さないnegative test、および仕様同期。retry/chunk/error処理全体の共通化は未完。
 - [x] body hashとURL dedupeの抽出。
 - [x] topics sliceの非永続化に対する法務回帰テスト。
 - [x] production schema検証契約のspec同期（`e03b4ff`）。
@@ -40,7 +43,7 @@
 - [ ] unexpected stderrの検出・失敗化（現状は既知Vite warningのpolicyのみ）。
 - [ ] DB巨大テストのfixture境界分割。
 - [ ] CI job並列化、base SHA changed detectionとそのnegative test。
-- [ ] typed config、clock、DB port、stage型、host concurrencyを実行経路へ配線。
+- [ ] typed config、clock、DB port、stage型、host concurrencyを実行経路へ配線。（配線原則: trackedファイルはuntracked scaffoldingに依存させない。committed slice/CI fresh cloneが壊れる。ingest.ts→port.tsで実証済み・revert済み。配線はscaffoldingのcommit判断後に実施）
 - [ ] `src/lib/llm/batch.ts` 全体のretry/chunk/parse/error共通化。
 - [ ] `discovery-ingest.ts` / `run-pipeline.ts` のorchestrator縮小。
 - [ ] host別bounded concurrencyの実経路配線（same-host=1とfetch前規律のnegative testを含む）。
@@ -62,37 +65,38 @@
 
 これらは現在、実行経路に配線されておらず、削除指示でも完了成果物でもない。
 
+さらに、未完のためコミットから除外したものは `tests/audit-migration-metadata.test.ts`、`tests/console-monitor.ts`、`tests/console-monitor.test.ts` である。これらおよび未追跡scaffoldingは検証済みの完了成果物ではない。
+
 ## 計測・検証の記録
 
 測定値と適用範囲は混同しない。詳細は `docs/measurements/refactoring-baseline-2026-09.md` を参照。
 
-| 対象                                                      | 実測結果                                                                                 | 判定                               |
-| --------------------------------------------------------- | ---------------------------------------------------------------------------------------- | ---------------------------------- |
-| historical pilot                                          | 47 files / 578 pass / 1 skip、warm median 17.40s、P95 18.56s、cold 17.59s、RSS 424340 kB | 既存値を保持。cold x5は未実施      |
-| 全working tree（scaffolding含む）                         | 54 files / 605 pass / 1 skip / 17.43s、coverage tiers pass                               | 単発。KPI証跡ではない              |
-| 今回コミット済みslice（scaffolding 10ファイルを一時除外） | 49 files / 588 pass / 1 skip / 16.52s                                                    | 単発warm。5回未実施のためKPI未判定 |
+| 対象                         | 実測結果                                                                                 | 判定                              |
+| ---------------------------- | ---------------------------------------------------------------------------------------- | --------------------------------- |
+| historical pilot             | 47 files / 578 pass / 1 skip、warm median 17.40s、P95 18.56s、cold 17.59s、RSS 424340 kB | 既存値を保持。cold x5は未実施     |
+| audit testを除くcoverage実行 | 55 files / 610 pass / 1 skip / 17.65s、coverage tiers pass                               | 単発coverage。KPI系列には混ぜない |
 
 `pnpm verify` はuncommitted changed countが0のときtest/smokeをskipするため、この進捗の証拠には使用しない。明示的な全test、coverage、smokeを実行して確認した。直接 `pnpm exec vitest` のVite warningと、`pnpm test` policyでの抑止も区別する。
 
-### db68f14後のコミット済みslice検証
+### 最新検証（2026-09-06）
 
-未配線scaffolding 10ファイルを可逆的に除外したコミット済みsliceに対し、`VITE_CONFIG_NATIVE_IGNORE_WARNING=true pnpm exec vitest run --coverage` を実行した。結果は49 files / 588 pass / 1 skip / 18.94sで、coverage summaryはstatements 80.69%、branches 70.35%、functions 84.36%、lines 82.55%、coverage tiersは全てpassした。
+audit testを除くcoverage実行は55 files / 610 pass / 1 skip / 17.65s、coverage summaryはstatements 80.96%、branches 70.62%、functions 84.86%、lines 82.81%で、coverage tiersは全てpassした。17.65sはcoverage単発の測定であり、KPI系列には使用しない。
 
-この18.94sはcoverageありの計測値であり、coverageなしの単発warmである16.52sとは別指標として扱う。いずれも反復測定ではないため、テスト高速化KPIの判定根拠にはしない。
+migration audit testはsandbox内のchild nodeがEPERMとなり、権限付き単独実行では1 passした。しかし実repo（SQL 15件、snapshot全欠落、journalは`0003`以降欠落）に対してMISSINGを表示するだけでexit 0であり、fail gateまたはnegative testの証明にはならない。
 
-`bash scripts/gates/smoke-test.sh` は2 passしたが、Vite native loader warningが3回出力された。`pnpm verify` は静的gateには成功した一方、ahead 9にもかかわらずChanged files countが0となりtest/smokeをskipした。また本番schemaはsandbox networkでfetch failed advisoryとなった。従って`pnpm verify`単独を完了根拠にしない。schema guardの`file:` negativeとremote positiveは、先行する独立検証の結果を維持する。
+static/type/security/format/spec refs/contract smokeは成功した。本番Turso schemaはread-onlyでup-to-date。webpack production buildも成功し、ローカルの `/` と `/api/health` はHTTP 200だった。Turbopack HTTP smokeはGoogle Fontsのnetwork制約後、権限付きでもsandboxのport bind panicとなり判定不能である。middleware deprecationとEdge warningは既知警告として扱う。
 
-以上から、Vite warningの根本解消、changed detection、KPIおよびDefinition of Doneは未完のままである。
+`pnpm verify` は未コミット変更があるにもかかわらずChanged files countが0となりtest/smokeをskipしたため、changed detectionは未完である。AI計画の混入はない（prompt、schema、UI、topic仕様の変更なし）。以上からmigration fail gate、実経路配線、CI、KPIおよびDefinition of Doneは未完のままである。
 
 ## 最小の残作業順
 
-1. migration auditをfail化し、fixtureによるnegative testを追加する。
-2. 既存scaffoldingを縦に配線するか、別途判断して除去する。
-3. `batch.ts` 全体へLLM共通化を広げる。
-4. pipeline orchestratorを段階接続へ縮小する。
-5. CI並列化とchanged detectionの安全側動作を実装する。
+1. migration auditをfail-closed化し、fixtureによるexit非0のnegative testを追加する。
+2. changed detectionを安全側へ修正し、未コミット変更のnegative testを追加する。
+3. 既存scaffoldingを縦に配線するか、別途判断して除去する。
+4. `batch.ts` のretry/chunk/error処理を共通化する。
+5. pipeline orchestratorを段階接続へ縮小し、CIを並列化する。
 6. host別並列化をaccess disciplineを保ったまま実配線する。
-7. cold/warm各5回を測定し、DoDを判定する。
+7. cold/CIとwarmの比較可能な反復測定を完了し、DoDを判定する。
 
 ## Definition of Done
 
