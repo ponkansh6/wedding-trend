@@ -74,7 +74,12 @@ if (needTest) {
   } catch {
     // ignore
   }
-  run("pnpm exec vitest run --coverage");
+  run("pnpm exec vitest run --coverage", {
+    env: {
+      ...process.env,
+      VITE_CONFIG_NATIVE_IGNORE_WARNING: "true",
+    },
+  });
   run("node scripts/gates/check-coverage-tiers.mjs");
   coverageTiersRan = true;
 } else {
