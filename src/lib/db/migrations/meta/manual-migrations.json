@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "migrations": [
+    {
+      "file": "0003_post_usefulness_criteria.sql",
+      "sha256": "83c770daf42a4ffc66ba62f6567ac491b560c5637ef7acc487ba995ecf72d927",
+      "reason": "manual-additive"
+    },
+    {
+      "file": "0004_post_rationales.sql",
+      "sha256": "1e458187f0bce864877b10a0f5faaf2e9eb1f6742f557b7d8c1f9f60cd5c6ddf",
+      "reason": "manual-additive"
+    },
+    {
+      "file": "0005_discovery_seen.sql",
+      "sha256": "45fe6fa6628a4fff4765a2dd8c56f37fbdc54efc6e9cccdaeafb4be321239bae",
+      "reason": "manual-additive"
+    },
+    {
+      "file": "0006_discovery_run.sql",
+      "sha256": "e567cbadfe3fd02e9c4e6ffd3b121e67fd86ed6882aa0c71644c2b92c7d219ba",
+      "reason": "manual-additive"
+    },
+    {
+      "file": "0007_source_policy.sql",
+      "sha256": "43e4ae502264b730a5c2d9ce3245be53b918256defce327bffd3789b1f05ea7d",
+      "reason": "manual-additive"
+    },
+    {
+      "file": "0008_host_gate_state.sql",
+      "sha256": "806045d72b1cea9813c28f8a8c13ce0af8fccb43ffbbcc57f7781198c0fa369c",
+      "reason": "manual-additive"
+    },
+    {
+      "file": "0009_post_publications_removals.sql",
+      "sha256": "75fc44620e6d8977a7eb549e66d2914566a920f58b2c330331b278d808f6b27d",
+      "reason": "manual-additive"
+    },
+    {
+      "file": "0010_post_publication_kind.sql",
+      "sha256": "544497067e989350eda455036803d82bda80f67f140bf53b52e943d8916589b7",
+      "reason": "manual-additive"
+    },
+    {
+      "file": "0011_post_publication_signals.sql",
+      "sha256": "e249667bde935d8b9276fd7f6a861783ec406d62b4124d76e4ad4e23c7857275",
+      "reason": "manual-additive"
+    },
+    {
+      "file": "0012_evidence_signal_observations.sql",
+      "sha256": "c1ea63b88e277db7eb203131e47a1a3dc356ab7113ce27eca7a9791804e2ae4a",
+      "reason": "manual-additive"
+    },
+    {
+      "file": "0013_post_topics.sql",
+      "sha256": "3ddf8be5b76e52245e06928fac1d9b8087b8bc917bf79609189a3385d48c9998",
+      "reason": "manual-additive"
+    },
+    {
+      "file": "0014_topic_backfill_signature.sql",
+      "sha256": "82dfa7f60cc43b3682abfac4869799393e23acd6eb438c4a23a41c63e42b4d53",
+      "reason": "manual-additive"
+    }
+  ]
+}

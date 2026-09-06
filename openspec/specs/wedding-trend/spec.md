@@ -524,7 +524,15 @@ LLM を呼び出す `topics-batch` の単体テストは `callGemini`（必要�
 production schema check は、`TURSO_DATABASE_URL` が `libsql:` であり、かつ認証トークンが
 設定されている場合にのみ本番スキーマを read-only で検査する。URL 未設定、トークン未設定、
 `file:` を含む非リモート URL はそれぞれ区別して fail-closed とし、期待 schema との差分を報告する。
-migration metadata audit は現時点では報告のみとし、DB の修復や migration の適用を自動実行しない。
+migration metadata audit は `pnpm verify` の静的ゲートであり、DB の修復や migration の適用を自動実行しない。
+`0000`〜`0002` は Drizzle 管理（journal entry と対応 snapshot が必須）、`0003`〜現行 tail は
+共有 Turso 向けの手書き additive SQL として `src/lib/db/migrations/meta/manual-migrations.json` に
+SHA-256 とレビュー分類を明示する。両分類は排他的で、すべての SQL migration はいずれか一方に
+属さなければならない。manual manifest の `reason` はレビュー分類であり、本番環境での適用証明ではない。
+手書き tail が続く間の新規 migration も forward-only/additive とし manifest へ明示追加する。Drizzle
+generate 管理へ戻す場合は snapshot を推測生成せず、別計画で rebaseline する。本番との照合は read-only
+で実施する。rebaseline 計画なしに journal へ `0003` 以降を追加してはならず、管理境界を変更する場合は
+同計画で audit の契約も更新する。
 
 ### §7.2 機械強制不変条件レジストリ
 

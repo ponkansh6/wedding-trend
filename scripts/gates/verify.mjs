@@ -109,6 +109,7 @@ function main() {
   run("bash scripts/gates/check-security.sh");
   run("node scripts/gates/check-script-imports.mjs");
   run("node scripts/gates/check-migrations-additive.mjs");
+  run("node scripts/gates/audit-migration-metadata.mjs");
   run("pnpm run type-check");
 
   // 2. Conditional or full tests & smoke
