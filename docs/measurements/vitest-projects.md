@@ -13,9 +13,9 @@
 
 ## 警告方針
 
-Vitest設定を明示ESM拡張子の `vitest.config.mts` に移行し、aliasの `__dirname` を `import.meta.dirname` に置換した。`package.json` の `type: module` 変更およびwarning抑止環境変数は使っていない。2026-09-06に直接 `pnpm exec vitest run tests/console-monitor.test.ts`（1 file / 4 tests）と実環境 `pnpm verify`（58 files / 617 passed / 1 skipped、coverage tiers・smoke・production schemaを含む）で、Vite config-loader warningが出ないことを確認した。
+Vitest設定を明示ESM拡張子の `vitest.config.mts` に移行し、aliasの `__dirname` を `import.meta.dirname` に置換した。`package.json` の `type: module` 変更およびwarning抑止環境変数は使っていない。2026-09-06に直接Vitest、実環境 `pnpm verify`、clean fresh cloneの全coverage（53 files / 615 passed / 1 skipped）で、Vite config-loader warningが出ないことを確認した。
 
-unexpected stderrの包括的なfail policyは未実装である。`console-monitor` のunit成功はprocess stderr gateの受入根拠にはせず、配線・negative・許容範囲はPlan 24 Slice 2で扱う。
+`console-monitor` はconsole spyによる未配線の試作で、process stderr gateではなかったため非採用として削除した。unexpected stderrの包括的なfail policyも、既存gateの意図的stderr、allowlist肥大、ログ欠落リスクにより現時点では非採用とする。CIでstderr品質契約が必要になり、全gate出力分類とprocess単位negativeを安全に実装できる場合のみ再評価する。
 
 `LibsqlError: no_such_table` はschema/migrationのresilience assertionで期待される場合があるが、無条件に抑止しない。各テストが意図を明示する。
 
