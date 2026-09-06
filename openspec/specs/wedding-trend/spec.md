@@ -507,7 +507,11 @@ HTTP smoke は必須であり、contract smoke 成功を production build 成功
 `test.projects` における `ui` プロジェクト、`environment: "happy-dom"`）が担う。
 `src/app/loading.tsx` の route-level loading UI も `loading.test.tsx` で、status の
 読み上げと、`FeedReadStatusTabs` の hydration 前と同じ単一記事レーンの視覚 Skeleton
-（`aria-hidden`）、4 件の記事カード一覧を検証する。ローディング中は未読・既読の実タブ、
+（`aria-hidden`）、4 件の記事カード一覧を検証する。route loading の DOM 順序は正式表示と
+一致させ、read-status tabs の Skeleton、`pt-4` の記事レーン、レーン見出し、カード一覧の順に
+描画する。見出しの占有高さは mobile で `h-[33px]`、`sm` 以上で `h-[39px]` とし、正式表示への
+切替時に「結婚式の体験ブログ」の位置が移動しないようにする。`loading.test.tsx` は意味のある
+testid と要素関係でこの配置契約を検証する。ローディング中は未読・既読の実タブ、
 文言、件数、操作、もっと見る等の推測情報、記事本文・要約・外部画像・元記事リンクを
 描画しない。レイアウト安定化のため、非操作・非意味的な 2 区画のタブ Skeleton を描画し、
 同テストの契約とする。

@@ -34,12 +34,7 @@ export default function Loading() {
     >
       <span className="sr-only">記事を読み込んでいます</span>
 
-      <section aria-hidden="true" className="flex flex-col gap-4">
-        <header className="flex flex-col gap-1.5">
-          <Skeleton className="h-8 w-52" />
-          <Skeleton className="h-4 w-full max-w-xl" />
-          <Skeleton className="h-4 w-full max-w-lg" />
-        </header>
+      <section aria-hidden="true">
         <div
           aria-hidden="true"
           data-testid="read-status-tabs-skeleton"
@@ -58,10 +53,19 @@ export default function Loading() {
             <Skeleton className="h-4 w-14" />
           </div>
         </div>
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 md:gap-4">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <FeedCardSkeleton key={i} />
-          ))}
+        <div className="pt-4">
+          <div className="flex flex-col gap-4">
+            <header className="flex flex-col gap-1.5">
+              <Skeleton data-testid="feed-heading-skeleton" className="h-[33px] w-52 sm:h-[39px]" />
+              <Skeleton className="h-[50px] w-full max-w-xl sm:h-[25px]" />
+              <Skeleton className="h-10 w-full max-w-lg sm:h-5" />
+            </header>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 md:gap-4">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <FeedCardSkeleton key={i} />
+              ))}
+            </div>
+          </div>
         </div>
       </section>
     </div>

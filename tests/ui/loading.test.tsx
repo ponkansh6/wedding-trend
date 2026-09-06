@@ -56,6 +56,21 @@ describe("route-level loading UI", () => {
     expect(lane).toBeInTheDocument();
     expect(lane?.querySelectorAll("article")).toHaveLength(4);
 
+    const laneChildren = Array.from(lane?.children ?? []);
+    expect(laneChildren).toHaveLength(2);
+    expect(laneChildren[0]).toHaveAttribute("data-testid", "read-status-tabs-skeleton");
+    expect(laneChildren[1]).toHaveClass("pt-4");
+
+    const content = laneChildren[1];
+    const contentChildren = Array.from(content?.children ?? []);
+    expect(contentChildren[0]?.tagName).toBe("DIV");
+    expect(contentChildren[0]?.firstElementChild?.tagName).toBe("HEADER");
+    expect(contentChildren[0]?.lastElementChild).toHaveClass("grid");
+    expect(contentChildren[0]?.lastElementChild?.querySelectorAll("article")).toHaveLength(4);
+
+    const headingSkeleton = screen.getByTestId("feed-heading-skeleton");
+    expect(headingSkeleton).toHaveClass("h-[33px]", "sm:h-[39px]");
+
     expect(container).not.toHaveTextContent(/\d+件|もっと見る/);
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
