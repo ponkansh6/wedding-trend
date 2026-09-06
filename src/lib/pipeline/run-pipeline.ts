@@ -36,10 +36,7 @@ import type {
 } from "@/lib/types";
 import { canonicalizeUrl } from "@/lib/url";
 import { dedupeUrls } from "./dedupe-urls";
-
-function addHoursIso(baseIso: string, hours: number): string {
-  return new Date(Date.parse(baseIso) + hours * 60 * 60 * 1000).toISOString();
-}
+import { addHoursIso } from "./retry-time";
 
 /**
  * `candidate.embedFetched` が true の場合のみ embed 情報を永続化する
@@ -257,12 +254,23 @@ export interface PipelineSummary {
   outcomes?: CandidateOutcome[];
 }
 
+function emptyStageCounts(): PipelineSummary["stageCounts"] {
+  return {
+    deduped: 0,
+    evidenceGatePassed: 0,
+    titleGatePassed: 0,
+    rateCapPassed: 0,
+    published: 0,
+    dropped: {},
+    retried: 0,
+  };
+}
+
 export async function runPipeline(
   adapter: PipelineAdapter,
   options: PipelineOptions,
 ): Promise<PipelineSummary> {
   const errors: string[] = [];
-  const droppedCounts: Record<string, number> = {};
 
   // 1. Fetch candidates
   let rawCandidates: PipelineCandidate[] = [];
@@ -277,15 +285,7 @@ export async function runPipeline(
       skipped: 0,
       errors,
       geminiCalls: 0,
-      stageCounts: {
-        deduped: 0,
-        evidenceGatePassed: 0,
-        titleGatePassed: 0,
-        rateCapPassed: 0,
-        published: 0,
-        dropped: droppedCounts,
-        retried: 0,
-      },
+      stageCounts: emptyStageCounts(),
     };
   }
 
@@ -621,6 +621,7 @@ export async function runPipelineOnCandidates(
     errors,
     geminiCalls,
     stageCounts: {
+      ...emptyStageCounts(),
       deduped: deduped.length,
       evidenceGatePassed,
       titleGatePassed,

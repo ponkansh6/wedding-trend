@@ -160,6 +160,25 @@ describe("runPipeline (src/lib/pipeline/run-pipeline.ts)", () => {
     );
   });
 
+  it("returns fresh zeroed stage counts when candidate fetching fails", async () => {
+    (adapter.fetchCandidates as any).mockRejectedValue(new Error("unavailable"));
+
+    const first = await runPipeline(adapter, options);
+    const second = await runPipeline(adapter, options);
+
+    expect(first.stageCounts).toEqual({
+      deduped: 0,
+      evidenceGatePassed: 0,
+      titleGatePassed: 0,
+      rateCapPassed: 0,
+      published: 0,
+      dropped: {},
+      retried: 0,
+    });
+    expect(first.stageCounts).not.toBe(second.stageCounts);
+    expect(first.stageCounts.dropped).not.toBe(second.stageCounts.dropped);
+  });
+
   it("handles duplicate URLs via canonicalization and deduplication", async () => {
     (adapter.fetchCandidates as any).mockResolvedValue([
       {

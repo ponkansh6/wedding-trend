@@ -64,6 +64,7 @@ import type { CurationResult } from "@/lib/llm/batch";
 import { computeContentHash, computeCurationSignature } from "@/lib/llm/signature";
 import { registrableDomain } from "@/lib/pipeline/source-name";
 import { isDailyPublishCapReached } from "@/lib/pipeline/rate-cap";
+import { addHoursIso } from "@/lib/pipeline/retry-time";
 import { checkTermsOfServiceChange, disciplinedFetch } from "@/lib/sources/access-discipline";
 import {
   computeEvidenceSignals,
@@ -359,10 +360,6 @@ async function publishPost(
 function backoffHoursFor(attempts: number): number {
   const idx = Math.min(attempts, RETRY_BACKOFF_HOURS.length - 1);
   return RETRY_BACKOFF_HOURS[idx] ?? RETRY_BACKOFF_HOURS[RETRY_BACKOFF_HOURS.length - 1];
-}
-
-function addHoursIso(baseIso: string, hours: number): string {
-  return new Date(Date.parse(baseIso) + hours * 60 * 60 * 1000).toISOString();
 }
 
 interface RetryContext {

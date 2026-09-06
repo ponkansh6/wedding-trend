@@ -301,6 +301,7 @@ kill gate K1（robots.txt 変化検知）の入力。取得のたびに内容ハ
   - `src/lib/embed/oembed.ts` 及び `src/lib/embed/providers.ts` による堅牢な埋め込み取得と障害時フォールバック。
 - **Pipeline modules（実処理の単一実装）**:
   - `src/lib/pipeline/ingest.ts`（`runIngest`）: RSS 巡回 → 正規化 URL での重複排除 → upsert → 未キュレーション/再キュレーション対象の予算内選定 → LLM 一括キュレーション、までの一連の処理。`/` は `export const dynamic = "force-dynamic"` でキャッシュを経由しないため、以前ここにあったフィードキャッシュの明示的失効（`revalidateTag`）は不要になった（詳細は §6.5）。
+  - pipeline の小さな共有境界として、`src/lib/pipeline/retry-time.ts` の `addHoursIso()` は UTC ISO の時刻へ時間を加算する純粋関数であり、`run-pipeline.ts` と `discovery-ingest.ts` が retry/TTL の期限計算に共用する。無効な日時は従来どおり `RangeError` とする。各経路の backoff は custom 対応と固定値という意味が異なるため統合しない。`src/lib/pipeline/run-pipeline.ts` は `emptyStageCounts()` で正常・失敗時とも独立した `stageCounts` / `dropped` を返す。いずれも DB、fetch、LLM、公開・法務条件および処理順序を変えないリファクタリングであり、`tests/pipeline/retry-time.test.ts` と公開経由の pipeline test が既存挙動を固定する。
   - どちらも「呼び出し元（Route Handler か Server Action か）に依存しない」ことを目的に切り出されており、`src/app/api/ingest/route.ts` および `src/app/actions.ts` はいずれもこれらの薄いラッパーに過ぎない。ロジックを二重実装しないことが本設計の前提。
 
 ### §6.1 収集トリガーの 2 経路
