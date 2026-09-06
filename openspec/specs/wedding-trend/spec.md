@@ -516,6 +516,10 @@ LLM を呼び出す `topics-batch` の単体テストは `callGemini`（必要�
 実行終了時に「未一致 tier パターン N件」として必ず表示する（ファイル改名・削除で計測
 対象が静かに漏れる事故を検知するための必須の付帯出力）。
 
+`pnpm verify` の変更検出は `scripts/gates/verify.mjs` が `execFileSync` の引数配列で
+行い、committed / staged / tracked / untracked / rename の各差分を収集する。Git の比較が
+できない場合は `reliable: false` とし、test と smoke を省略せず全実行する fail-safe とする。
+
 production schema check は、`TURSO_DATABASE_URL` が `libsql:` であり、かつ認証トークンが
 設定されている場合にのみ本番スキーマを read-only で検査する。URL 未設定、トークン未設定、
 `file:` を含む非リモート URL はそれぞれ区別して fail-closed とし、期待 schema との差分を報告する。
