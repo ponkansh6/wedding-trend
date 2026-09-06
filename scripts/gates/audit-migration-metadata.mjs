@@ -33,11 +33,17 @@ try {
   );
   console.log("------------------------------------------------------------");
 
+  let hasError = false;
+
   for (const name of allNames) {
     const hasSql = sqlFiles.includes(name);
     const hasJournal = journalEntries.includes(name);
     const tag = name.replace(/\.sql$/, "");
     const hasSnapshot = snapshotFiles.some((f) => f.startsWith(tag));
+
+    if (!hasSql || !hasJournal || !hasSnapshot) {
+      hasError = true;
+    }
 
     console.log(
       String(name).padEnd(35) +
@@ -47,7 +53,7 @@ try {
     );
   }
   console.log("------------------------------------------------------------");
-  process.exit(0);
+  process.exit(hasError ? 1 : 0);
 } catch (err) {
   console.error("IO Error:", err.message);
   process.exit(1);
