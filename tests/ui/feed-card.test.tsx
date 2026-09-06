@@ -63,6 +63,20 @@ describe("FeedCard", () => {
     expect(container.innerHTML).not.toContain(THUMBNAIL_URL);
   });
 
+  it("picture / figure タグおよび srcset 属性がコンテナに出現しない（メディア入力の非露出検証）", () => {
+    const card = makeCard({
+      thumbnailUrl: "https://example.com/image.jpg",
+      embedHtml:
+        '<picture><source srcset="https://example.com/source.jpg"><figure><img src="https://example.com/img.jpg"></figure></picture>',
+    });
+    const { container } = render(<FeedCard card={card} />);
+    expect(container.querySelectorAll("picture").length).toBe(0);
+    expect(container.querySelectorAll("figure").length).toBe(0);
+    expect(container.innerHTML).not.toContain("srcset");
+    expect(container.innerHTML).not.toContain("https://example.com/image.jpg");
+    expect(container.innerHTML).not.toContain("https://example.com/source.jpg");
+  });
+
   it("originalTitle を逐語表示する（前後に文字が付加されない）", () => {
     const title = "元記事のタイトルそのまま";
     render(<FeedCard card={makeCard({ originalTitle: title })} />);
