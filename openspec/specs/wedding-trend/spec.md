@@ -847,7 +847,11 @@ bump しなければならない。bump がないと `getStaleCurationCandidates
 
 - 初期 HTML と JavaScript 無効時は、ロード済みカードを単一一覧として利用可能にする。
   hydration 前はこの単一一覧と、`aria-hidden` の非操作・2 区画タブ Skeleton を併存し、
-  クライアント初期化後に Skeleton を実タブへ置換する。保存済み ID により「未読」と「既読」へ
+  クライアント初期化後に Skeleton を実タブへ置換する。hydration 前の client fallback は単一の
+  root wrapper 内に tab Skeleton と `pt-4` の記事レーンを置き、外側 page の flex gap を内部へ
+  持ち込まない。tab placeholder の `line-height` は正式な `text-meta` の 19.5px と一致させ、
+  見出しの位置を hydration 前後で安定させる。`feed-read-status-tabs.test.tsx` はこの構造契約を
+  検証する。保存済み ID により「未読」と「既読」へ
   分類する。元記事を
   開くリンクの操作時に同期的な best-effort で ID を既読として記録し、リンク遷移は
   妨げない。既読タブでは主タッチによる水平左スワイプ（48px 以上、縦方向32px以下）か

@@ -52,11 +52,23 @@ describe("FeedReadStatusTabs", () => {
     const skeleton = document.querySelector(
       '[data-testid="pre-hydration-read-status-tabs-skeleton"]',
     );
+    const root = document.body.firstElementChild;
+    const tabSkeletons = skeleton?.querySelectorAll(
+      '[data-testid="pre-hydration-read-status-tab-skeleton"]',
+    );
 
+    expect(document.body.children).toHaveLength(1);
+    expect(root).not.toBeNull();
     expect(skeleton).toHaveAttribute("aria-hidden", "true");
-    expect(
-      skeleton?.querySelectorAll('[data-testid="pre-hydration-read-status-tab-skeleton"]'),
-    ).toHaveLength(2);
+    expect(tabSkeletons).toHaveLength(2);
+    if (!root || !skeleton || !tabSkeletons) throw new Error("pre-hydration layout must render");
+
+    expect(root.children[0]).toBe(skeleton);
+    expect(root.children[1]).toHaveClass("pt-4");
+    expect(root.children[1]).toHaveTextContent("結婚式の体験ブログ");
+    for (const tabSkeleton of tabSkeletons) {
+      expect(tabSkeleton.firstElementChild).toHaveClass("min-h-[19.5px]");
+    }
     expect(document.body).toHaveTextContent("記事 1");
     expect(document.body).toHaveTextContent("記事 2");
     expect(document.querySelector('[role="tablist"]')).toBeNull();

@@ -68,7 +68,7 @@ export function FeedReadStatusTabs({ cards, nextCount = null }: FeedReadStatusTa
   // no-JavaScript fallback: all loaded cards remain in one ordinary list.
   if (!hydrated) {
     return (
-      <>
+      <div>
         <div
           aria-hidden="true"
           data-testid="pre-hydration-read-status-tabs-skeleton"
@@ -78,13 +78,17 @@ export function FeedReadStatusTabs({ cards, nextCount = null }: FeedReadStatusTa
             data-testid="pre-hydration-read-status-tab-skeleton"
             className="-mb-px border-b-2 border-[var(--color-accent)] px-3 py-2"
           >
-            <Skeleton className="h-4 w-16" />
+            <div className="flex min-h-[19.5px] items-center">
+              <Skeleton className="h-4 w-16" />
+            </div>
           </div>
           <div
             data-testid="pre-hydration-read-status-tab-skeleton"
             className="-mb-px border-b-2 border-transparent px-3 py-2"
           >
-            <Skeleton className="h-4 w-14" />
+            <div className="flex min-h-[19.5px] items-center">
+              <Skeleton className="h-4 w-14" />
+            </div>
           </div>
         </div>
         <div className="pt-4">
@@ -97,7 +101,7 @@ export function FeedReadStatusTabs({ cards, nextCount = null }: FeedReadStatusTa
             countLabel="読み込み済み"
           />
         )}
-      </>
+      </div>
     );
   }
 
