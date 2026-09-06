@@ -2,7 +2,7 @@
 
 - 対象: `wedding-trend` 全体
 - 作成日: 2026-09-05
-- State: **一部進行中 (2026-09-06)** — 本書のチェックは実装済みの狭いsliceだけを表し、Plan 18完了を意味しない。
+- State: **縮小確定scope完了・コミットhandoff待ち (2026-09-06)** — 本書の今回scopeは、軽量なgate信頼性修正・test移設・format解消と、重い残件のPlan 24への移管である。本書の `[x]` は実装と対象受入が済んだことを表し、Gitのコミット状態は別管理とする。Plan 18-aiの再実施および機能変更は含まない。設計判断、本番経路への配線、履歴整合、反復計測を要する残件は [Plan 24](./24-refactoring-acceptance-and-runtime-slices.md) の独立sliceとして管理する。
 - 不変条件: `openspec/specs/wedding-trend/spec.md` §10 / §11。記事本文の非生成・非永続化、逐語タイトル、アクセス規律、fail-closedを変更しない。
 
 ## 今回の実装範囲
@@ -21,90 +21,152 @@
 10. `6dfab54` `docs(plan): record committed-slice verification`
 11. `18492ee` `refactor(llm): centralize batch JSON parsing`
 
-### 完了した狭い成果物
+### 受入確認済みの狭い成果物（コミット状態は別管理）
 
 - [x] production schema target guard: `file:` はnegative確認でexit 1、本番 `libsql:` はread-only検査でup-to-dateを確認。ローカルSQLiteを本番成功と誤認しない。
-- [x] Vite config-loader warningの抑止方針: `pnpm test` のpolicy経路で抑止する。直接の `pnpm exec vitest` ではwarningが残るため、根本解消ではない。
+- [x] Vite config-loader warningの根治: `vitest.config.mts` への移行と `import.meta.dirname` 化後、直接Vitestおよび実環境 `pnpm verify`（smoke/coverageを含む）でwarningなしを確認。stderr policy全体はPlan 24 Slice 2で継続する。
 - [x] CIの `fetch-depth: 0`。
-- [x] migration metadataのread-only report tool。検出を報告するだけでfail gateではなく、修復・squash・書込みはしない。
+- [x] migration metadataのread-only report tool。修復・squash・書込みはしない。
 - [x] batch実経路のfence除去→JSON parse→Zod検証、raw応答をログへ出さないnegative test、および仕様同期。retry/chunk/error処理全体の共通化は未完。
 - [x] body hashとURL dedupeの抽出。
 - [x] topics sliceの非永続化に対する法務回帰テスト。
 - [x] production schema検証契約のspec同期（`e03b4ff`）。
 
+### 未コミットの軽量slice（対象受入済み）
+
+- [x] `verify.mjs` のgit呼出しを `execFileSync` の引数配列へ置換し、committed/staged/tracked/untracked/renameを収集する。git比較不能時は `reliable: false` としてtest/smokeを必ず実行する。module exportと絶対パス比較のCLI main guardにより、実モジュールを直接検証できるようにした。
+- [x] `tests/verify-changed-files.test.ts` はregex/`new Function` 抽出を廃止し、実moduleでbase不在、committed、tracked、staged、untracked、rename、git failure fail-safeを検証する。
+- [x] body hash test移設に伴う2ファイルのformatを解消した。production/assertionの意味は変更しない。
+- [x] 対象検証は3 files / 48 passed / 1 skipped、対象oxfmt成功。sandboxでGit spawnがEPERMとなるnegativeでも、実 `pnpm verify` は `Changed files count: 0`、`reliable: false`、`needTest: true`、`needSmoke: true`となりskipしなかった。
+- [x] 実環境の `pnpm verify` はchanged files 49、`reliable: true`、test/smoke実行で全gate成功（58 files / 617 passed / 1 skipped、coverage tiers pass、production schema up-to-date）。Vite config-loader warningは根治済み。devDependency advisory warningは別件non-blockingで残る。
+
 ### AI計画との境界
 
 `topics-batch` のparse共通化とtopics slice leak testは、既存処理の重複削減と§10/§11の法務安全網である。prompt、schema、UI、topic仕様は変更していない。従ってPlan 18-aiの再実施ではない。
 
-## 未完了・部分成果
+## 残件の移管
 
-- [ ] cold/warm各5回のKPIとCI時間の反復計測。
-- [ ] 全不変条件の意図的破壊によるnegative確認。
-- [ ] unexpected stderrの検出・失敗化（現状は既知Vite warningのpolicyのみ）。
-- [ ] DB巨大テストのfixture境界分割。
-- [ ] CI job並列化、base SHA changed detectionとそのnegative test。
-- [ ] typed config、clock、DB port、stage型、host concurrencyを実行経路へ配線。（配線原則: trackedファイルはuntracked scaffoldingに依存させない。committed slice/CI fresh cloneが壊れる。ingest.ts→port.tsで実証済み・revert済み。配線はscaffoldingのcommit判断後に実施）
-- [ ] `src/lib/llm/batch.ts` 全体のretry/chunk/parse/error共通化。
-- [ ] `discovery-ingest.ts` / `run-pipeline.ts` のorchestrator縮小。
-- [ ] host別bounded concurrencyの実経路配線（same-host=1とfetch前規律のnegative testを含む）。
-- [ ] 参照数0を根拠にした実コード削除。
-- [ ] migration metadata auditのfail gate化とnegative test。
+Plan 18の縮小確定scopeでは、以下の重い残件を二重管理しない。すべて [Plan 24](./24-refactoring-acceptance-and-runtime-slices.md) に移管済みである。
 
-未配線scaffoldingは未追跡であり、本コミットの対象外として維持する。実ファイルは次の10件である。
+- migration metadata整合とauditのverify/CI配線
+- Vite config-loader warningおよびunexpected stderr policy
+- host concurrencyの採否
+- `discovery-ingest.ts` / `run-pipeline.ts` の責務分離とgolden set
+- host concurrencyの導入可否
+- CI job並列化の再評価、cold/warm各5回のKPI
 
-- `src/lib/config/runtime.ts`
-- `src/lib/time/clock.ts`
-- `src/lib/db/port.ts`
-- `src/lib/pipeline/stages.ts`
+### 見送り・延期・完了ブロッカーの区分
+
+「見送り」は未達を隠す語として使わない。各項目は次の三分類で管理する。
+
+| 区分                  | 項目                         | 判断と再開・完了条件                                                                                                                                                                                                                                                                                            |
+| --------------------- | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 対象外                | LLM汎用batcher化             | 通常batchは30件を`p-limit`で並列処理し、topicsは25件を逐次処理する。retry、chunk、fallbackの差異は意図的である。共通化対象はfence除去、JSON parse、エラー分類などの共通骨格までとし、実行制御の統合は本Planの対象外とする。差異が減少し、重複削減の実測効果が抽象化コストを上回る場合だけ、別Planで再評価する。 |
+| Plan 24移管           | pipeline責務分離             | 行数だけを根拠に分割しない。実経路use case、unit/integration、fresh clone、複雑性低減の証拠がそろう縦sliceだけを実施する。                                                                                                                                                                                      |
+| Plan 24移管           | CI job並列化                 | 同一gate集合のwall time・queue/startup costを計測し、効果が実行・保守コストを上回る場合だけ採用する。                                                                                                                                                                                                           |
+| Plan 24移管           | host concurrency             | same-host=1、allowlist/robots/ToS、rate limit/daily capをnegative testで維持でき、host待ちがボトルネックの場合だけ採用する。                                                                                                                                                                                    |
+| Plan 24移管           | migration metadata audit統合 | fail-closedコードは存在するが、metadata整合、verify/CI配線、fresh clone/read-only production検証を要する。                                                                                                                                                                                                      |
+| 完了                  | verify changed detection     | `execFileSync`、git失敗時full test/smoke fallback、実module test、sandbox negativeと実環境full verifyで受入済み。                                                                                                                                                                                               |
+| 一部完了・Plan 24継続 | stderr policy                | Vite config-loader warningは根治済み。console monitorの採否・配線、unexpected stderr negative、許容範囲の統一方針は独立判断を要する。                                                                                                                                                                           |
+
+### 未配線scaffoldingの採否
+
+typed config、clock、DB port、stage型、host concurrencyのscaffoldingは未追跡かつ未配線であった。保持し続ける方針は採らない。Plan 24 Slice 3で、production未参照かつ専用test以外からも参照されないclock、stage型、runtime config、DB portは非採用として削除済みである。DbPortは約50の既存関数を束ねるだけでproduction境界になっておらず、採用には全DBのDI設計を要するため削除した。host concurrencyだけはアクセス規律の評価を要するためPlan 24 Slice 5で扱う。trackedファイルはuntracked scaffoldingに依存させず、committed sliceとCI fresh cloneを壊さない。
+
+削除前の未配線scaffoldingは次の10件だった。clock、stage型、runtime config、DbPort、および各専用testの8件はPlan 24で非採用削除済みであり、過去の足場の証跡として本一覧を保持する。
+
+- `src/lib/config/runtime.ts`（Plan 24で非採用削除済み）
+- `src/lib/time/clock.ts`（Plan 24で非採用削除済み）
+- `src/lib/db/port.ts`（Plan 24で非採用削除済み）
+- `src/lib/pipeline/stages.ts`（Plan 24で非採用削除済み）
 - `src/lib/sources/host-concurrency.ts`
-- `tests/config-runtime.test.ts`
-- `tests/clock.test.ts`
-- `tests/db-port.test.ts`
-- `tests/pipeline-stages.test.ts`
+- `tests/config-runtime.test.ts`（Plan 24で非採用削除済み）
+- `tests/clock.test.ts`（Plan 24で非採用削除済み）
+- `tests/db-port.test.ts`（Plan 24で非採用削除済み）
+- `tests/pipeline-stages.test.ts`（Plan 24で非採用削除済み）
 - `tests/host-concurrency.test.ts`
 
-これらは現在、実行経路に配線されておらず、削除指示でも完了成果物でもない。
+clock、stage型、runtime config、DbPort、および各専用testの8件はPlan 24で非採用削除済みである。現存する未追跡scaffoldingはhost concurrencyだけであり、完了成果物ではない。上記の採否基準により、Plan 24 Slice 5で配線または削除を判断する。
 
-さらに、未完のためコミットから除外したものは `tests/audit-migration-metadata.test.ts`、`tests/console-monitor.ts`、`tests/console-monitor.test.ts` である。これらおよび未追跡scaffoldingは検証済みの完了成果物ではない。
+さらに、未完のためコミットから除外したものは `tests/audit-migration-metadata.test.ts`、`tests/console-monitor.ts`、`tests/console-monitor.test.ts` である。これらおよび未追跡scaffoldingは検証済みの完了成果物ではない。なお、actionsの正しいパスは `src/app/actions.ts` であり、`src/lib/pipeline/actions.ts` ではない。
+
+`.sqlite/wedding-trend.db` と `tmp-*.ts` はPlan成果物、検証対象、コミット対象のいずれでもない。削除または保持は別判断とする。
+
+### migration metadata auditの状態
+
+#### 完了: read-only report/parity tool
+
+metadataの欠落・不整合を報告するread-only toolは存在する。修復、squash、DB書込みは本Planの自動作業に含めず、必要な場合は明示承認を得る別作業とする。
+
+#### 実装中・未受入: read-only fail gate
+
+正常fixtureではexit 0、欠落fixtureではexit 1、実リポジトリの欠落でもexit 1となる実装とtargeted testはある。実repoでは15 migrations、全snapshot欠落、journalは`0003`以降欠落を検出してexit 1となった。DBへ書き込まないことも維持している。ただし未コミット、verify/CI未配線、既存metadataの整合未解決のため、fail gateとしての受入は未完である。
+
+### changed detectionの受入条件
+
+`execSync(string)`がshellをspawnしてsandboxでEPERMとなると、git取得失敗を黙殺して空のchanged setへfail-openし、dirty 23件でも`Changed files count: 0`、`needTest: false`、`needSmoke: false`となったことは、修正前の再現証跡である。現行は `execFileSync` の引数配列と比較不能時のfull test/smoke fallbackに置換済みであり、実module testはbase SHA不明、committed、tracked、staged、untracked、rename、git failureを対象にする。sandbox negativeでも比較不能時にtest/smokeをskipしないことを確認した。変更検出修正直後の実環境 `pnpm verify` はchanged files 40、`reliable: true`、`needTest: true`、`needSmoke: true`で全gateに成功している。その後のVite `.mts` 修正後の最新実行は49件であり、下記「最新検証」に記録する。現在の未完はコミットhandoffのみである。
 
 ## 計測・検証の記録
 
 測定値と適用範囲は混同しない。詳細は `docs/measurements/refactoring-baseline-2026-09.md` を参照。
+
+### Plan 18のKPIと測定条件
+
+Plan 17のbaselineとは混同しない。Plan 18の比較は同一commit、同一マシン、同一worker数、同一commandで行い、cold/warmを各5回測定する。warm medianは**10.5秒以下**、P95は**15秒以下**を目標とする。CIも同じgate集合で比較する。coverageの単発実行はKPI系列に混ぜない。目標未達なら、速度を理由とする複雑化は採用しない。
 
 | 対象                         | 実測結果                                                                                 | 判定                              |
 | ---------------------------- | ---------------------------------------------------------------------------------------- | --------------------------------- |
 | historical pilot             | 47 files / 578 pass / 1 skip、warm median 17.40s、P95 18.56s、cold 17.59s、RSS 424340 kB | 既存値を保持。cold x5は未実施     |
 | audit testを除くcoverage実行 | 55 files / 610 pass / 1 skip / 17.65s、coverage tiers pass                               | 単発coverage。KPI系列には混ぜない |
 
-`pnpm verify` はuncommitted changed countが0のときtest/smokeをskipするため、この進捗の証拠には使用しない。明示的な全test、coverage、smokeを実行して確認した。直接 `pnpm exec vitest` のVite warningと、`pnpm test` policyでの抑止も区別する。
+過去の全test・coverage・smoke結果は当時の証跡であり、今回の未コミットsliceの受入証跡ではない。直接 `pnpm exec vitest` のVite warningと、過去の `pnpm test` policyでの抑止も区別する。
 
 ### 最新検証（2026-09-06）
 
-audit testを除くcoverage実行は55 files / 610 pass / 1 skip / 17.65s、coverage summaryはstatements 80.96%、branches 70.62%、functions 84.86%、lines 82.81%で、coverage tiersは全てpassした。17.65sはcoverage単発の測定であり、KPI系列には使用しない。
+軽量sliceの対象Vitestは3 files / 48 passed / 1 skipped、対象oxfmtは成功した。feed-cardが画像入力を`img`、`picture`、`figure`、`srcset`等として露出しないnegativeも維持している。
 
-migration audit testはsandbox内のchild nodeがEPERMとなり、権限付き単独実行では1 passした。しかし実repo（SQL 15件、snapshot全欠落、journalは`0003`以降欠落）に対してMISSINGを表示するだけでexit 0であり、fail gateまたはnegative testの証明にはならない。
+Git spawnをsandboxでEPERMにしたnegativeでは、実 `pnpm verify` が `Changed files count: 0`、`reliable: false`、`needTest: true`、`needSmoke: true`となり、test/smokeをskipしないことを確認した。変更検出修正直後の通常実環境ではchanged files 40、`reliable: true`、test/smoke実行となり、`pnpm verify` は全gate成功（58 files / 617 passed / 1 skipped、coverage tiers pass、production schema up-to-date）である。Vite `.mts` 修正後の最新実行（同じ実装契約）は49件であり、上記の未コミット軽量sliceに記録した。
 
-static/type/security/format/spec refs/contract smokeは成功した。本番Turso schemaはread-onlyでup-to-date。webpack production buildも成功し、ローカルの `/` と `/api/health` はHTTP 200だった。Turbopack HTTP smokeはGoogle Fontsのnetwork制約後、権限付きでもsandboxのport bind panicとなり判定不能である。middleware deprecationとEdge warningは既知警告として扱う。
+Vite config-loader warningは `vitest.config.mts` 移行後に直接Vitestおよびverify（smoke/coverage含む）で再発しないことを確認した。devDependency high/critical advisory warningは別件non-blockingで残る。unexpected stderr policyとmigration metadataの整合・CI配線はPlan 24で扱う。AI計画の混入はない（prompt、schema、UI、topic仕様の変更なし）。
 
-`pnpm verify` は未コミット変更があるにもかかわらずChanged files countが0となりtest/smokeをskipしたため、changed detectionは未完である。AI計画の混入はない（prompt、schema、UI、topic仕様の変更なし）。以上からmigration fail gate、実経路配線、CI、KPIおよびDefinition of Doneは未完のままである。
+### 過去の補足検証（受入の代替にはしない）
 
-## 最小の残作業順
+- KPI反復測定: main作業ツリーは追跡変更7件でdirtyのため、HEAD `2c5559c` のclean worktree（`/tmp/opencode/wt-kpi-2c5559c`、後始末済み）で `pnpm test` をcold×5・warm×5。Node 24.19.0 / pnpm 11.9.0 / 4 cores。cold: 16.813 / 16.477 / 16.898 / 17.362 / 17.634s、warm: 16.667 / 17.765 / 18.075 / 18.791 / 17.648s。warm median 17.765s、P95 18.791s → 目標（10.5s以下 / 15s以下）**未達**。計画ルール「目標未達なら、速度を理由とする複雑化は採用しない」を適用し、CI並列化・DB分割の速度目的採用を見送る。
+- CI wall-time計測（同一worktree・逐次・各1回）: lint 0.699s、type-check 8.818s、coverage（vitest 22.381s + tiers check 0.656s）、security 5.160s、smoke:contract 3.191s、smoke:http 23.883s、prod-schemaは `TURSO_DATABASE_URL` 未設定でskip、spec-refs 0.016s。`pnpm test` はKPI値（median 17.77s）を流用。合計約64.7s、全PASS。残作業順5の測定要件を満たし、採用判断は上記ルールにより不採用。
+- zero-ref調査: 追跡コードのexport 9件（`computeCurationSignature`、`shadowEvaluateTopics`、`formatAbsoluteJa`、`FeedLaneClassic`、`EmptyState`、`curateSingle`、`getAllowlistedTosUrl`、`writeReadStatus`、`PublishedTime`）を全文検索で確認し、すべて参照あり。安全な削除候補なし（調査済み・削除なし）。
+- junk整理: `exports.txt`（291行のexport名ダンプ、untracked）を削除。計時用worktreeは後始末済み。
 
-1. migration auditをfail-closed化し、fixtureによるexit非0のnegative testを追加する。
-2. changed detectionを安全側へ修正し、未コミット変更のnegative testを追加する。
-3. 既存scaffoldingを縦に配線するか、別途判断して除去する。
-4. `batch.ts` のretry/chunk/error処理を共通化する。
-5. pipeline orchestratorを段階接続へ縮小し、CIを並列化する。
-6. host別並列化をaccess disciplineを保ったまま実配線する。
-7. cold/CIとwarmの比較可能な反復測定を完了し、DoDを判定する。
+## 法務不変条件のnegative test matrix
 
-## Definition of Done
+§10/§11の各確認はpositiveだけでは完了としない。未確認の行は未完である。
 
-- [ ] 反復測定でテスト高速化KPIを判定済み。
-- [ ] 全不変条件に成功/意図的破壊の対がある。
-- [ ] unexpected stderr policyとCI並列/base SHA negativeが実装済み。
-- [ ] config/clock/DB port/stage/host concurrencyが実経路に配線済み。
-- [ ] LLM batch、pipeline縮小、host並列、削除台帳の実削除が完了。
-- [ ] migration auditがfail gateとしてnegative test済み。
-- [ ] lint、type-check、全test、coverage tiers、spec refs、security、smoke、read-only production schemaの該当gateを明示実行している。
-- [x] spec更新は `e03b4ff` に記録し、§10/§11の不変条件を維持した。
+| 不変条件                                | spec節 | positive確認                      | negative確認                               | 証跡                                 |
+| --------------------------------------- | ------ | --------------------------------- | ------------------------------------------ | ------------------------------------ |
+| 記事本文・sliceを生成または永続化しない | §10    | 永続化対象が許可フィールドのみ    | 本文/slice投入を拒否または保存されないこと | unit/integration test、DB inspection |
+| タイトルは逐語                          | §10    | 取得タイトルをそのまま表示・保存  | 書換え・要約タイトルを拒否すること         | golden set、render test              |
+| 画像を表示しない                        | §10    | 記事表示に画像要素・画像URLがない | 画像入力がUI/永続化へ漏れないこと          | render test、DB inspection           |
+| allowlistのみ取得する                   | §11    | 許可hostを取得する                | 非許可hostをfetch前に拒否する              | unit/integration test、fetch spy     |
+| robots/ToSを守る                        | §11    | 許可された取得だけを続行          | robots/ToS不許可時に取得しない             | fixture、fetch spy                   |
+| K1–K6                                   | §11    | 各制約を満たす入力を受理          | 各制約違反を個別に拒否する                 | constraint matrix test               |
+| same-host=1                             | §11    | 異なるhostは必要時に進行          | 同一hostの同時fetchが2件にならない         | concurrency test、fetch trace        |
+| rate limit/daily cap                    | §11    | 上限内を取得する                  | 上限超過時にfetchしない                    | clock fixture、counter trace         |
+
+## rollback・停止条件
+
+成果物はコミット単位でrevertする。法務negative test、golden set、fresh clone、CI required gateのいずれかが失敗した時点で、その成果物の作業を停止する。
+
+- read-only gateは、誤検知または本番接続先の誤判定が起きた場合、gate導入コミットだけをrevertし、DBへの修復・書込みは行わない。
+- host concurrencyとpipeline変更は、same-host=1、アクセス規律、rate limit/daily cap、またはgolden setを損ねた場合、それぞれの縦sliceコミットをrevertする。アクセス規律を緩めて継続しない。
+- CI並列化は、同一gate集合を失う、required gateが欠ける、または測定効果が維持コストを下回る場合、workflow変更コミットをrevertする。
+
+## 残作業の次手
+
+Plan 18で追加の残作業は持たない。Plan 24を依存順どおり実施し、各sliceを独立に受入する。LLM全体のretry/chunk/fallback共通化は対象外のままとする。
+
+## Definition of Done（縮小確定scope）
+
+- [x] changed detectionをfail-safeへ修正し、実module test、sandbox negative、実環境full verifyで確認した。
+- [x] body hash test移設のformatを解消し、対象test/formatを確認した。
+- [x] 重い残件をPlan 24へ移管し、Plan 18と二重管理しない。
+- [x] Plan 18-aiの変更を含めず、§10/§11の不変条件を維持した。
+- [ ] 未コミット変更を必要な粒度でコミットする（本書の実装受入とは別のGit handoff）。
