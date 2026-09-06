@@ -13,7 +13,9 @@
 
 ## 警告方針
 
-`pnpm test` は既知のVite config-loader warningをpolicy経路で抑止する。これは出力ノイズの制御であり、Viteの根本解消ではない。直接 `pnpm exec vitest` では当該warningが残るため、unexpected stderrの包括的なfail policyは未実装である。
+Vitest設定を明示ESM拡張子の `vitest.config.mts` に移行し、aliasの `__dirname` を `import.meta.dirname` に置換した。`package.json` の `type: module` 変更およびwarning抑止環境変数は使っていない。2026-09-06に直接 `pnpm exec vitest run tests/console-monitor.test.ts`（1 file / 4 tests）と実環境 `pnpm verify`（58 files / 617 passed / 1 skipped、coverage tiers・smoke・production schemaを含む）で、Vite config-loader warningが出ないことを確認した。
+
+unexpected stderrの包括的なfail policyは未実装である。`console-monitor` のunit成功はprocess stderr gateの受入根拠にはせず、配線・negative・許容範囲はPlan 24 Slice 2で扱う。
 
 `LibsqlError: no_such_table` はschema/migrationのresilience assertionで期待される場合があるが、無条件に抑止しない。各テストが意図を明示する。
 

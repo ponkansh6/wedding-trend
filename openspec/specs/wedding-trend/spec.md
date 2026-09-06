@@ -500,7 +500,7 @@ HTTP smoke は必須であり、contract smoke 成功を production build 成功
 `target="_blank"` + `rel="noopener noreferrer"` 導線・`sourceName` 常時表示と
 `author` の非 null 時のみ表示・`rationaleText` / `aiSummary` 非表示・AI 免責の
 恒常注記描画といった §10 の法務不変条件は、カードが実際に描画されて初めて検証可能
-であり、これらは `tests/ui/` のコンポーネントテスト（`vitest.config.ts` の
+であり、これらは `tests/ui/` のコンポーネントテスト（`vitest.config.mts` の
 `test.projects` における `ui` プロジェクト、`environment: "happy-dom"`）が担う。
 `src/app/loading.tsx` の route-level loading UI も `loading.test.tsx` で、status の
 読み上げと、`FeedReadStatusTabs` の hydration 前と同じ単一記事レーンの視覚 Skeleton
