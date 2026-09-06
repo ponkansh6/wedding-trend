@@ -2,7 +2,7 @@
 
 - 対象: `wedding-trend` の未受入リファクタリング残件
 - 作成日: 2026-09-06
-- State: **local implementation acceptance 完了、remote CI handoff 待ち**
+- State: **local / fresh clone acceptance 完了、remote CI handoff 待ち**
 - 移管元: [Plan 18](./18-refactoring-simplification-and-efficiency.md)
 
 ## 背景と境界
@@ -73,15 +73,15 @@ Plan 18で軽量なverify fail-safe、test移設、format解消は対象受入�
 
 この2件は局所的な重複除去であり、次の本体分離を置き換えない。実装は `4b918e5` でコミット済みであり、clean fresh cloneでも全coverage（53 files / 615 passed / 1 skipped、tiers全pass）まで再現した。テスト数の増加はmigration audit testの拡充とretry-time / summaryのcharacterization追加によるものであり、KPIの再計測値ではない。
 
-**本体分離（2026-09-06、local acceptance）:** `discovery-ingest.ts` を access/fetch verdict → extraction → LLM → sticky/rate → persistence/status/stats の既存順序を調停する入口に絞った。`discovery-extraction.ts` は title/container/evidence/body hash と LLM 専用の ephemeral judgment slice を返す純粋 Q1、`discovery-retry.ts` は retry/terminal/日時の純粋判断、`discovery-persistence.ts` は upsert/drop/publish/retry の DB 効果、`discovery-rate-cap.ts` は JST 日次公開上限、`discovery-revalidation.ts` は公開済み再検証を担当する。入口は再検証 API を re-export し、既存利用者との互換性を保つ。永続化 DTO は `originalExcerpt: null` と body hash 等の非内容 metadata に限定し、raw HTML、container、visible text、judgment slice を渡さない。
+**本体分離（2026-09-06、local / fresh clone acceptance）:** `discovery-ingest.ts` を access/fetch verdict → extraction → LLM → sticky/rate → persistence/status/stats の既存順序を調停する入口に絞った。`discovery-extraction.ts` は title/container/evidence/body hash と LLM 専用の ephemeral judgment slice を返す純粋 Q1、`discovery-retry.ts` は retry/terminal/日時の純粋判断、`discovery-persistence.ts` は upsert/drop/publish/retry の DB 効果、`discovery-rate-cap.ts` は JST 日次公開上限、`discovery-revalidation.ts` は公開済み再検証を担当する。入口は再検証 API を re-export し、既存利用者との互換性を保つ。永続化 DTO は `originalExcerpt: null` と body hash 等の非内容 metadata に限定し、raw HTML、container、visible text、judgment slice を渡さない。
 
-characterization は成功時の repository 効果を article fetch → LLM → upsert → markCurated → recordPublication → fetched 状態の順で固定し、title/container/evidence の決定的ゲートで LLM・publication が呼ばれないこと、DTO に本文・raw HTML・slice が漏れないことを固定する。normalized golden trace は ready publish、extraction failure、LLM failure、robots 拒否の4ケースを追加し、出力・永続化・fetch 順序の契約を固定する。これらを含む対象6 files の targeted 実行は **83 passed / 1 skipped**。権限付き `pnpm verify` は **56 files / 635 passed / 1 skipped**、coverage tiers 全pass、production schema up-to-date を含む全ゲートに成功した。先行の sandbox `EPERM` による `verify-changed-files` 失敗は、今回の権限付き完全成功により最終証跡から解消した。fresh clone と push 後の remote CI は未実施である。
+characterization は成功時の repository 効果を article fetch → LLM → upsert → markCurated → recordPublication → fetched 状態の順で固定し、title/container/evidence の決定的ゲートで LLM・publication が呼ばれないこと、DTO に本文・raw HTML・slice が漏れないことを固定する。normalized golden trace は ready publish、extraction failure、LLM failure、robots 拒否の4ケースを追加し、出力・永続化・fetch 順序の契約を固定する。これらを含む対象6 files の targeted 実行は **83 passed / 1 skipped**。権限付き `pnpm verify` は **56 files / 635 passed / 1 skipped**、coverage tiers 全pass、production schema up-to-date を含む全ゲートに成功した。先行の sandbox `EPERM` による `verify-changed-files` 失敗は、今回の権限付き完全成功により最終証跡から解消した。commit `7fd3d92` から `git clone --no-local` したfresh cloneで `pnpm install --frozen-lockfile` が成功し、`pnpm verify` も成功した（変更なしのためtest/smokeは自動skip）。このため `pnpm exec vitest run --coverage` と明示smokeを別途実行し、**56 files / 635 passed / 1 skipped**、smoke **2 passed**、coverage tiers は Tier 1 **98.53%** / Tier 2 **89.02%** / Tier 3 **79.10%** ですべて成功した。残件は push 後の remote CI のみである。
 
 **開始条件:** `discovery-ingest.ts` / `run-pipeline.ts` の境界ごとに実経路use caseとgolden setを定義できること。
 
 **成果物:** 挙動不変の責務分離、golden set、unit/integration、fresh clone実行証跡。
 
-**Acceptance:** [x] responsibility boundary、純粋抽出/retry、DB 効果、JST rate cap、revalidation の依存方向を分離し、characterization と targeted test（83 passed / 1 skipped）で既存の fetch/LLM/永続化順序と本文非永続化を固定する。[x] normalized golden trace の4ケースで出力・永続化・fetch 順序の契約を維持し、§10/§11のnegativeを通す。[x] required gate は権限付き `pnpm verify`（56 files / 635 passed / 1 skipped、coverage tiers全pass、production schema up-to-date）で成功した。[ ] commit 後の fresh clone と push 後の remote CI を確認する。publication の部分成功・retry reason分類は Plan 25、budget/観測は Plan 26 とし、この挙動不変 refactor に混在させない。
+**Acceptance:** [x] responsibility boundary、純粋抽出/retry、DB 効果、JST rate cap、revalidation の依存方向を分離し、characterization と targeted test（83 passed / 1 skipped）で既存の fetch/LLM/永続化順序と本文非永続化を固定する。[x] normalized golden trace の4ケースで出力・永続化・fetch 順序の契約を維持し、§10/§11のnegativeを通す。[x] required gate は権限付き `pnpm verify`（56 files / 635 passed / 1 skipped、coverage tiers全pass、production schema up-to-date）で成功した。[x] commit `7fd3d92` のfresh cloneでinstall、明示Vitest coverage、明示smoke、coverage tiersを成功させた。[ ] push 後の remote CI を確認する。publication の部分成功・retry reason分類は Plan 25、budget/観測は Plan 26 とし、この挙動不変 refactor に混在させない。
 
 **STOP / rollback:** golden set、法務negative、access discipline、fresh cloneのいずれかが失敗したら停止し、その縦sliceだけをrevertする。
 
@@ -112,9 +112,9 @@ GitHub remote CIのsuccessful main runsを5回取得してqueue/startupを比較
 - [x] Slice 1のmetadata整合、audit配線、negative、空SQLite file適用、read-only production検証、およびclean fresh clone検証を完了した。remote CIはpush後に確認する。
 - [x] Slice 2のVite warning根治とconsole monitor / 包括stderr gateの非採用判断を完了し、再評価条件を記録した。
 - [x] Slice 3のclock、stages、runtime config、DB portを非採用削除まで完了し、host concurrencyはSlice 5へ引き渡した。
-- [ ] Slice 4のfresh cloneとremote CIを受入する（責務分離本体、normalized golden trace、local gateは完了）。
+- [x] Slice 4のfresh cloneを受入した（commit `7fd3d92`、install、明示Vitest coverage 56 files / 635 passed / 1 skipped、smoke 2 passed、coverage tiers Tier 1 98.53% / Tier 2 89.02% / Tier 3 79.10%）。remote CIはpush後に確認する。
 - [x] Slice 5の未配線host concurrencyを非採用として削除し、再評価時の§11同期・negative要件を記録した。
 - [x] Slice 6でcold/warm各5回とCI gate相当の比較を行い、証拠なき並列化を非採用と記録した。
 - [x] 変更が法務、DB、アクセス契約に触れる場合、spec同期とrequired gate成功を確認する。
 
-**Git handoff:** `[x]` はlocal implementation acceptanceを表す。Slice 1は `1652351`、Slice 4の軽量境界整理は `4b918e5` にコミット済みで、clean fresh cloneも確認済みである。push後のremote CI確認だけをhandoffとして残す。
+**Git handoff:** `[x]` はlocalまたはfresh cloneの受入完了を表す。Slice 1は `1652351`、Slice 4の軽量境界整理は `4b918e5`、本体分離は `7fd3d92` にコミット済みである。Slice 4はcommit `7fd3d92` のclean fresh cloneでinstall、明示Vitest coverage、smoke、coverage tiersまで確認済みであり、push後のremote CI確認だけをhandoffとして残す。
