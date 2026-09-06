@@ -15,14 +15,15 @@ import {
   getPostsByUrls,
   getRationaleByPostId,
   isRemoved,
+  markCurated,
   markRetracted,
   recordPublication,
   saveHostGateState,
   seedDiscoverySeen,
+  setDiscoverySeenStatus,
   upsertPosts,
 } from "@/lib/db/repository";
 import {
-  bodyHashSimilarity,
   computeBodyHash,
   computeContainerBodyHash,
   ingestDiscoveredUrls,
@@ -42,11 +43,19 @@ vi.mock("@/lib/db/repository", async (importOriginal) => {
   return {
     ...actual,
     countPublishedSince: vi.fn(),
+    markCurated: vi.fn(actual.markCurated),
+    recordPublication: vi.fn(actual.recordPublication),
+    setDiscoverySeenStatus: vi.fn(actual.setDiscoverySeenStatus),
+    upsertPosts: vi.fn(actual.upsertPosts),
   };
 });
 
 const mockedCurate = vi.mocked(curateSingle);
 const mockedCountPublishedSince = vi.mocked(countPublishedSince);
+const mockedMarkCurated = vi.mocked(markCurated);
+const mockedRecordPublication = vi.mocked(recordPublication);
+const mockedSetDiscoverySeenStatus = vi.mocked(setDiscoverySeenStatus);
+const mockedUpsertPosts = vi.mocked(upsertPosts);
 
 const HOST = "www.mwed.jp";
 const DISALLOWED_HOST = "not-on-the-allowlist.example.com";
@@ -131,6 +140,11 @@ describe("ingestDiscoveredUrls", () => {
     __setSleepForTests(async () => {});
     mockedCurate.mockReset();
     mockedCountPublishedSince.mockResolvedValue(0);
+    // repository の実装を wrap した spy は実装を保ったまま呼び出し履歴だけ分離する。
+    mockedMarkCurated.mockClear();
+    mockedRecordPublication.mockClear();
+    mockedSetDiscoverySeenStatus.mockClear();
+    mockedUpsertPosts.mockClear();
   });
 
   it("Q3: allowlist 外ホストはネットワーク I/O ゼロで一切処理しない", async () => {
@@ -239,6 +253,189 @@ describe("ingestDiscoveredUrls", () => {
     expect(counts).toEqual({ pending: 0, fetched: 1, skipped: 0 });
   });
 
+  it("characterization: 正常系は取得後に LLM・保存・公開記録へ進み、本文は永続化 DTO に渡さない", async () => {
+    const url = `https://${HOST}/story/cases/characterization-order`;
+    const fictionalBodyFragment = "架空の結婚準備メモだけを使う検証用断片";
+    const filler = "あ".repeat(2000);
+    const html = `<html><head><title>順序固定用の架空タイトル</title></head><body><div class="story-detail"><p>${fictionalBodyFragment}${filler}</p><p>架空の段落その二です。</p><p>架空の段落その三です。</p></div></body></html>`;
+    await seedPending(HOST, url);
+    const fetchMock = vi.fn(async (input: string | URL) => {
+      const requested = String(input);
+      if (requested.endsWith("/robots.txt")) return resp({ status: 200, body: ALLOW_ALL_ROBOTS });
+      if (requested === url) return resp({ status: 200, body: html });
+      throw new Error(`unexpected fetch: ${requested}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    mockedCurate.mockResolvedValue(sufficientCuration());
+
+    // seed の書き込みを順序比較から除く。
+    mockedUpsertPosts.mockClear();
+    mockedMarkCurated.mockClear();
+    mockedRecordPublication.mockClear();
+    mockedSetDiscoverySeenStatus.mockClear();
+
+    const stats = await ingestDiscoveredUrls(HOST);
+
+    expect(stats.published).toBe(1);
+    const articleFetchOrder = fetchMock.mock.invocationCallOrder[1];
+    const upsertOrder = mockedUpsertPosts.mock.invocationCallOrder[0];
+    const curateOrder = mockedCurate.mock.invocationCallOrder[0];
+    const curatedOrder = mockedMarkCurated.mock.invocationCallOrder[0];
+    const publicationOrder = mockedRecordPublication.mock.invocationCallOrder[0];
+    const statusOrder = mockedSetDiscoverySeenStatus.mock.invocationCallOrder.at(-1);
+    expect(articleFetchOrder).toBeLessThan(curateOrder ?? Number.POSITIVE_INFINITY);
+    expect(curateOrder).toBeLessThan(upsertOrder ?? Number.POSITIVE_INFINITY);
+    expect(upsertOrder).toBeLessThan(curatedOrder ?? Number.POSITIVE_INFINITY);
+    expect(curatedOrder).toBeLessThan(publicationOrder ?? Number.POSITIVE_INFINITY);
+    expect(publicationOrder).toBeLessThan(statusOrder ?? Number.POSITIVE_INFINITY);
+
+    // 原文・HTML・判定スライスのような生データを repository DTO に渡さない。
+    const persistedArguments = [
+      mockedUpsertPosts.mock.calls,
+      mockedMarkCurated.mock.calls,
+      mockedRecordPublication.mock.calls,
+    ];
+    expect(JSON.stringify(persistedArguments)).not.toContain(fictionalBodyFragment);
+    expect(JSON.stringify(persistedArguments)).not.toMatch(
+      /<html|judgmentSlice|originalExcerpt[^:]*:[^n]/i,
+    );
+    expect(mockedRecordPublication).toHaveBeenCalledWith(
+      expect.any(Number),
+      expect.any(String),
+      expect.stringMatching(/^[0-9a-f]{16}$/),
+      "body",
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(Number),
+    );
+  });
+
+  it.each([
+    {
+      name: "ready → publish",
+      article: () => resp({ status: 200, body: articleHtml("正規化トレース用タイトル") }),
+      curation: sufficientCuration(),
+      expected: {
+        fetches: ["robots", "article"],
+        extraction: "ready",
+        llm: "called",
+        persistence: ["upsert:safe", "markCurated", "recordPublication"],
+        seen: ["fetched"],
+        stats: { processed: 1, published: 1, enqueuedRetries: 0, skippedRobots: 0 },
+      },
+    },
+    {
+      name: "container missing",
+      article: () => resp({ status: 200, body: "<title>コンテナなし</title>" }),
+      curation: undefined,
+      expected: {
+        fetches: ["robots", "article"],
+        extraction: "container_not_found",
+        llm: "not_called",
+        persistence: ["upsert:safe"],
+        seen: ["fetched"],
+        stats: {
+          processed: 1,
+          published: 0,
+          extractionInsufficientDropped: 1,
+          enqueuedRetries: 0,
+        },
+      },
+    },
+    {
+      name: "LLM failure",
+      article: () => resp({ status: 200, body: articleHtml("LLM失敗用タイトル") }),
+      // `curateSingle` の一時失敗契約は `undefined` ではなく null。
+      curation: null,
+      expected: {
+        fetches: ["robots", "article"],
+        extraction: "ready",
+        llm: "called",
+        persistence: [],
+        seen: ["fetched"],
+        stats: { processed: 1, published: 0, enqueuedRetries: 1, skippedRobots: 0 },
+      },
+    },
+    {
+      name: "robots access denied",
+      article: undefined,
+      curation: undefined,
+      expected: {
+        fetches: ["robots"],
+        extraction: "not_reached",
+        llm: "not_called",
+        persistence: [],
+        seen: ["skipped"],
+        stats: { processed: 1, published: 0, enqueuedRetries: 0, skippedRobots: 1 },
+      },
+    },
+  ])("golden normalized trace: $name", async ({ name, article, curation, expected }) => {
+    const url = `https://${HOST}/story/cases/golden-${name.replaceAll(" ", "-")}`;
+    await seedPending(HOST, url);
+    const fetchMock = vi.fn(async (input: string | URL) => {
+      const requested = String(input);
+      if (requested.endsWith("/robots.txt")) {
+        return resp({
+          status: 200,
+          body: article === undefined ? DISALLOW_ALL_ROBOTS : ALLOW_ALL_ROBOTS,
+        });
+      }
+      if (requested === url && article) return article();
+      throw new Error(`unexpected fetch: ${requested}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    if (curation !== undefined) mockedCurate.mockResolvedValue(curation);
+
+    const stats = await ingestDiscoveredUrls(HOST);
+    const persisted = mockedUpsertPosts.mock.calls[0]?.[0]?.[0];
+    const storedPost = (await getPostsByUrls([url])).get(url);
+    const removalReason =
+      storedPost?.id == null
+        ? undefined
+        : (
+            await db
+              .select({ reason: postRemovals.reason })
+              .from(postRemovals)
+              .where(eq(postRemovals.postId, storedPost.id))
+          )[0]?.reason;
+    const articleFetched = fetchMock.mock.calls.some(
+      ([input]) => !String(input).endsWith("/robots.txt"),
+    );
+    const externalOutcome = !articleFetched
+      ? "not_reached"
+      : removalReason === "extraction_insufficient:container_not_found"
+        ? "container_not_found"
+        : mockedCurate.mock.calls.length > 0
+          ? "ready"
+          : "unexpected";
+    const trace = {
+      fetches: fetchMock.mock.calls.map(([input]) =>
+        String(input).endsWith("/robots.txt") ? "robots" : "article",
+      ),
+      extraction: externalOutcome,
+      llm: mockedCurate.mock.calls.length === 0 ? "not_called" : "called",
+      persistence: [
+        ...(mockedUpsertPosts.mock.calls.length === 0 ? [] : ["upsert:safe"]),
+        ...(mockedMarkCurated.mock.calls.length === 0 ? [] : ["markCurated"]),
+        ...(mockedRecordPublication.mock.calls.length === 0 ? [] : ["recordPublication"]),
+      ],
+      seen: mockedSetDiscoverySeenStatus.mock.calls.map(([, , status]) => status),
+      stats: Object.fromEntries(
+        Object.keys(expected.stats).map((key) => [key, stats[key as keyof typeof stats]]),
+      ),
+    };
+
+    // 正規化トレースには可変 ID・時刻・順序番号を持ち込まない。永続化入力は安全な
+    // キーだけを観測し、記事本文・HTML・判定スライスを golden に含めない。
+    if (persisted) {
+      expect({ url: persisted.url, originalExcerpt: persisted.originalExcerpt }).toEqual({
+        url,
+        originalExcerpt: null,
+      });
+    }
+    expect(trace).toEqual(expected);
+  });
+
   it("originalTitle: コンテナ内に h1 があれば <title> ではなく h1 のテキストを使う", async () => {
     const url = `https://${HOST}/story/cases/with-h1`;
     await seedPending(HOST, url);
@@ -315,6 +512,7 @@ describe("ingestDiscoveredUrls", () => {
     expect(stats.published).toBe(0);
     // Q1: 決定的ゲート不合格時は LLM を一切呼ばない（自己申告の廃止）。
     expect(mockedCurate).not.toHaveBeenCalled();
+    expect(mockedRecordPublication).not.toHaveBeenCalled();
     // 条件別カウンタ: 本文が短いだけで段落数・リンク密度・定型行率は満たすため
     // text_length のみが計上され、他の内訳は増えない。
     expect(stats.extractionFailedByTextLength).toBe(1);
@@ -358,6 +556,7 @@ describe("ingestDiscoveredUrls", () => {
 
     expect(stats.extractionInsufficientDropped).toBe(1);
     expect(mockedCurate).not.toHaveBeenCalled();
+    expect(mockedRecordPublication).not.toHaveBeenCalled();
     expect(stats.extractionFailedByParagraphCount).toBe(1);
     expect(stats.extractionFailedByTextLength).toBe(0);
   });
@@ -394,6 +593,7 @@ describe("ingestDiscoveredUrls", () => {
     expect(stats.extractionFailedByLinkDensity).toBe(0);
     expect(stats.extractionFailedByParagraphCount).toBe(0);
     expect(mockedCurate).not.toHaveBeenCalled();
+    expect(mockedRecordPublication).not.toHaveBeenCalled();
 
     const post = (await getPostsByUrls([url])).get(url);
     expect(post?.status).toBe("rejected");
@@ -423,9 +623,9 @@ describe("ingestDiscoveredUrls", () => {
 
     expect(stats.titleFilterDropped).toBe(1);
     expect(stats.published).toBe(0);
-    // タイトルフィルタは LLM 呼び出し後（curation 結果の topicAnchor を使う訳ではないが）
-    // タイトルはフェッチ直後に確定するため、実装は呼ぶ・呼ばないどちらもあり得る。
-    // ここでは終端理由のみを検証する。
+    // 現行のタイトルフィルタは LLM 呼び出し後にあるため、LLM 非呼出は契約にしない。
+    // ただし終端棄却後に公開記録へ進まないことは固定する。
+    expect(mockedRecordPublication).not.toHaveBeenCalled();
 
     const post = (await getPostsByUrls([url])).get(url);
     expect(post?.status).toBe("rejected");

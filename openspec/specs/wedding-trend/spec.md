@@ -18,7 +18,7 @@ Next.js 16 (App Router), React 19, TypeScript strict, Tailwind CSS v4, Drizzle O
 - **自動巡回コレクター**:
   - RSS フィードに基づくブログ・体験談の収集 (`src/lib/sources/hatena-bookmark.ts`, `src/lib/sources/google-news.ts`, `src/lib/sources/note.ts`, `src/lib/sources/ameblo.ts`, `src/lib/sources/base/rss-fetcher.ts`, `src/lib/sources/base/feed-parser.ts`, `src/lib/sources/registry.ts`)
 - **sitemap 差分による発見・本文取得（discovery 経路）**:
-  - RSS フィードが存在しないセクション（第1対象: `mwed.jp` 体験談）を sitemap の差分から発見し、アクセス規律レイヤー経由で本文を取得して判定する。本文は判定後に破棄し永続化しない (`src/lib/sources/sitemap-discovery.ts`, `src/lib/sources/access-discipline.ts`, `src/lib/sources/article-text.ts`, `src/lib/pipeline/discovery-ingest.ts`, `scripts/run-discovery.mjs`)。また、有用度スコア等の全件バックフィルスクリプト `scripts/backfill-usefulness.mjs` にも discovery 経路由来のプレフライト・バイパス機能が統合されており、本文をメモリ上で一時取得して再スコア対象にルーティングする。詳細は §6.3 を参照。
+  - RSS フィードが存在しないセクション（第1対象: `mwed.jp` 体験談）を sitemap の差分から発見し、アクセス規律レイヤー経由で本文を取得して判定する。実行のオーケストレーションは `src/lib/pipeline/discovery-ingest.ts`、抽出/Q1 は `discovery-extraction.ts`、retry 判断は純粋関数の `discovery-retry.ts`、DB 効果は `discovery-persistence.ts`、JST 日次公開上限は `discovery-rate-cap.ts`、公開済み再検証は `discovery-revalidation.ts`（互換のため入口から re-export）に分離する。本文と判定スライスは判定後に破棄し永続化しない。詳細は §6.3 を参照。
 - **AI による見出し・要約生成**:
   - Google Gemini API を用いた一括抽出・サマライズ（バッチサイズ: `LLM_BATCH_SIZE = 30`。`src/lib/llm/client.ts`, `src/lib/llm/batch.ts`, `src/lib/llm/prompts.ts`, `src/lib/llm/schemas.ts`, `src/lib/llm/signature.ts`)
 - **定期巡回 API**:
@@ -296,11 +296,12 @@ kill gate K1（robots.txt 変化検知）の入力。取得のたびに内容ハ
   - 単一フィードレーン: `src/components/feed/feed-lane-classic.tsx`, `src/components/feed/feed-card.tsx`
 - **Collection pipeline**:
   - `src/lib/sources/registry.ts` -> 各アダプタ (`src/lib/sources/hatena-bookmark.ts`, `src/lib/sources/google-news.ts`, `src/lib/sources/note.ts`, `src/lib/sources/ameblo.ts`) -> RSS フェッチャー (`src/lib/sources/base/rss-fetcher.ts`, `src/lib/sources/base/feed-parser.ts`)
-  - discovery 経路（RSS が無いセクション向け）: `src/lib/sources/sitemap-discovery.ts` -> `src/lib/sources/access-discipline.ts` -> `src/lib/sources/article-text.ts` -> `src/lib/pipeline/discovery-ingest.ts`（§6.3）
+  - discovery 経路（RSS が無いセクション向け）: `src/lib/sources/sitemap-discovery.ts` -> `src/lib/sources/access-discipline.ts` -> `src/lib/pipeline/discovery-ingest.ts`（オーケストレーション） -> `discovery-extraction.ts`（純粋な抽出/Q1） -> LLM -> `discovery-rate-cap.ts` / `discovery-persistence.ts`（JST公開上限/DB効果）。`discovery-retry.ts` はretry判断のみ、`discovery-revalidation.ts` は公開済みの再検証のみを担当する（§6.3）。
 - **oEmbed fallback**:
   - `src/lib/embed/oembed.ts` 及び `src/lib/embed/providers.ts` による堅牢な埋め込み取得と障害時フォールバック。
 - **Pipeline modules（実処理の単一実装）**:
   - `src/lib/pipeline/ingest.ts`（`runIngest`）: RSS 巡回 → 正規化 URL での重複排除 → upsert → 未キュレーション/再キュレーション対象の予算内選定 → LLM 一括キュレーション、までの一連の処理。`/` は `export const dynamic = "force-dynamic"` でキャッシュを経由しないため、以前ここにあったフィードキャッシュの明示的失効（`revalidateTag`）は不要になった（詳細は §6.5）。
+  - discovery の責務境界: `discovery-ingest.ts` は access/fetch verdict、抽出、LLM、sticky/rate、永続化・状態更新・統計を既存順序で調停する。`discovery-extraction.ts` は HTML から title/container/evidence/判定スライス/body hash を返す純粋な Q1 境界であり、判定スライスは LLM 入力中だけの一時値である。`discovery-retry.ts` は retry/終端と日時を決める純粋関数、`discovery-persistence.ts` は upsert/drop/publish/retry の DB 効果、`discovery-rate-cap.ts` は JST 日次公開上限、`discovery-revalidation.ts` は公開済み投稿の再検証を担当し、入口は同関数を re-export して互換性を保つ。永続化 DTO は抽出本文・raw HTML・判定スライスを持たず、`originalExcerpt: null` と body hash 等の許可済み非内容 metadata だけを扱う。法務・DB・アクセス規律・呼出順序は変更しない。characterization test は fetch → LLM → upsert → curate記録 → publication記録 → fetched状態という成功順序と、LLM 前ゲート時の no-call を固定する。
   - pipeline の小さな共有境界として、`src/lib/pipeline/retry-time.ts` の `addHoursIso()` は UTC ISO の時刻へ時間を加算する純粋関数であり、`run-pipeline.ts` と `discovery-ingest.ts` が retry/TTL の期限計算に共用する。無効な日時は従来どおり `RangeError` とする。各経路の backoff は custom 対応と固定値という意味が異なるため統合しない。`src/lib/pipeline/run-pipeline.ts` は `emptyStageCounts()` で正常・失敗時とも独立した `stageCounts` / `dropped` を返す。いずれも DB、fetch、LLM、公開・法務条件および処理順序を変えないリファクタリングであり、`tests/pipeline/retry-time.test.ts` と公開経由の pipeline test が既存挙動を固定する。
   - どちらも「呼び出し元（Route Handler か Server Action か）に依存しない」ことを目的に切り出されており、`src/app/api/ingest/route.ts` および `src/app/actions.ts` はいずれもこれらの薄いラッパーに過ぎない。ロジックを二重実装しないことが本設計の前提。
 
@@ -363,17 +364,18 @@ RSS フィードが構造的に存在しないセクション（第1対象: `mwe
   `ingestDiscoveredUrls()`）**: `discovery_seen` の `pending` URL を、
   `src/lib/sources/access-discipline.ts` の `disciplinedFetch()`（§10-6）
   経由で 1 件ずつ取得する。取得した HTML から `src/lib/sources/article-text.ts`
-  の `extractHtmlTitle()` で元タイトルを取得し、続いて**記事本文コンテナの
-  切り出し → 判定スライスの抽出**の2段階で判定対象を得る（詳細は §10-4 第4項）。
+  の `extractHtmlTitle()` で元タイトルを取得し、`discovery-extraction.ts` の純粋な
+  Q1 境界で**記事本文コンテナの切り出し → 判定スライスの抽出**の2段階で判定対象を得る
+  （詳細は §10-4 第4項）。
   切り出しに失敗した場合、または判定スライスが `hasSufficientEvidence()`
   （文字数閾値 `MIN_EVIDENCE_INPUT_CHARS`）未満の場合、あるいは `<title>` が
   取得できない場合は LLM を呼ばずに `pending` 保存（または `skipped`）とする。
   条件を満たせば `curateSingle()` に判定スライスを渡し、キュレーション結果を
   `published` として `post_rationales`（§5）を含めて保存する。
   **`posts.original_excerpt` には常に `null` を保存し、抽出した本文は
-  いかなるカラムにも永続化しない**（§10-5。DB への書き込みは
-  `upsertPosts()` に渡す直前のオブジェクトで `originalExcerpt: null` を
-  明示している）。`sourceId` は既存のエバーグリーン経路と同じ
+  いかなるカラムにも永続化しない**（§10-5。`discovery-persistence.ts` が
+  `upsertPosts()` に渡す DTO で `originalExcerpt: null` を明示し、本文由来は
+  body hash 等の許可済み非内容 metadata に限る）。`sourceId` は既存のエバーグリーン経路と同じ
   `EVERGREEN_SOURCE_ID`（`"evergreen"`）を共有する。
   ランは 1 回の実行時間予算（`DISCOVERY_INGEST_TIME_BUDGET_MS`、既定 15分）を
   超えたら残りを次回ランに委ねる。kill gate 発火（§10-6）・B1（日次リクエスト
@@ -901,6 +903,7 @@ bump しなければならない。bump がないと `getStaleCurationCandidates
    - **SNS 手動投入経路**（現在は廃止）: 旧仕様における SNS 投稿手動投入経路の名残り。現在は Stage 2（投入経路停止）により完全撤去されている。
    - **エバーグリーン経路**（`src/lib/pipeline/evergreen-via-pipeline.ts` の `curateEvergreenUrlViaPipeline`）: OGP メタデータの `og:description` / `<meta name="description">`（`meta.description`）のみを指す。`<title>` / `og:title` は表示ラベルであり判定の材料にしない。本文 DOM は一切読まない（`src/lib/sources/ogp.ts` は meta タグと JSON-LD のみを走査する。`tests/ogp.test.ts` がこの不変条件を固定する）。
    - **discovery 経路**（`src/lib/pipeline/discovery-ingest.ts` の `ingestDiscoveredUrls`）: 取得した記事 HTML から、まず `src/lib/sources/article-text.ts` の `extractArticleContainer()` がホストごとの許可リスト `articleContainerSelectors`（`src/lib/constants.ts` の `HOST_ALLOWLIST` 各エントリ）に従って**記事本文コンテナ**（`www.mwed.jp` は `div.story-detail` を第一候補、`div.produce-story-detail` を次点とする優先順のセレクタ配列）を切り出す。いずれのセレクタにも一致しない場合は `null` を返し、コンテナが存在しない記事は判定対象にしない（破損シグナルとしての扱いは §11 参照）。切り出したコンテナの innerHTML から `extractVisibleText()` でノイズ除去後、その**先頭から最大 1,500 字**を**判定スライス**として抽出する（コンテナ抽出前段が入る以前は「ページ全体の先頭 1,200 字をスキップした後続 1,500 字」であったが、口コミ等の第三者 UGC やナビが判定対象に混入する欠陥があったため、コンテナ抽出後の先頭スライスに変更した）。§10-5 の禁止事項と対になる規律であり、この判定スライスは LLM 入力としてのみ使い DB には一切保存しない。この節は `shared_plan/06-rationale-and-scraping.md` §5.3 に対応する運用規律であり、`src/lib/sources/article-text.ts` と `src/lib/pipeline/discovery-ingest.ts` のコード内コメントが参照する「§5.3」は当該 plan ドキュメントの節番号を指す（spec.md 側の対応内容は本項 §10-3〜§10-5 である）。
+   - **実装境界**: この抽出/Q1 は `src/lib/pipeline/discovery-extraction.ts` が担い、判定スライスは LLM 入力としてのみ保持する一時値である。`discovery-persistence.ts` に渡す DTO は raw HTML、container、visible text、判定スライスを含まず、`originalExcerpt: null` と body hash 等の許可済み非内容 metadata に限る。
    - Instagram のキーなし oEmbed エンドポイント（`graph.facebook.com/.../instagram_oembed`）はキャプション本文を一切返さない（`version` / `provider_name` / `provider_url` / `type` / `width` / `html` のみで `title` が欠落する。2026-08-22 の実リクエストで確認済み）。これに対し YouTube の oEmbed は `title` を返す。
    - SNS 経路で原文テキストが両方とも存在しない場合、`runSubmitUrl` は `curateSingle` を一切呼ばず、`status: "pending"` のまま投稿を保存する（`aiSummary` は null のまま）。取得済みの embed（`embedProvider` / `embedHtml` / `embedFetchedAt`）と `url` は保存し、再取得コストを避ける。呼び出し元には安定コード `"needs_source_text"` を返す。
    - エバーグリーン経路で原文テキストが存在しない場合も同様に、`curateEvergreenUrl` は `curateSingle` を一切呼ばず、取得済みのメタデータ（タイトル・著者・サムネイル・公開日）と `url` を `status: "pending"` で保存する。呼び出し元には安定コード `"needs_source_text"` を返す。LLM 失敗時のフォールバック要約も原文テキスト（excerpt）のみから生成し、title へのフォールバックは行わない。
@@ -908,7 +911,7 @@ bump しなければならない。bump がないと `getStaleCurationCandidates
    - 公開の可否は最終的に §9.9 の表示条件（`RATIONALE_DISPLAY_PHASE`）に従う。`status: "pending"` の投稿と `post_rationales` 行が無い投稿はいずれのフェーズでも表示されない。
    - 決定的ゲートを通過した場合は、`curateSingle` によるキュレーション結果を `published` として保存する。
    - **出典クレジット（第 2 項）の解決規則（エバーグリーン経路）**: 出典名は「運営の明示指定（CLI の `--source-name`、前後空白は trim）→ `og:site_name` → URL ホスト名（`www.` を除去した実在ドメイン）」の順で解決する。いずれも解決できない場合、架空のソース名を捏造せずに保存を拒否する（安定コード `"no_source_name"`）。サイト名を示さない固定文字列へのフォールバック生成は禁止。discovery 経路の `sourceName` は `registrableDomain(url)`（解決できなければ対象ホスト名）で決定する（`src/lib/pipeline/discovery-ingest.ts`）。
-5. **抽出本文の永続化禁止**: discovery 経路で取得した本文（記事本文コンテナ抽出（`extractArticleContainer()`）を経た判定スライスの出力）は LLM 判定の入力としてのみ使用し、**`posts` を含むいかなるカラムにも永続化しない**。`src/lib/pipeline/discovery-ingest.ts` の `upsertPostRow()` は `originalExcerpt: null` を常に渡し、discovery 経路由来の投稿の `originalExcerpt` は常に `null` になる。理由は3つ: (a) §10-3/§10-4 の「取得・判定は情報解析、公開は (a) 他人の表現（記事本文の逐語断片）を含まず (b) 自らの出力は非創作的な短ラベル（トピックタグ等）に限り (c) 根拠文は決定的テンプレートのみ、という自己記述」という二層構造を維持できる、(b) 「他人の著作物のデータベース」を新たに作らない、(c) 本文が DB に存在すると将来誰かがそれを要約の材料に使う drift を構造的に防ぐ（無ければ使えない）。エバーグリーン経路・SNS 経路の `originalExcerpt`（`og:description` やキャプション等、配信者自身が公開用に提供したメタデータ）とは性質が異なるため区別すること——discovery 経路の抽出本文は配信者が要約用に提供したものではなく、記事本文からの機械的な抽出（複製）である。
+5. **抽出本文の永続化禁止**: discovery 経路で取得した本文（記事本文コンテナ抽出（`extractArticleContainer()`）を経た判定スライスの出力）は LLM 判定の入力としてのみ使用し、**`posts` を含むいかなるカラムにも永続化しない**。`src/lib/pipeline/discovery-persistence.ts` の `upsertPostRow()` は `originalExcerpt: null` を常に渡し、discovery 経路由来の投稿の `originalExcerpt` は常に `null` になる。本文由来で許可する永続値は body hash 等の非内容 metadata だけであり、raw HTML、container、visible text、判定スライスを DTO に含めない。理由は3つ: (a) §10-3/§10-4 の「取得・判定は情報解析、公開は (a) 他人の表現（記事本文の逐語断片）を含まず (b) 自らの出力は非創作的な短ラベル（トピックタグ等）に限り (c) 根拠文は決定的テンプレートのみ、という自己記述」という二層構造を維持できる、(b) 「他人の著作物のデータベース」を新たに作らない、(c) 本文が DB に存在すると将来誰かがそれを要約の材料に使う drift を構造的に防ぐ（無ければ使えない）。エバーグリーン経路・SNS 経路の `originalExcerpt`（`og:description` やキャプション等、配信者自身が公開用に提供したメタデータ）とは性質が異なるため区別すること——discovery 経路の抽出本文は配信者が要約用に提供したものではなく、記事本文からの機械的な抽出（複製）である。
    - **topics専用生成時の判定スライス非永続化**: topics専用生成時の判定スライスも同様にメモリ上のみで取り出し、LLM投入後に破棄する。DB、ログ、stdout、checkpoint、telemetry、例外、raw LLM request/response に保存・出力しない。originalExcerptは常にnull。ホスト別共有上限HOST_DAILY_SHARE_MAXは廃止済みだが sequential per-host, 20s/Crawl-delay, 200 cap, robots/ToS/allowlist再検証は維持する。redirectはfinal URLを独立してallowlist/robots/ToS/rateで再検証し、cross-hostも同様、canonicalが別記事または同一性に疑義があればno update。
    - **バックフィル修復時も非永続**: プロンプト/gate を改善した後、discovery 経路で公開済みの投稿は `originalExcerpt` が空のため通常のバックフィル（`scripts/backfill-usefulness.mjs`、プレフライト `shouldRegenerateAnchor()` が本文なし候補を一律スキップ）では再キュレーションされず、旧基準のトピックアンカーのまま固定される。この救済は `scripts/backfill-mwed-anchors.mjs` が行う——対象は `status = "published"` かつ署名不一致の投稿に限定し、`disciplinedFetch()` で本文を再取得し `extractArticleContainer()` → 判定スライスをメモリ上で復元し、1 回の Gemini バッチリクエストで再キュレーションする。**判定スライスはこの経路でも DB へ書き戻さない**: `markCurated()` へ渡す update は `scripts/lib/mwed-anchor-backfill.mjs` の `assertNoSliceLeak()` がキー許可リスト（`url` / `aiSummary` / `category` / `tag` / `contentHash` / `curationSignature` / `usefulness` / `rationale`）で検証し、違反時は throw して中断する。プレビュー出力もトピックアンカーの新旧のみで本文は表示しない。`originalTitle`・`post_publications`（bodyHash / M4）・`discovery_seen`・公開ゲート（撤回判定）は変更しないため公開状態は変わらない。
 6. **アクセス規律（discovery 経路の本文取得のみに適用。実装 `src/lib/sources/access-discipline.ts`）**:
