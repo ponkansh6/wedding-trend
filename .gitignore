@@ -50,6 +50,14 @@ next-env.d.ts
 local.db
 local.db-*
 
+# 将来の Google Docs 移行を試すためのローカル補助資産（現行アプリ・CI・公開処理は参照しない）
+/src/lib/google-docs/
+/scripts/gates/check-google-docs.ts
+/scripts/ops/get-google-docs-refresh-token.ts
+
+# ローカル検証用 SQLite データ（資格情報・取得データを含み得るためコミットしない）
+/.sqlite/
+
 # topicAnchor 再生成前の復元用スナップショット（scripts/snapshot-anchors.mjs）
 snapshots/
 

@@ -34,6 +34,7 @@ Next.js 16 (App Router), React 19, TypeScript strict, Tailwind CSS v4, Drizzle O
 - パーソナライズやユーザーごとの嗜好スコアリング（中立的キュレーションのため）
 - Instagram / TikTok のハッシュタグ自動スクレイピング（API の規約・仕様上の制約により手動 URL 投入を採用）
 - ゼクシィ等の非公開プラットフォームの自動巡回
+- Google Docs の将来移行用ローカル補助資産（`src/lib/google-docs/` と関連スクリプト）。現行アプリ・CI・公開処理は依存せず、OAuth 資格情報およびローカル SQLite データ（`/.sqlite/`）を含めてコミットしない。
 
 ---
 
