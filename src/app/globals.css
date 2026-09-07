@@ -71,40 +71,41 @@
  * prefers-color-scheme の別ブロックは持たず .dark の上書きのみで完結させる。
  */
 .dark {
-  --background: #1a1512;
-  --surface: #29231e;
-  --surface-hover: #322b24;
-  --foreground: #f3ece3;
-  --muted-foreground: #b7aa9c;
-  --border: #453b32;
-  --ring: #e2603d;
+  color-scheme: dark;
+  --background: #2c2926;
+  --surface: #393532;
+  --surface-hover: #46403b;
+  --foreground: #f7f0e8;
+  --muted-foreground: #d4c9be;
+  --border: #5b544e;
+  --ring: #f0ad96;
 
-  /* vs --surface #221d18（背景2色のうち明るい方 = 最も厳しいケース）: 6.09:1
-     vs --background #16120e: 6.79:1 */
-  --muted-foreground-subtle: #a89a89;
+  /* vs --surface #393532（背景2色のうち明るい方 = 最も厳しいケース）: 6.09:1
+     vs --background #2c2926: 6.79:1 */
+  --muted-foreground-subtle: #c5b9ae;
 
-  --accent: #e2603d;
-  --on-accent: #16120e;
+  --accent: #e08a72;
+  --on-accent: #2b211d;
 
-  --classic: #8fa6de;
+  --classic: #b8c7ee;
   --on-classic: #16120e;
   --on-classic-solid: #16120e;
 
-  --ai-chip: #2a2347;
-  --on-ai-chip: #c9bef0;
+  --ai-chip: #40354b;
+  --on-ai-chip: #ead5ff;
 
-  --skeleton: #2b241d;
+  --skeleton: #4b4540;
 
-  /* ダークはカード面（--surface: #221d18 / --surface-hover: #2b241d）に
-     埋没しないよう、地を数段持ち上げた温かみのある焦げ茶にし、上辺のわずかな
-     ハイライトと下辺の沈み込みで「浮いた薄いチップ」の厚みを作る。
-     青寄りグレーを避け、暖色のまま明度差だけで階層を出す。 */
-  --topic-chip: #362b20;
-  --topic-border: #4d3f2e;
+  /* ダークはカード面（--surface: #393532 / --surface-hover: #46403b）に
+      埋没しないよう、地を数段持ち上げた温かみのある焦げ茶にし、上辺のわずかな
+      ハイライトと下辺の沈み込みで「浮いた薄いチップ」の厚みを作る。
+      青寄りグレーを避け、暖色のまま明度差だけで階層を出す。 */
+  --topic-chip: #473a30;
+  --topic-border: #665649;
   --topic-chip-highlight: rgba(255, 224, 189, 0.08);
-  --topic-chip-shadow: rgba(0, 0, 0, 0.35);
+  --topic-chip-shadow: rgba(43, 33, 29, 0.35);
 
-  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4), 0 14px 32px -16px rgba(0, 0, 0, 0.55);
+  --shadow-card: 0 1px 2px rgba(43, 33, 29, 0.28), 0 12px 28px -16px rgba(43, 33, 29, 0.25);
 }
 
 @theme inline {

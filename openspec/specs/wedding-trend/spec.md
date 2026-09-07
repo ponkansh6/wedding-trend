@@ -516,6 +516,9 @@ testid と要素関係でこの配置契約を検証する。ローディング�
 文言、件数、操作、もっと見る等の推測情報、記事本文・要約・外部画像・元記事リンクを
 描画しない。レイアウト安定化のため、非操作・非意味的な 2 区画のタブ Skeleton を描画し、
 同テストの契約とする。
+
+Plan 27（薄暮の和紙）は、中核実装・自動検証・公開フィード静止画受入まで完了している。通常モード不変のまま `.dark` 主要 token と `--shadow-card` / `--topic-chip-shadow` を暖色化し、`tests/theme-tokens.test.ts`（5/5 passed）で回帰検出する。`pnpm verify` は 57 files・640 passed / 1 skipped で通過し、390x844 と 1440x960 の light/dark 公開フィード静止画も pass とした。CLS 数値・ちらつき、loading/error/admin/toast、hover/focus/sticky、Sonner 実画面、OLED 低輝度・iOS Safari・Android Chrome・reduced motion の追加受入は未完である。
+
 LLM を呼び出す `topics-batch` の単体テストは `callGemini`（必要に応じて backoff）をモックし、
 入力 ID をすべて含むスキーマ適合 JSON を即時に返す。外部通信・実 API キー・タイムアウトには依存しない。
 2026-09-01（shared_plan/20 P3）に旧 7 段を 3 段（法務・公開ゲート系 / パイプライン・
