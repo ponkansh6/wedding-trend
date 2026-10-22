@@ -63,6 +63,7 @@ Next.js 16 (App Router), React 19, TypeScript strict, Tailwind CSS v4, Drizzle O
 - **NFR-002: テストカバレッジ**: 各モジュールレイヤーに応じた厳格なカバレッジ要件の達成。
 - **NFR-003: 法的・倫理的安全性の担保**: ゼロクリック要約の回避と、元ソースへの導線・クレジットの強制。
 - **NFR-004: パフォーマンス**: Next.js 16 App Router の標準機能を活かした高速なサーバーサイド描画およびキャッシュ制御。
+- **NFR-005: Node.js runtime**: 開発環境と GitHub Actions の各 workflow（CI・discovery・weekly-monitor）は Node.js `24.22.1` を使用する。開発環境は `.nvmrc`、package の `engines.node` で同じバージョンを指定する。
 
 ---
 
