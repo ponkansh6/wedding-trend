@@ -96,3 +96,9 @@ warning はブロックしないが、シグナルとして必ず対処するこ
 
 - 個人プロジェクトのため、作業ブランチは `main` を直接使用してよい。
 - コミットメッセージは Conventional Commits（commit-msg フックで強制）。
+
+## 一回限りの push 承認記録
+
+- 2026-10-26、この会話でユーザーが、`https://github.com/ponkansh6/wedding-trend.git` の `main` に対する今回の通常 push を明示承認した。
+- 承認する payload は既存コミット `4dae181 chore(deps): update dependencies` と、本記録を追加する `docs: record one-time push approval` コミットのみ。
+- この承認は今回の push 一回限りで失効する。将来の push、ほかのコミット、force push は許可しない。
